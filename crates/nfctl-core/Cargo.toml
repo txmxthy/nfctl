@@ -8,9 +8,20 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+# In-memory adapters for tests and the CLI's own test-suite.
+fake = []
+
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
+time.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

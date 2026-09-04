@@ -14,7 +14,21 @@ path = "src/main.rs"
 
 [dependencies]
 nfctl-core.workspace = true
+nfctl-k8s.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng = "0.10"
+time.workspace = true
+tokio.workspace = true
+unicode-width = "0.2"
+
+[dev-dependencies]
+nfctl-core = { workspace = true, features = ["fake"] }
+insta.workspace = true
+assert_cmd.workspace = true
+predicates = "3"
 
 [lints]
 workspace = true

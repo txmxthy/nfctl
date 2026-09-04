@@ -1,0 +1,6 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out(&[\"get\", \"simple-pipeline\"]).await"
+---
+NAME             PHASE    VERTICES  SOURCES  SINKS  UDFS  AGE  DESIRED  ISB      MESSAGE
+simple-pipeline  Running  3         1        1      1     3d   Running  default

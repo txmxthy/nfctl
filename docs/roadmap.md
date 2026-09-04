@@ -2,8 +2,8 @@
 
 | Command | Status | Milestone |
 |---|---|---|
-| `ls`, `get` | planned | M1 |
-| `completions` | planned | M1 |
+| `ls`, `get` | done | M1 |
+| `completions` | done | M1 |
 | `dag` | planned | M2 |
 | `logs` | planned | M3 |
 | `top`, `status` | planned | M4 |

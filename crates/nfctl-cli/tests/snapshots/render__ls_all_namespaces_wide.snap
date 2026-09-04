@@ -1,0 +1,8 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out(&[\"ls\", \"-A\", \"-o\", \"wide\"]).await"
+---
+NAMESPACE  NAME             PHASE    VERTICES  SOURCES  SINKS  UDFS  AGE  DESIRED  ISB      MESSAGE
+demo       paused-pipeline  Paused   3         1        1      1     3d   Running  default  waiting for buffers to drain
+demo       simple-pipeline  Running  3         1        1      1     3d   Running  default
+other      elsewhere        Failed   3         1        1      1     3d   Running  default
