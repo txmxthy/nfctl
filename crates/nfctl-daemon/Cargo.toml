@@ -1,0 +1,15 @@
+[package]
+name = "nfctl-daemon"
+description = "Numaflow daemon adapter for nfctl (implements DaemonPort)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nfctl-core.workspace = true
+
+[lints]
+workspace = true

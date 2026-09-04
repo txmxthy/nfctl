@@ -1,0 +1,20 @@
+[package]
+name = "nfctl-cli"
+description = "nfctl: a CLI for operating Numaflow pipelines"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "nfctl"
+path = "src/main.rs"
+
+[dependencies]
+nfctl-core.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true
