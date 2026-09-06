@@ -1,38 +1,104 @@
 # nfctl
 
-A CLI (and soon TUI) for operating [Numaflow](https://numaflow.numaproj.io/) pipelines.
+A CLI for operating [Numaflow](https://numaflow.numaproj.io/) pipelines.
 
-`kubectl` can create and patch Numaflow resources, but it cannot tail a vertex's logs
-through pod churn, show buffer fill and processing rates next to the pipeline phase,
-draw the DAG, or run a safe pause → drain → resume. `nfctl` does those things in one
-static binary.
+`kubectl` can create and patch Numaflow resources, but it cannot follow a vertex's
+logs through pod churn, show buffer fill and processing rates next to the pipeline
+phase, draw the DAG, or run a safe pause → drain → resume. `nfctl` does those
+things in one static binary, with `-o json` on every command and `--dry-run` on
+every mutating one.
 
-> Status: pre-alpha. See [docs/roadmap.md](docs/roadmap.md) for what works today.
+> Status: pre-alpha. Commands below work against Numaflow 1.6+; see
+> [docs/roadmap.md](docs/roadmap.md) for what is still a stub.
 
-## Planned commands
+## Commands
 
 ```
-nfctl ls                          pipelines in a namespace, with health
-nfctl dag <pipeline>              ASCII / mermaid / dot rendering of the topology
-nfctl logs <pipeline> [vertex]    multi-pod tail that survives scale-to-zero
-nfctl top <pipeline>              phase + rates + pending + buffer usage, live
-nfctl pause | resume | recycle    lifecycle procedures done the right way
-nfctl apply -f spec.yaml --check  refuse or warn on changes that need delete-and-recreate
+nfctl ls                                  pipelines in a namespace (-A for all)
+nfctl get <pipeline> [-o wide|json|yaml]
+nfctl dag <pipeline> [-f ascii|mermaid|dot]
+nfctl logs <pipeline> [vertex] [-f] [-c container] [--since 10m] [--tail N]
+nfctl status <pipeline>                   phase + health + rates + pending + buffer usage
+nfctl top <pipeline> [-i 2]               the same, refreshing
+nfctl isb ls | isb inspect <name>
+nfctl pause <pipeline> [--wait]           reports whether buffers drained
+nfctl resume <pipeline> [--strategy fast|slow]
+nfctl recycle <pipeline> [vertex]         restart a vertex's pods, or pause-drain-resume
+nfctl wait <pipeline> --phase paused
+nfctl scale <pipeline> <vertex> <n>
+nfctl apply -f spec.yaml [--check]        refuses changes that need delete-and-recreate
+nfctl completions <shell>
 ```
 
-Every command supports `-o json`; every mutating command supports `--dry-run`.
+Global flags: `-n/--namespace`, `-A`, `--context`, `--request-timeout`, `-o`,
+`--daemon-url` (skip the port-forward when running in-cluster).
+
+### `dag`
+
+```
+                                                ┌───────────┐
+                                             ┌─▶│ even-sink │
+                                             │  └───────────┘
+           ┌─────────────┐                   │
+┌────┐     │ even-or-odd │─even-tag──────────┘  ┌───────────┐
+│ in │────▶│             │─odd-tag─────────────▶│ odd-sink  │
+└────┘     │             │─even-tag, odd-tag─┐  └───────────┘
+           └─────────────┘                   │
+                                             │  ┌───────────┐
+                                             └─▶│ all-sink  │
+                                                └───────────┘
+```
+
+### `status`
+
+```
+default/linear  phase=Running  health=healthy  desired=Running
+Pipeline data flow is healthy (D1)
+
+VERTEX  KIND    PARTS  RATE/1m  RATE/5m  PENDING
+in      source  1      5.0      5.0      -
+cat     map     1      5.0      5.0      4
+out     sink    1      4.9      5.0      9
+
+EDGE        PENDING  ACK-PENDING  USAGE  FULL  WATERMARK
+in -> cat   0        6            0%     no    1s ago
+cat -> out  0        10           0%     no    2s ago
+```
+
+Runtime numbers come from the pipeline's daemon, reached through an automatic
+port-forward; if the daemon is unreachable the CRD half still renders with a warning.
+
+## Install
+
+```
+cargo install --path crates/nfctl-cli
+```
+
+Prebuilt binaries and a Homebrew tap are on the roadmap.
+
+## Demo
+
+`just demo-up` installs Numaflow into your current local kube context and applies
+the pipelines in [`examples/`](examples); [`docs/demo`](docs/demo) has the script and
+the tapes behind these recordings.
+
+| | |
+|---|---|
+| ![ls](docs/demo/ls.gif) | ![dag](docs/demo/dag.gif) |
+| ![top](docs/demo/top.gif) | ![pause](docs/demo/pause.gif) |
+| ![logs](docs/demo/logs.gif) | ![apply](docs/demo/apply.gif) |
 
 ## Design
 
-Hexagonal: a pure domain crate with two ports (cluster, daemon), thin adapters for
-kube-rs and the Numaflow daemon API, and a CLI on top. See
+Hexagonal. A pure domain crate with two ports (cluster, daemon), thin adapters for
+kube-rs and the daemon's JSON API, and a CLI on top. See
 [docs/architecture.md](docs/architecture.md) and the ADRs in [docs/adr](docs/adr).
 
 ## Development
 
 ```
 just ci          # fmt, clippy -D warnings, tests, cargo-deny
-just demo-up     # local cluster with Numaflow + example pipelines (see docs/demo)
+just test-live   # tests that need the demo cluster
 ```
 
 ## Licence

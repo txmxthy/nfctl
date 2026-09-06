@@ -1,0 +1,27 @@
+apiVersion: numaflow.numaproj.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: partitions
+spec:
+  vertices:
+    - name: in
+      source:
+        generator:
+          rpu: 100
+          duration: 1s
+          keyCount: 5
+          value: 5
+    - name: cat
+      partitions: 3
+      udf:
+        container:
+          image: quay.io/numaio/numaflow-go/map-cat:stable
+    - name: out
+      partitions: 3
+      sink:
+        log: {}
+  edges:
+    - from: in
+      to: cat
+    - from: cat
+      to: out

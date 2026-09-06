@@ -1,0 +1,10 @@
+# Demo only: "latest" and a tiny volume are not production settings.
+apiVersion: numaflow.numaproj.io/v1alpha1
+kind: InterStepBufferService
+metadata:
+  name: default
+spec:
+  jetstream:
+    version: latest
+    persistence:
+      volumeSize: 3Gi

@@ -1,0 +1,29 @@
+apiVersion: numaflow.numaproj.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: scaling
+spec:
+  vertices:
+    - name: in
+      source:
+        generator:
+          rpu: 50
+          duration: 1s
+    - name: cat
+      scale:
+        min: 1
+        max: 4
+      udf:
+        container:
+          image: quay.io/numaio/numaflow-go/map-cat:stable
+    - name: out
+      scale:
+        min: 1
+        max: 3
+      sink:
+        log: {}
+  edges:
+    - from: in
+      to: cat
+    - from: cat
+      to: out

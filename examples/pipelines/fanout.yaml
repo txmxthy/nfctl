@@ -1,0 +1,51 @@
+apiVersion: numaflow.numaproj.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: fanout
+spec:
+  vertices:
+    - name: in
+      source:
+        http: {}
+    - name: even-or-odd
+      scale:
+        min: 1
+      udf:
+        container:
+          image: quay.io/numaio/numaflow-go/map-even-odd:stable
+    - name: even-sink
+      scale:
+        min: 1
+      sink:
+        log: {}
+    - name: odd-sink
+      scale:
+        min: 1
+      sink:
+        log: {}
+    - name: all-sink
+      scale:
+        min: 1
+      sink:
+        log: {}
+  edges:
+    - from: in
+      to: even-or-odd
+    - from: even-or-odd
+      to: even-sink
+      conditions:
+        tags:
+          operator: or
+          values: [even-tag]
+    - from: even-or-odd
+      to: odd-sink
+      conditions:
+        tags:
+          operator: or
+          values: [odd-tag]
+    - from: even-or-odd
+      to: all-sink
+      conditions:
+        tags:
+          operator: or
+          values: [even-tag, odd-tag]

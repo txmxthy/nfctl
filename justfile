@@ -38,9 +38,10 @@ demo-down: (_require_ctx)
     -kubectl --context {{demo_ctx}} delete -f examples/isbsvc.yaml --ignore-not-found
     -kubectl --context {{demo_ctx}} delete namespace numaflow-system --ignore-not-found
 
-# render docs/demo/*.tape to gifs (needs `vhs`)
-record:
-    for t in docs/demo/*.tape; do vhs "$t"; done
+# render docs/demo/*.tape to gifs (needs `vhs` and a release build on PATH)
+record: (_require_ctx)
+    cargo build --release -q
+    for t in docs/demo/*.tape; do PATH="$PWD/target/release:$PATH" NFCTL_CONTEXT={{demo_ctx}} vhs "$t"; done
 
 # refuse to touch anything but the local demo cluster
 _require_ctx:

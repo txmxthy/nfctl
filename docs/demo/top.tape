@@ -1,0 +1,13 @@
+# vhs tape: top — run `just record` after `just demo-up`
+Output docs/demo/top.gif
+Set Shell fish
+Set FontSize 14
+Set Width 1100
+Set Height 480
+Set Theme "Catppuccin Mocha"
+Set TypingSpeed 40ms
+Type "nfctl top linear"
+Enter
+Sleep 8s
+Ctrl+C
+Sleep 1s
