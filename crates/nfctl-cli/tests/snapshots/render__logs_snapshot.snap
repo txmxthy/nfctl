@@ -1,0 +1,6 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "run(&cli, &ctx).await.unwrap().collect().await"
+---
+1970-01-01T00:00:05Z simple-pipeline-cat-0-abcd/numa hello from numa
+1970-01-01T00:00:05Z simple-pipeline-cat-0-abcd/udf hello from udf

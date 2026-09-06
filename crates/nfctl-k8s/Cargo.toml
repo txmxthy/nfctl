@@ -10,7 +10,7 @@ authors.workspace = true
 
 [dependencies]
 nfctl-core.workspace = true
-kube = { version = "4.2", default-features = false, features = ["client", "rustls-tls", "ring"] }
+kube = { version = "4.2", default-features = false, features = ["client", "rustls-tls", "ring", "runtime", "ws"] }
 k8s-openapi = { version = "0.28", features = ["latest"] }
 async-trait.workspace = true
 futures.workspace = true

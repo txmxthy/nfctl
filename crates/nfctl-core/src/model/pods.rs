@@ -126,6 +126,16 @@ pub enum PodEvent {
     ResyncDone,
 }
 
+/// How to open one container's log stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LogOptions {
+    pub follow: bool,
+    /// Inclusive lower bound on line timestamps.
+    pub since: Option<Timestamp>,
+    /// Only the last N lines of the backlog.
+    pub tail_lines: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogLine {
     pub at: Option<Timestamp>,

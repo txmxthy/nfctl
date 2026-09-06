@@ -1,39 +1,102 @@
 //! In-memory adapters for tests. Enabled with the `fake` feature.
 
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::model::{
     BufferInfo, BufferName, ContainerName, DesiredPhase, EdgeWatermark, IsbName, IsbService,
-    Lifecycle, Limits, LogLine, Namespace, ObjectMeta, Pipeline, PipelineHealth, PipelineKey,
-    PipelineName, PipelinePhase, PipelineSpec, PipelineStatus, PodEvent, PodName, PodRef,
+    Lifecycle, Limits, LogLine, LogOptions, Namespace, ObjectMeta, Pipeline, PipelineHealth,
+    PipelineKey, PipelinePhase, PipelineSpec, PipelineStatus, PodEvent, PodName, PodRef,
     ReplicaErrors, ResumeStrategy, ScaleSpec, Selector, Timestamp, Topology, Vertex, VertexCounts,
     VertexKind, VertexMetrics, VertexName,
 };
 use crate::ports::{ClusterPort, DaemonConnector, DaemonPort};
 use crate::{Error, Result};
 
-/// A cluster whose state is a `Vec<Pipeline>` behind a mutex.
+/// What one `tail_logs` call returns, in order of calls for that key.
+#[derive(Debug, Clone)]
+pub struct LogScript {
+    pub lines: Vec<LogLine>,
+    /// Keep the stream open after `lines` (until the tail is aborted).
+    pub hang: bool,
+}
+
+/// A recorded `tail_logs` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TailCall {
+    pub pod: PodName,
+    pub container: ContainerName,
+    pub opts: LogOptions,
+}
+
+#[derive(Debug, Default)]
+struct State {
+    pipelines: Vec<Pipeline>,
+    pods: Vec<PodRef>,
+    pod_watchers: Vec<mpsc::Sender<Result<PodEvent>>>,
+    scripts: HashMap<(PodName, ContainerName), VecDeque<LogScript>>,
+    tail_calls: Vec<TailCall>,
+    /// Senders kept so a hanging script's stream stays open until dropped here.
+    hung: Vec<mpsc::Sender<Result<LogLine>>>,
+}
+
+/// A cluster whose state lives behind a mutex and can be driven from a test.
 #[derive(Debug, Default, Clone)]
 pub struct FakeCluster {
-    pipelines: Arc<Mutex<Vec<Pipeline>>>,
+    state: Arc<Mutex<State>>,
 }
 
 impl FakeCluster {
     #[must_use]
     pub fn with_pipelines(pipelines: Vec<Pipeline>) -> Self {
-        Self {
-            pipelines: Arc::new(Mutex::new(pipelines)),
-        }
+        let f = Self::default();
+        f.lock().pipelines = pipelines;
+        f
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Pipeline>> {
+    fn lock(&self) -> MutexGuard<'_, State> {
         // A poisoned mutex in a test double is a test bug; recovering hides nothing useful.
-        self.pipelines
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Queue what the next `tail_logs` for this pod/container returns.
+    pub fn script(&self, pod: &PodName, container: &ContainerName, script: LogScript) {
+        self.lock()
+            .scripts
+            .entry((pod.clone(), container.clone()))
+            .or_default()
+            .push_back(script);
+    }
+
+    /// Push a pod event to every open watch (and update the pod list).
+    pub fn emit(&self, ev: &PodEvent) {
+        let mut g = self.lock();
+        match ev {
+            PodEvent::Applied(p) => {
+                g.pods.retain(|x| x.name != p.name);
+                g.pods.push(p.clone());
+            }
+            PodEvent::Deleted(p) => g.pods.retain(|x| x.name != p.name),
+            PodEvent::Resync | PodEvent::ResyncDone => {}
+        }
+        g.pod_watchers
+            .retain(|tx| tx.try_send(Ok(ev.clone())).is_ok());
+    }
+
+    /// Add pipelines to the cluster.
+    pub fn add_pipelines(&self, pipelines: impl IntoIterator<Item = Pipeline>) {
+        self.lock().pipelines.extend(pipelines);
+    }
+
+    /// Every `tail_logs` call so far.
+    #[must_use]
+    pub fn tail_calls(&self) -> Vec<TailCall> {
+        self.lock().tail_calls.clone()
     }
 }
 
@@ -42,6 +105,7 @@ impl ClusterPort for FakeCluster {
     async fn list_pipelines(&self, ns: Option<&Namespace>) -> Result<Vec<Pipeline>> {
         Ok(self
             .lock()
+            .pipelines
             .iter()
             .filter(|p| ns.is_none_or(|ns| &p.key.namespace == ns))
             .cloned()
@@ -50,6 +114,7 @@ impl ClusterPort for FakeCluster {
 
     async fn get_pipeline(&self, key: &PipelineKey) -> Result<Pipeline> {
         self.lock()
+            .pipelines
             .iter()
             .find(|p| &p.key == key)
             .cloned()
@@ -76,6 +141,7 @@ impl ClusterPort for FakeCluster {
     ) -> Result<()> {
         let mut g = self.lock();
         let p = g
+            .pipelines
             .iter_mut()
             .find(|p| &p.key == key)
             .ok_or_else(|| Error::NotFound {
@@ -100,7 +166,7 @@ impl ClusterPort for FakeCluster {
     }
 
     async fn list_pods(&self, _ns: &Namespace, _selector: &Selector) -> Result<Vec<PodRef>> {
-        Ok(vec![])
+        Ok(self.lock().pods.clone())
     }
 
     async fn watch_pods(
@@ -108,27 +174,65 @@ impl ClusterPort for FakeCluster {
         _ns: &Namespace,
         _selector: &Selector,
     ) -> Result<BoxStream<'static, Result<PodEvent>>> {
-        Ok(Box::pin(stream::empty()))
+        let (tx, rx) = mpsc::channel(64);
+        let mut g = self.lock();
+        // Replay current pods as an initial list, like a real watcher.
+        let _ = tx.try_send(Ok(PodEvent::Resync));
+        for p in &g.pods {
+            let _ = tx.try_send(Ok(PodEvent::Applied(p.clone())));
+        }
+        let _ = tx.try_send(Ok(PodEvent::ResyncDone));
+        g.pod_watchers.push(tx);
+        Ok(Box::pin(ReceiverStream::new(rx)))
     }
 
     async fn delete_pods(
         &self,
         _ns: &Namespace,
         _selector: &Selector,
-        _dry_run: bool,
+        dry_run: bool,
     ) -> Result<Vec<PodName>> {
-        Ok(vec![])
+        let names: Vec<PodName> = self.lock().pods.iter().map(|p| p.name.clone()).collect();
+        if !dry_run {
+            for n in &names {
+                let pod = self.lock().pods.iter().find(|p| &p.name == n).cloned();
+                if let Some(pod) = pod {
+                    self.emit(&PodEvent::Deleted(pod));
+                }
+            }
+        }
+        Ok(names)
     }
 
     async fn tail_logs(
         &self,
         _ns: &Namespace,
-        _pod: &PodName,
-        _container: &ContainerName,
-        _since: Option<Timestamp>,
-        _tail_lines: Option<u32>,
+        pod: &PodName,
+        container: &ContainerName,
+        opts: &LogOptions,
     ) -> Result<BoxStream<'static, Result<LogLine>>> {
-        Ok(Box::pin(stream::empty()))
+        let mut g = self.lock();
+        g.tail_calls.push(TailCall {
+            pod: pod.clone(),
+            container: container.clone(),
+            opts: *opts,
+        });
+        let script = g
+            .scripts
+            .get_mut(&(pod.clone(), container.clone()))
+            .and_then(VecDeque::pop_front)
+            .unwrap_or(LogScript {
+                lines: vec![],
+                hang: !opts.follow,
+            });
+        let (tx, rx) = mpsc::channel(script.lines.len().max(1));
+        for l in script.lines {
+            let _ = tx.try_send(Ok(l));
+        }
+        if script.hang && opts.follow {
+            g.hung.push(tx);
+        }
+        Ok(Box::pin(ReceiverStream::new(rx)))
     }
 }
 
@@ -188,23 +292,23 @@ impl DaemonConnector for FakeDaemons {
     }
 }
 
+fn lit<T: TryFrom<&'static str>>(s: &'static str) -> T {
+    T::try_from(s).unwrap_or_else(|_| unreachable!("literal `{s}` is valid"))
+}
+
 /// A three-vertex `in -> cat -> out` pipeline for tests and snapshots.
-///
-/// # Panics
-/// Never: every literal is valid.
 #[must_use]
-pub fn sample_pipeline(ns: &str, name: &str, phase: PipelinePhase) -> Pipeline {
-    let vn = |s: &str| VertexName::new(s).unwrap_or_else(|_| unreachable!("literal is valid"));
-    let v = |s: &str, kind: VertexKind| Vertex {
-        name: vn(s),
+pub fn sample_pipeline(ns: &'static str, name: &'static str, phase: PipelinePhase) -> Pipeline {
+    let v = |s: &'static str, kind: VertexKind| Vertex {
+        name: lit(s),
         kind,
         partitions: 1,
         scale: ScaleSpec::default(),
         image: None,
     };
-    let e = |a: &str, b: &str| crate::model::Edge {
-        from: vn(a),
-        to: vn(b),
+    let e = |a: &'static str, b: &'static str| crate::model::Edge {
+        from: lit(a),
+        to: lit(b),
         conditions: None,
         on_full: crate::model::OnFull::default(),
     };
@@ -219,10 +323,7 @@ pub fn sample_pipeline(ns: &str, name: &str, phase: PipelinePhase) -> Pipeline {
     .unwrap_or_else(|_| unreachable!("sample topology is valid"));
     let counts = VertexCounts::from_topology(&topology);
     Pipeline {
-        key: PipelineKey::new(
-            Namespace::new(ns).unwrap_or_else(|_| unreachable!("literal is valid")),
-            PipelineName::new(name).unwrap_or_else(|_| unreachable!("literal is valid")),
-        ),
+        key: PipelineKey::new(lit(ns), lit(name)),
         meta: ObjectMeta {
             generation: Some(1),
             created: Some(Timestamp::new(time::OffsetDateTime::UNIX_EPOCH)),
@@ -230,7 +331,7 @@ pub fn sample_pipeline(ns: &str, name: &str, phase: PipelinePhase) -> Pipeline {
             resume_strategy: None,
         },
         spec: PipelineSpec {
-            isb: IsbName::new("default").unwrap_or_else(|_| unreachable!("literal is valid")),
+            isb: lit::<IsbName>("default"),
             lifecycle: Lifecycle::default(),
             limits: Limits::default(),
             topology,
@@ -240,6 +341,27 @@ pub fn sample_pipeline(ns: &str, name: &str, phase: PipelinePhase) -> Pipeline {
             counts,
             ..PipelineStatus::default()
         },
+    }
+}
+
+/// A running vertex pod with a `numa` container and, optionally, a `udf` one.
+#[must_use]
+pub fn sample_pod(name: &'static str, with_udf: bool) -> PodRef {
+    let c = |n: &'static str| crate::model::ContainerState {
+        name: lit(n),
+        running: true,
+        restart_count: 0,
+        is_init: false,
+    };
+    let mut containers = vec![c("numa")];
+    if with_udf {
+        containers.push(c("udf"));
+    }
+    PodRef {
+        name: lit(name),
+        phase: crate::model::PodPhase::Running,
+        containers,
+        default_container: with_udf.then(|| lit::<ContainerName>("udf")),
     }
 }
 

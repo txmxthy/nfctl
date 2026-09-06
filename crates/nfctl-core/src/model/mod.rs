@@ -18,7 +18,9 @@ pub use pipeline::{
     Condition, DesiredPhase, Lifecycle, Limits, ObjectMeta, Pipeline, PipelinePhase, PipelineSpec,
     PipelineStatus, ResumeStrategy, VertexCounts,
 };
-pub use pods::{ContainerState, LogLine, PodEvent, PodPhase, PodRef, Selector, TaggedLine, labels};
+pub use pods::{
+    ContainerState, LogLine, LogOptions, PodEvent, PodPhase, PodRef, Selector, TaggedLine, labels,
+};
 pub use runtime::{
     BufferInfo, ContainerError, EdgeWatermark, Fraction, Health, PipelineHealth, ReplicaErrors,
     VertexMetrics, Windows,

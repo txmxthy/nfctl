@@ -6,4 +6,4 @@ mod commands;
 mod output;
 
 pub use cli::{Cli, Command, Globals, OutputFormat};
-pub use commands::{Context, run, run_offline};
+pub use commands::{Context, Output, run, run_offline};

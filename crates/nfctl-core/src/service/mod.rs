@@ -1,8 +1,10 @@
 //! Use cases. Everything the CLI and TUI do goes through here, so both share one
 //! implementation of every multi-step Numaflow procedure.
 
+pub mod logs;
 mod pipeline;
 
+pub use logs::{ContainerSelect, TailHandle, TailOptions};
 pub use pipeline::PipelineService;
 
 use async_trait::async_trait;

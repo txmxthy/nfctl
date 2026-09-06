@@ -5,10 +5,11 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 
 use crate::Result;
+use crate::model::LogOptions;
 use crate::model::{
     BufferInfo, BufferName, ContainerName, DesiredPhase, EdgeWatermark, IsbService, LogLine,
     Namespace, Pipeline, PipelineHealth, PipelineKey, PodEvent, PodName, PodRef, ReplicaErrors,
-    ResumeStrategy, Selector, Timestamp, VertexMetrics, VertexName,
+    ResumeStrategy, Selector, VertexMetrics, VertexName,
 };
 
 /// Kubernetes: CRDs, pods and logs.
@@ -46,14 +47,14 @@ pub trait ClusterPort: Send + Sync {
         dry_run: bool,
     ) -> Result<Vec<PodName>>;
 
-    /// Follow one container's log. Ends when the container terminates.
+    /// One container's log. With `follow`, the stream stays open until the
+    /// container terminates; without, it ends after the current backlog.
     async fn tail_logs(
         &self,
         ns: &Namespace,
         pod: &PodName,
         container: &ContainerName,
-        since: Option<Timestamp>,
-        tail_lines: Option<u32>,
+        opts: &LogOptions,
     ) -> Result<BoxStream<'static, Result<LogLine>>>;
 }
 

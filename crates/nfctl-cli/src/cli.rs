@@ -74,10 +74,30 @@ pub enum Command {
         width: Option<usize>,
     },
 
-    /// Tail logs across a pipeline's pods (preview: not implemented yet, see docs/roadmap.md)
+    /// Logs from every pod of a pipeline (or one vertex), tagged by pod and container
     Logs {
+        /// Pipeline name
         name: String,
+        /// Restrict to one vertex
         vertex: Option<String>,
+        /// Container(s) to read; default is `numa` plus the pod's default container
+        #[arg(short, long = "container", value_name = "NAME")]
+        containers: Vec<String>,
+        /// Every non-init container
+        #[arg(long, conflicts_with = "containers")]
+        all_containers: bool,
+        /// Keep following; new pods are picked up and restarts resumed
+        #[arg(short, long)]
+        follow: bool,
+        /// Only lines newer than this, e.g. `10m`, `2h`
+        #[arg(long, value_name = "DURATION")]
+        since: Option<String>,
+        /// Last N lines of each container's backlog
+        #[arg(long, value_name = "N")]
+        tail: Option<u32>,
+        /// Prefix each line with its timestamp
+        #[arg(long)]
+        timestamps: bool,
     },
 
     /// Live phase, rates, pending and buffer usage (preview: not implemented yet, see docs/roadmap.md)
@@ -150,7 +170,6 @@ impl Command {
     #[must_use]
     pub fn stub_name(&self) -> Option<&'static str> {
         Some(match self {
-            Command::Logs { .. } => "logs",
             Command::Top { .. } => "top",
             Command::Status { .. } => "status",
             Command::Isb { .. } => "isb",
@@ -165,6 +184,7 @@ impl Command {
             Command::Ls
             | Command::Get { .. }
             | Command::Dag { .. }
+            | Command::Logs { .. }
             | Command::Completions { .. } => {
                 return None;
             }
