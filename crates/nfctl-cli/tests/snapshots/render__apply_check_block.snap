@@ -1,0 +1,6 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: err.to_string()
+---
+BLOCK  interStepBufferServiceName changed (default -> other): immutable, delete and recreate
+demo/simple-pipeline: refusing to apply; delete and recreate the pipeline instead

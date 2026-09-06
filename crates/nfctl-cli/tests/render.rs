@@ -13,6 +13,7 @@ use nfctl_core::model::{
     BufferInfo, BufferName, Fraction, Health, IsbName, IsbPhase, IsbService, LogLine, Namespace,
     PipelineHealth, PipelinePhase, PodEvent, Timestamp, VertexMetrics, VertexName, Windows,
 };
+use nfctl_core::ports::ClusterPort;
 use nfctl_core::service::PipelineService;
 use time::OffsetDateTime;
 
@@ -227,4 +228,125 @@ async fn bad_name_is_rejected_before_any_call() {
     let err = run(&cli, &ctx()).await.err().unwrap();
     assert!(matches!(err, nfctl_core::Error::Usage(_)), "{err}");
     assert_eq!(err.exit_code(), 2);
+}
+
+#[tokio::test]
+async fn lifecycle_commands_against_fake() {
+    let c = FakeCluster::default();
+    c.emit(&PodEvent::Applied(sample_pod(
+        "simple-pipeline-cat-0-abcd",
+        false,
+    )));
+    let ctx = ctx_with(c.clone());
+    let run_s = |args: &'static [&'static str]| {
+        let ctx = ctx.clone();
+        async move { out_ctx(&Cli::parse_from(args), &ctx).await }
+    };
+    assert_eq!(
+        run_s(&["nfctl", "pause", "simple-pipeline", "--dry-run"]).await,
+        "demo/simple-pipeline: pause accepted (dry run)\n"
+    );
+    assert_eq!(
+        run_s(&["nfctl", "pause", "simple-pipeline", "--wait"]).await,
+        "demo/simple-pipeline: Paused; drain state unknown\n"
+    );
+    assert_eq!(
+        run_s(&["nfctl", "wait", "simple-pipeline", "--phase", "paused"]).await,
+        "demo/simple-pipeline: Paused\n"
+    );
+    assert_eq!(
+        run_s(&["nfctl", "resume", "simple-pipeline", "--strategy", "slow"]).await,
+        "demo/simple-pipeline: resume (slow)\n"
+    );
+    insta::assert_snapshot!(
+        "recycle_vertex",
+        run_s(&["nfctl", "recycle", "simple-pipeline", "cat"]).await
+    );
+    assert_eq!(
+        run_s(&["nfctl", "recycle", "simple-pipeline"]).await,
+        "demo/simple-pipeline: paused, resumed (fast)\n"
+    );
+    assert_eq!(
+        run_s(&["nfctl", "scale", "simple-pipeline", "cat", "3"]).await,
+        "demo/simple-pipeline/cat: replicas=3\n"
+    );
+    assert_eq!(c.scale_calls().len(), 1);
+    let err = run(
+        &Cli::parse_from([
+            "nfctl",
+            "wait",
+            "simple-pipeline",
+            "--phase",
+            "failed",
+            "--timeout",
+            "0",
+        ]),
+        &ctx,
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(matches!(err, nfctl_core::Error::Timeout(_)), "{err}");
+}
+
+#[tokio::test]
+async fn apply_check_blocks_and_warns() {
+    let c = FakeCluster::default();
+    let ctx = ctx_with(c.clone());
+    let dir = std::env::temp_dir().join(format!("nfctl-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, body: &str| {
+        let p = dir.join(name);
+        std::fs::write(&p, body).unwrap();
+        p.to_string_lossy().into_owned()
+    };
+
+    // Same topology, different ISB: blocked.
+    let mut isb_change = sample_pipeline("demo", "simple-pipeline", PipelinePhase::Running);
+    isb_change.spec.isb = IsbName::new("other").unwrap();
+    let f1 = write("isb.yaml", "isb-change");
+    c.register_manifest("isb-change", isb_change);
+    let err = run(
+        &Cli::parse_from(["nfctl", "apply", "-f", &f1, "--check"]),
+        &ctx,
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(err.exit_code(), 3);
+    insta::assert_snapshot!("apply_check_block", err.to_string());
+
+    // New pipeline: fine, and applied.
+    let f2 = write("new.yaml", "brand-new");
+    c.register_manifest(
+        "brand-new",
+        sample_pipeline("demo", "brand-new", PipelinePhase::Unknown),
+    );
+    insta::assert_snapshot!(
+        "apply_create",
+        out_ctx(&Cli::parse_from(["nfctl", "apply", "-f", &f2]), &ctx).await
+    );
+    assert!(
+        c.list_pipelines(None)
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.key.name.as_str() == "brand-new")
+    );
+
+    // Unchanged existing pipeline with --check: no changes reported.
+    let f3 = write("same.yaml", "same");
+    c.register_manifest(
+        "same",
+        sample_pipeline("demo", "simple-pipeline", PipelinePhase::Running),
+    );
+    assert_eq!(
+        out_ctx(
+            &Cli::parse_from(["nfctl", "apply", "-f", &f3, "--check"]),
+            &ctx
+        )
+        .await,
+        "demo/simple-pipeline: no topology changes\n"
+    );
+    std::fs::remove_dir_all(&dir).ok();
 }

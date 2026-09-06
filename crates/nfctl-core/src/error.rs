@@ -30,6 +30,10 @@ pub enum Error {
     #[error("invalid topology: {0}")]
     Topology(#[from] TopologyError),
 
+    /// `apply --check` found a blocking change; the payload is the rendered report.
+    #[error("{0}")]
+    CheckFailed(String),
+
     /// Bad arguments that clap could not catch (e.g. an invalid resource name).
     #[error("{0}")]
     Usage(String),
@@ -46,7 +50,7 @@ impl Error {
         match self {
             Error::Unimplemented(_) => 4,
             Error::Usage(_) => 2,
-            Error::Invalid { .. } | Error::Topology(_) => 3,
+            Error::Invalid { .. } | Error::Topology(_) | Error::CheckFailed(_) => 3,
             _ => 1,
         }
     }

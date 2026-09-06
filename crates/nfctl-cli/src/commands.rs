@@ -8,12 +8,13 @@ use nfctl_core::model::{
     ContainerName, IsbName, Namespace, PipelineKey, PipelineName, Selector, TaggedLine, Timestamp,
     VertexName,
 };
+use nfctl_core::model::{PipelinePhase, ResumeStrategy};
 use nfctl_core::ports::ClusterPort;
-use nfctl_core::service::PipelineService;
 use nfctl_core::service::logs::{ContainerSelect, TailOptions, snapshot, tail};
+use nfctl_core::service::{PipelineService, lifecycle};
 use nfctl_core::{Error, Result};
 
-use crate::cli::{Cli, Command, DagFormat, IsbCommand, OutputFormat};
+use crate::cli::{Cli, Command, DagFormat, IsbCommand, OutputFormat, Phase, Strategy};
 use crate::output;
 
 /// What a command produces: a finished string, or lines as they arrive.
@@ -284,16 +285,16 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
             output::view(&v, fmt)
         }
         Command::Isb { command } => run_isb(cli, ctx, command).await,
+        Command::Pause { .. }
+        | Command::Resume { .. }
+        | Command::Recycle { .. }
+        | Command::Wait { .. }
+        | Command::Apply { .. }
+        | Command::Scale { .. } => run_lifecycle(cli, ctx).await,
         // Handled above; listed so the match stays exhaustive.
         Command::Completions { .. }
         | Command::Logs { .. }
         | Command::Top { .. }
-        | Command::Pause { .. }
-        | Command::Resume { .. }
-        | Command::Recycle { .. }
-        | Command::Wait { .. }
-        | Command::Apply
-        | Command::Scale { .. }
         | Command::Mvtx
         | Command::Tui => unreachable!("handled before run_text"),
     }
@@ -326,4 +327,216 @@ async fn run_isb(cli: &Cli, ctx: &Context, command: &IsbCommand) -> Result<Strin
             output::isb_detail(&isb, &users, fmt)
         }
     }
+}
+
+fn pipeline_key(cli: &Cli, ctx: &Context, name: &str) -> Result<PipelineKey> {
+    let ns = ctx.namespace(cli)?;
+    let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
+    Ok(PipelineKey::new(ns, name))
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
+    let fmt = cli.globals.output;
+    let cluster = ctx.cluster.as_ref();
+    let daemons = ctx.service.daemons();
+    match &cli.command {
+        Command::Pause {
+            name,
+            wait,
+            timeout,
+            dry_run,
+        } => {
+            let key = pipeline_key(cli, ctx, name)?;
+            let wait = wait.then(|| Duration::from_secs(*timeout));
+            let r = lifecycle::pause(cluster, daemons, &key, wait, *dry_run).await?;
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                return output::serialised(&r, fmt);
+            }
+            let drained = match r.drained {
+                Some(true) => "buffers drained",
+                Some(false) => "buffers still draining",
+                None => "drain state unknown",
+            };
+            Ok(match (r.dry_run, r.phase) {
+                (true, _) => format!("{key}: pause accepted (dry run)\n"),
+                (false, PipelinePhase::Paused) => format!("{key}: Paused; {drained}\n"),
+                (false, phase) => format!(
+                    "{key}: desired Paused, currently {}; {drained}\n",
+                    phase.as_str()
+                ),
+            })
+        }
+        Command::Resume {
+            name,
+            strategy,
+            dry_run,
+        } => {
+            let key = pipeline_key(cli, ctx, name)?;
+            let strategy = match strategy {
+                Strategy::Fast => ResumeStrategy::Fast,
+                Strategy::Slow => ResumeStrategy::Slow,
+            };
+            lifecycle::resume(cluster, &key, strategy, *dry_run).await?;
+            Ok(format!(
+                "{key}: resume ({}){}\n",
+                strategy.as_str(),
+                if *dry_run { " accepted (dry run)" } else { "" }
+            ))
+        }
+        Command::Recycle {
+            name,
+            vertex,
+            timeout,
+            dry_run,
+        } => {
+            let key = pipeline_key(cli, ctx, name)?;
+            let vertex = vertex
+                .as_deref()
+                .map(|v| VertexName::new(v).map_err(|e| invalid_arg("vertex", v, e)))
+                .transpose()?;
+            let r = lifecycle::recycle(
+                cluster,
+                daemons,
+                &key,
+                vertex.as_ref(),
+                Duration::from_secs(*timeout),
+                *dry_run,
+            )
+            .await?;
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                return output::serialised(&r, fmt);
+            }
+            let suffix = if *dry_run { " (dry run)" } else { "" };
+            Ok(match r {
+                lifecycle::RecycleReport::Pods { vertex, deleted } => {
+                    let mut s =
+                        format!("{key}/{vertex}: deleted {} pod(s){suffix}\n", deleted.len());
+                    for p in deleted {
+                        let _ = std::fmt::Write::write_fmt(&mut s, format_args!("  {p}\n"));
+                    }
+                    s
+                }
+                lifecycle::RecycleReport::Pipeline { drained, .. } => format!(
+                    "{key}: paused{}, resumed (fast){suffix}\n",
+                    match drained {
+                        Some(true) => " and drained",
+                        Some(false) => " (buffers not empty)",
+                        None => "",
+                    }
+                ),
+            })
+        }
+        Command::Wait {
+            name,
+            phase,
+            timeout,
+        } => {
+            let key = pipeline_key(cli, ctx, name)?;
+            let phase = match phase {
+                Phase::Running => PipelinePhase::Running,
+                Phase::Paused => PipelinePhase::Paused,
+                Phase::Pausing => PipelinePhase::Pausing,
+                Phase::Failed => PipelinePhase::Failed,
+            };
+            let p = lifecycle::wait_for_phase(cluster, &key, phase, Duration::from_secs(*timeout))
+                .await?;
+            Ok(format!("{key}: {}\n", p.status.phase.as_str()))
+        }
+        Command::Scale {
+            name,
+            vertex,
+            replicas,
+            dry_run,
+        } => {
+            let key = pipeline_key(cli, ctx, name)?;
+            let vertex = VertexName::new(vertex).map_err(|e| invalid_arg("vertex", vertex, e))?;
+            cluster
+                .scale_vertex(&key, &vertex, *replicas, *dry_run)
+                .await?;
+            Ok(format!(
+                "{key}/{vertex}: replicas={replicas}{}\n",
+                if *dry_run { " (dry run)" } else { "" }
+            ))
+        }
+        Command::Apply {
+            file,
+            check,
+            dry_run,
+        } => run_apply(cli, ctx, file, *check, *dry_run).await,
+        _ => unreachable!("run_lifecycle is only called for lifecycle commands"),
+    }
+}
+
+async fn run_apply(
+    cli: &Cli,
+    ctx: &Context,
+    file: &str,
+    check: bool,
+    dry_run: bool,
+) -> Result<String> {
+    let fmt = cli.globals.output;
+    let text = if file == "-" {
+        let mut s = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
+            .map_err(|e| Error::Usage(format!("reading stdin: {e}")))?;
+        s
+    } else {
+        std::fs::read_to_string(file).map_err(|e| Error::Usage(format!("reading `{file}`: {e}")))?
+    };
+    let ns = ctx.namespace(cli)?;
+    let new = ctx.cluster.parse_manifest(&text, &ns)?;
+    let live = match ctx.cluster.get_pipeline(&new.key).await {
+        Ok(p) => Some(p),
+        Err(Error::NotFound { .. }) => None,
+        Err(e) => return Err(e),
+    };
+    let backlog = match (&live, ctx.service.daemons().connect(&new.key).await) {
+        (Some(_), Ok(d)) => d
+            .buffers()
+            .await
+            .ok()
+            .map(|b| b.iter().filter_map(|x| x.pending).sum::<i64>()),
+        _ => None,
+    };
+    let report = nfctl_core::service::check(live.as_ref(), &new, backlog);
+    if check {
+        if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+            let s = output::serialised(&report, fmt)?;
+            return if report.ok() {
+                Ok(s)
+            } else {
+                Err(Error::CheckFailed(s))
+            };
+        }
+        let s = output::apply_report(&new.key, &report, live.is_some());
+        return if report.ok() {
+            Ok(s)
+        } else {
+            Err(Error::CheckFailed(s))
+        };
+    }
+    if !report.ok() {
+        return Err(Error::CheckFailed(output::apply_report(
+            &new.key,
+            &report,
+            live.is_some(),
+        )));
+    }
+    let applied = ctx.cluster.apply_manifest(&text, &ns, dry_run).await?;
+    let mut s = output::apply_report(&new.key, &report, live.is_some());
+    let _ = std::fmt::Write::write_fmt(
+        &mut s,
+        format_args!(
+            "{}: {}{}\n",
+            applied.key,
+            if live.is_some() {
+                "configured"
+            } else {
+                "created"
+            },
+            if dry_run { " (server dry run)" } else { "" }
+        ),
+    );
+    Ok(s)
 }

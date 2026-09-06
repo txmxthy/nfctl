@@ -19,6 +19,11 @@ pub fn isb_resource() -> ApiResource {
 }
 
 #[must_use]
+pub fn vertex_resource() -> ApiResource {
+    ApiResource::from_gvk_with_plural(&GroupVersionKind::gvk(GROUP, VERSION, "Vertex"), "vertices")
+}
+
+#[must_use]
 pub fn pipeline_resource() -> ApiResource {
     ApiResource::from_gvk_with_plural(
         &GroupVersionKind::gvk(GROUP, VERSION, "Pipeline"),

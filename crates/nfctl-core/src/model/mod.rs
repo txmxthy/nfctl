@@ -27,5 +27,6 @@ pub use runtime::{
 };
 pub use time::{Timestamp, duration_secs};
 pub use topology::{
-    Edge, OnFull, ScaleSpec, TagCondition, TagOperator, Topology, TopologyError, Vertex, VertexKind,
+    Edge, OnFull, ScaleSpec, TagCondition, TagOperator, Topology, TopologyDiff, TopologyError,
+    Vertex, VertexKind,
 };

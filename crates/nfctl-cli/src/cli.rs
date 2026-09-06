@@ -128,29 +128,83 @@ pub enum Command {
         command: IsbCommand,
     },
 
-    /// Pause a pipeline (preview: not implemented yet, see docs/roadmap.md)
-    Pause { name: String },
-
-    /// Resume a pipeline (preview: not implemented yet, see docs/roadmap.md)
-    Resume { name: String },
-
-    /// Restart a pipeline or one vertex safely (preview: not implemented yet, see docs/roadmap.md)
-    Recycle {
+    /// Pause a pipeline: sources stop, buffers drain, pods scale to zero
+    Pause {
+        /// Pipeline name
         name: String,
-        vertex: Option<String>,
+        /// Block until the phase is Paused and report whether buffers drained
+        #[arg(short, long)]
+        wait: bool,
+        /// Give up waiting after this many seconds
+        #[arg(long, default_value_t = 120, value_name = "SECS")]
+        timeout: u64,
+        /// Validate on the server without changing anything
+        #[arg(long)]
+        dry_run: bool,
     },
 
-    /// Wait for a pipeline phase (preview: not implemented yet, see docs/roadmap.md)
-    Wait { name: String },
-
-    /// Apply a pipeline spec, checking for unsafe changes (preview: not implemented yet, see docs/roadmap.md)
-    Apply,
-
-    /// Scale a vertex (preview: not implemented yet, see docs/roadmap.md)
-    Scale {
+    /// Resume a paused pipeline
+    Resume {
+        /// Pipeline name
         name: String,
+        /// `fast` restores the replica counts from before the pause; `slow` starts at the minimum
+        #[arg(short, long, default_value = "fast", value_enum)]
+        strategy: Strategy,
+        /// Validate on the server without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Restart one vertex (delete its pods) or a whole pipeline (pause, drain, resume)
+    Recycle {
+        /// Pipeline name
+        name: String,
+        /// Restrict to one vertex
+        vertex: Option<String>,
+        /// Give up waiting for the pause after this many seconds
+        #[arg(long, default_value_t = 120, value_name = "SECS")]
+        timeout: u64,
+        /// Show what would happen without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Block until a pipeline reaches a phase
+    Wait {
+        /// Pipeline name
+        name: String,
+        /// Phase to wait for
+        #[arg(short, long, value_enum)]
+        phase: Phase,
+        /// Give up after this many seconds
+        #[arg(long, default_value_t = 300, value_name = "SECS")]
+        timeout: u64,
+    },
+
+    /// Apply a Pipeline manifest, refusing changes that need delete-and-recreate
+    Apply {
+        /// Manifest file (`-` for stdin)
+        #[arg(short, long, value_name = "FILE")]
+        file: String,
+        /// Report what would change and exit 3 on a blocking change, without applying
+        #[arg(long)]
+        check: bool,
+        /// Server-side dry run (still runs the checks)
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Set a vertex's replica count
+    Scale {
+        /// Pipeline name
+        name: String,
+        /// Vertex name
         vertex: String,
+        /// Replica count
         replicas: u32,
+        /// Validate on the server without changing anything
+        #[arg(long)]
+        dry_run: bool,
     },
 
     #[command(about = "MonoVertex operations (preview: not implemented yet, see docs/roadmap.md)")]
@@ -164,6 +218,20 @@ pub enum Command {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Strategy {
+    Fast,
+    Slow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Phase {
+    Running,
+    Paused,
+    Pausing,
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -186,12 +254,6 @@ impl Command {
     #[must_use]
     pub fn stub_name(&self) -> Option<&'static str> {
         Some(match self {
-            Command::Pause { .. } => "pause",
-            Command::Resume { .. } => "resume",
-            Command::Recycle { .. } => "recycle",
-            Command::Wait { .. } => "wait",
-            Command::Apply => "apply",
-            Command::Scale { .. } => "scale",
             Command::Mvtx => "mvtx",
             Command::Tui => "tui",
             Command::Ls
@@ -201,6 +263,12 @@ impl Command {
             | Command::Top { .. }
             | Command::Status { .. }
             | Command::Isb { .. }
+            | Command::Pause { .. }
+            | Command::Resume { .. }
+            | Command::Recycle { .. }
+            | Command::Wait { .. }
+            | Command::Apply { .. }
+            | Command::Scale { .. }
             | Command::Completions { .. } => {
                 return None;
             }

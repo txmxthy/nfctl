@@ -3,12 +3,12 @@ use futures::stream::BoxStream;
 use futures::{AsyncBufReadExt, StreamExt, TryStreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use kube::Client;
-use kube::api::{Api, DeleteParams, ListParams, LogParams, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, DynamicObject, ListParams, LogParams, Patch, PatchParams};
 use kube::runtime::{WatchStreamExt, watcher};
 use nfctl_core::model::ContainerName;
 use nfctl_core::model::{
     DesiredPhase, IsbService, LogLine, LogOptions, Namespace, Pipeline, PipelineKey, PodEvent,
-    PodName, PodRef, ResumeStrategy, Selector, Timestamp, labels,
+    PodName, PodRef, ResumeStrategy, Selector, Timestamp, VertexName, labels,
 };
 use nfctl_core::ports::ClusterPort;
 use nfctl_core::{Error, Result};
@@ -64,8 +64,39 @@ fn map_kube(e: kube::Error, kind: &'static str, name: &str) -> Error {
             name: name.to_owned(),
         },
         kube::Error::Api(ae) if ae.code == 403 => Error::Forbidden(ae.message.clone()),
+        // The API server's message is the useful part; the struct dump is not.
+        kube::Error::Api(ae) => Error::Cluster(format!("{} (HTTP {})", ae.message, ae.code).into()),
         _ => Error::cluster(e),
     }
+}
+
+/// YAML or JSON text → a JSON document, checking it really is a Pipeline.
+fn parse_document(text: &str) -> Result<serde_json::Value> {
+    let invalid = |reason: String| Error::Invalid {
+        kind: "manifest",
+        name: "<input>".into(),
+        reason,
+    };
+    let value: serde_json::Value =
+        serde_yaml_ng::from_str(text).map_err(|e| invalid(e.to_string()))?;
+    let kind = value
+        .get("kind")
+        .and_then(|k| k.as_str())
+        .unwrap_or_default();
+    if kind != "Pipeline" {
+        return Err(invalid(format!("kind is `{kind}`, expected `Pipeline`")));
+    }
+    Ok(value)
+}
+
+/// YAML or JSON text → the wire object.
+fn parse_pipeline_object(text: &str) -> Result<PipelineObject> {
+    let invalid = |reason: String| Error::Invalid {
+        kind: "manifest",
+        name: "<input>".into(),
+        reason,
+    };
+    serde_json::from_value(parse_document(text)?).map_err(|e| invalid(e.to_string()))
 }
 
 /// Split the `RFC3339Nano ` prefix kubelet adds with `timestamps=true`.
@@ -159,6 +190,96 @@ impl ClusterPort for KubeCluster {
             .patch(key.name.as_str(), &pp, &Patch::Merge(&body))
             .await
             .map_err(|e| map_kube(e, "pipeline", &key.to_string()))?;
+        Ok(())
+    }
+
+    fn parse_manifest(&self, text: &str, default_ns: &Namespace) -> Result<Pipeline> {
+        let mut obj = parse_pipeline_object(text)?;
+        if obj.metadata.namespace.is_none() {
+            obj.metadata.namespace = Some(default_ns.to_string());
+        }
+        into_pipeline(obj)
+    }
+
+    async fn apply_manifest(
+        &self,
+        text: &str,
+        default_ns: &Namespace,
+        dry_run: bool,
+    ) -> Result<Pipeline> {
+        // Send the user's document, not a round-trip through our DTOs: absent
+        // fields must stay absent for server-side apply.
+        let mut doc = parse_document(text)?;
+        let invalid = |reason: String| Error::Invalid {
+            kind: "manifest",
+            name: "<input>".into(),
+            reason,
+        };
+        let Some(meta) = doc
+            .get_mut("metadata")
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            return Err(invalid("no metadata".into()));
+        };
+        if !meta.contains_key("namespace") {
+            meta.insert(
+                "namespace".into(),
+                serde_json::Value::String(default_ns.to_string()),
+            );
+        }
+        let name = meta
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let ns_raw = meta
+            .get("namespace")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let ns = Namespace::new(ns_raw).map_err(|e| invalid(format!("namespace: {e}")))?;
+        // Validate locally first so a bad manifest fails with a domain error.
+        let obj: PipelineObject =
+            serde_json::from_value(doc.clone()).map_err(|e| invalid(e.to_string()))?;
+        into_pipeline(obj)?;
+        let pp = PatchParams {
+            dry_run,
+            force: true,
+            ..PatchParams::apply("nfctl")
+        };
+        let applied = self
+            .pipelines(&ns)
+            .patch(&name, &pp, &Patch::Apply(&doc))
+            .await
+            .map_err(|e| map_kube(e, "pipeline", &name))?;
+        into_pipeline(applied)
+    }
+
+    async fn scale_vertex(
+        &self,
+        key: &PipelineKey,
+        vertex: &VertexName,
+        replicas: u32,
+        dry_run: bool,
+    ) -> Result<()> {
+        // Vertex objects are named `<pipeline>-<vertex>`.
+        let name = format!("{}-{}", key.name, vertex);
+        let api: Api<DynamicObject> = Api::namespaced_with(
+            self.client.clone(),
+            key.namespace.as_str(),
+            &crate::dto::vertex_resource(),
+        );
+        let pp = PatchParams {
+            dry_run,
+            ..PatchParams::default()
+        };
+        api.patch_scale(
+            &name,
+            &pp,
+            &Patch::Merge(serde_json::json!({ "spec": { "replicas": replicas } })),
+        )
+        .await
+        .map_err(|e| map_kube(e, "vertex", &format!("{key}/{vertex}")))?;
         Ok(())
     }
 
@@ -265,5 +386,19 @@ mod tests {
         let l = parse_log_line("no timestamp here");
         assert_eq!(l.at, None);
         assert_eq!(l.text, "no timestamp here");
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+
+    #[test]
+    fn parses_yaml_and_rejects_other_kinds() {
+        let yaml = "apiVersion: numaflow.numaproj.io/v1alpha1\nkind: Pipeline\nmetadata:\n  name: p\nspec:\n  vertices:\n  - name: in\n    source: {generator: {}}\n  - name: out\n    sink: {log: {}}\n  edges:\n  - {from: in, to: out}\n";
+        let obj = parse_pipeline_object(yaml).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(obj.metadata.name.as_deref(), Some("p"));
+        let bad = parse_pipeline_object("kind: Vertex\nmetadata: {name: x}\n");
+        assert!(bad.is_err());
     }
 }

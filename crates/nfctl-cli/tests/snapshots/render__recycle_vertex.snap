@@ -1,0 +1,6 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "run_s(&[\"nfctl\", \"recycle\", \"simple-pipeline\", \"cat\"]).await"
+---
+demo/simple-pipeline/cat: deleted 1 pod(s)
+  simple-pipeline-cat-0-abcd

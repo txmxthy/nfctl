@@ -356,3 +356,39 @@ pub fn isb_detail(
     }
     Ok(out)
 }
+
+/// Human summary of an apply check.
+#[must_use]
+pub fn apply_report(
+    key: &nfctl_core::model::PipelineKey,
+    r: &nfctl_core::service::ApplyReport,
+    exists: bool,
+) -> String {
+    let mut out = String::new();
+    if !exists {
+        let _ = writeln!(out, "{key}: does not exist yet; will be created");
+        return out;
+    }
+    for b in &r.blocks {
+        let _ = writeln!(out, "BLOCK  {b}");
+    }
+    for w in &r.warnings {
+        let _ = writeln!(out, "WARN   {w}");
+    }
+    if let Some(d) = &r.diff
+        && !d.shape_changed()
+        && d.kind_changed.is_empty()
+        && d.partitions_changed.is_empty()
+        && d.image_changed.is_empty()
+        && r.blocks.is_empty()
+    {
+        let _ = writeln!(out, "{key}: no topology changes");
+    }
+    if !r.blocks.is_empty() {
+        let _ = writeln!(
+            out,
+            "{key}: refusing to apply; delete and recreate the pipeline instead"
+        );
+    }
+    out
+}

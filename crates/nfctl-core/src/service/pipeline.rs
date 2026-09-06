@@ -43,6 +43,12 @@ impl PipelineService {
         super::pipeline_view(self.cluster.as_ref(), self.daemons.as_ref(), key, now).await
     }
 
+    /// The daemon factory, for procedures that need runtime data.
+    #[must_use]
+    pub fn daemons(&self) -> &dyn DaemonConnector {
+        self.daemons.as_ref()
+    }
+
     pub async fn list_isb(&self, ns: &Namespace) -> Result<Vec<crate::model::IsbService>> {
         let mut v = self.cluster.list_isb(ns).await?;
         v.sort_by(|a, b| a.name.cmp(&b.name));

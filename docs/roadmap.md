@@ -8,10 +8,10 @@
 | `logs` | done | M3 |
 | `top`, `status` | done | M4 |
 | `isb ls`, `isb inspect` | done | M4 |
-| `pause`, `resume`, `wait` | planned | M5 |
-| `recycle` | planned | M5 |
-| `apply --check` | planned | M5 |
-| `scale` | planned | M5 |
+| `pause`, `resume`, `wait` | done | M5 |
+| `recycle` | done | M5 |
+| `apply --check` | done | M5 |
+| `scale` | done | M5 |
 | `tui` | stub | M7 |
 | `mvtx …` | stub | M8 |
 

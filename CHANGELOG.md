@@ -13,3 +13,5 @@ All notable changes to this project are documented here. Format follows
 - `nfctl logs`: multi-pod log tailing tagged by pod and container; `-f` follows through pod replacement and container restarts, resuming from the last timestamp seen.
 - `nfctl status` / `nfctl top`: pipeline phase and health fused with per-vertex rates and pending and per-edge buffer usage and watermark lag, read from the pipeline daemon through an automatic port-forward. `--daemon-url` for in-cluster use.
 - `nfctl isb ls` / `isb inspect`.
+- Lifecycle: `pause --wait` (reports drain), `resume --strategy fast|slow`, `recycle` (vertex pods or pause-drain-resume), `wait --phase`, `scale`; every mutating verb takes `--dry-run`.
+- `nfctl apply`: server-side apply with `--check`, which refuses immutable changes (ISB, instance, vertex type, reduce partitions) and warns on topology or image changes that risk in-flight data.

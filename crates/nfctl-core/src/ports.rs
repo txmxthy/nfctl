@@ -32,6 +32,27 @@ pub trait ClusterPort: Send + Sync {
         dry_run: bool,
     ) -> Result<()>;
 
+    /// Parse a Pipeline manifest (YAML or JSON) into the domain without touching the
+    /// cluster. `default_ns` applies when the manifest has no namespace.
+    fn parse_manifest(&self, text: &str, default_ns: &Namespace) -> Result<Pipeline>;
+
+    /// Server-side apply of a Pipeline manifest (field manager `nfctl`).
+    async fn apply_manifest(
+        &self,
+        text: &str,
+        default_ns: &Namespace,
+        dry_run: bool,
+    ) -> Result<Pipeline>;
+
+    /// Set a vertex's replica count through the scale subresource.
+    async fn scale_vertex(
+        &self,
+        key: &PipelineKey,
+        vertex: &VertexName,
+        replicas: u32,
+        dry_run: bool,
+    ) -> Result<()>;
+
     async fn list_isb(&self, ns: &Namespace) -> Result<Vec<IsbService>>;
 
     async fn list_pods(&self, ns: &Namespace, selector: &Selector) -> Result<Vec<PodRef>>;

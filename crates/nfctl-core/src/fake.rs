@@ -38,6 +38,8 @@ pub struct TailCall {
 struct State {
     pipelines: Vec<Pipeline>,
     isbs: Vec<IsbService>,
+    manifests: HashMap<String, Pipeline>,
+    scaled: Vec<(PipelineKey, VertexName, u32)>,
     pods: Vec<PodRef>,
     pod_watchers: Vec<mpsc::Sender<Result<PodEvent>>>,
     scripts: HashMap<(PodName, ContainerName), VecDeque<LogScript>>,
@@ -87,6 +89,16 @@ impl FakeCluster {
         }
         g.pod_watchers
             .retain(|tx| tx.try_send(Ok(ev.clone())).is_ok());
+    }
+
+    /// Teach the fake what a manifest text parses to (the fake has no YAML parser).
+    pub fn register_manifest(&self, text: &str, pipeline: Pipeline) {
+        self.lock().manifests.insert(text.to_owned(), pipeline);
+    }
+
+    #[must_use]
+    pub fn scale_calls(&self) -> Vec<(PipelineKey, VertexName, u32)> {
+        self.lock().scaled.clone()
     }
 
     pub fn add_isbs(&self, isbs: impl IntoIterator<Item = IsbService>) {
@@ -163,6 +175,48 @@ impl ClusterPort for FakeCluster {
             DesiredPhase::Running => PipelinePhase::Running,
             DesiredPhase::Paused => PipelinePhase::Paused,
         };
+        Ok(())
+    }
+
+    fn parse_manifest(&self, text: &str, _default_ns: &Namespace) -> Result<Pipeline> {
+        self.lock()
+            .manifests
+            .get(text)
+            .cloned()
+            .ok_or_else(|| Error::Invalid {
+                kind: "manifest",
+                name: "<text>".into(),
+                reason: "unregistered".into(),
+            })
+    }
+
+    async fn apply_manifest(
+        &self,
+        text: &str,
+        default_ns: &Namespace,
+        dry_run: bool,
+    ) -> Result<Pipeline> {
+        let p = self.parse_manifest(text, default_ns)?;
+        if !dry_run {
+            let mut g = self.lock();
+            g.pipelines.retain(|x| x.key != p.key);
+            g.pipelines.push(p.clone());
+        }
+        Ok(p)
+    }
+
+    async fn scale_vertex(
+        &self,
+        key: &PipelineKey,
+        vertex: &VertexName,
+        replicas: u32,
+        dry_run: bool,
+    ) -> Result<()> {
+        if !dry_run {
+            self.lock()
+                .scaled
+                .push((key.clone(), vertex.clone(), replicas));
+        }
         Ok(())
     }
 

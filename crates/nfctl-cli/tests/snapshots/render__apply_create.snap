@@ -1,0 +1,6 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out_ctx(&Cli::parse_from([\"nfctl\", \"apply\", \"-f\", &f2]), &ctx).await"
+---
+demo/brand-new: does not exist yet; will be created
+demo/brand-new: created

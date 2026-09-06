@@ -185,6 +185,69 @@ impl Topology {
     pub fn count(&self, kind: VertexKind) -> usize {
         self.vertices.iter().filter(|v| v.kind == kind).count()
     }
+
+    /// What changes when `self` is replaced by `new`.
+    #[must_use]
+    pub fn diff(&self, new: &Topology) -> TopologyDiff {
+        let mut d = TopologyDiff::default();
+        for v in &new.vertices {
+            match self.vertex(&v.name) {
+                None => d.added_vertices.push(v.name.clone()),
+                Some(old) => {
+                    if old.kind != v.kind {
+                        d.kind_changed.push((v.name.clone(), old.kind, v.kind));
+                    }
+                    if old.partitions != v.partitions {
+                        d.partitions_changed
+                            .push((v.name.clone(), old.partitions, v.partitions));
+                    }
+                    if old.image != v.image {
+                        d.image_changed.push(v.name.clone());
+                    }
+                }
+            }
+        }
+        for v in &self.vertices {
+            if new.vertex(&v.name).is_none() {
+                d.removed_vertices.push(v.name.clone());
+            }
+        }
+        let key = |e: &Edge| (e.from.clone(), e.to.clone());
+        for e in &new.edges {
+            if !self.edges.iter().any(|o| key(o) == key(e)) {
+                d.added_edges.push(key(e));
+            }
+        }
+        for e in &self.edges {
+            if !new.edges.iter().any(|n| key(n) == key(e)) {
+                d.removed_edges.push(key(e));
+            }
+        }
+        d
+    }
+}
+
+/// Differences between two topologies, by category.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct TopologyDiff {
+    pub added_vertices: Vec<VertexName>,
+    pub removed_vertices: Vec<VertexName>,
+    pub added_edges: Vec<(VertexName, VertexName)>,
+    pub removed_edges: Vec<(VertexName, VertexName)>,
+    pub kind_changed: Vec<(VertexName, VertexKind, VertexKind)>,
+    pub partitions_changed: Vec<(VertexName, u32, u32)>,
+    pub image_changed: Vec<VertexName>,
+}
+
+impl TopologyDiff {
+    /// Any vertex or edge added or removed.
+    #[must_use]
+    pub fn shape_changed(&self) -> bool {
+        !(self.added_vertices.is_empty()
+            && self.removed_vertices.is_empty()
+            && self.added_edges.is_empty()
+            && self.removed_edges.is_empty())
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +298,43 @@ pub(crate) mod tests {
             vec![e("in", "a"), e("a", "a"), e("a", "out")],
         );
         assert!(t.is_ok());
+    }
+
+    #[test]
+    fn diff_reports_each_category() {
+        let old = Topology::new(
+            vec![
+                v("in", VertexKind::Source),
+                v("a", VertexKind::Map),
+                v("out", VertexKind::Sink),
+            ],
+            vec![e("in", "a"), e("a", "out")],
+        )
+        .unwrap();
+        let mut a2 = v("a", VertexKind::Reduce);
+        a2.partitions = 3;
+        let new = Topology::new(
+            vec![
+                v("in", VertexKind::Source),
+                a2,
+                v("b", VertexKind::Map),
+                v("out", VertexKind::Sink),
+            ],
+            vec![e("in", "a"), e("a", "b"), e("b", "out")],
+        )
+        .unwrap();
+        let d = old.diff(&new);
+        assert_eq!(d.added_vertices.len(), 1);
+        assert!(d.removed_vertices.is_empty());
+        assert_eq!(d.added_edges.len(), 2);
+        assert_eq!(d.removed_edges.len(), 1);
+        assert_eq!(d.kind_changed.len(), 1);
+        assert_eq!(
+            d.partitions_changed,
+            vec![(VertexName::new("a").unwrap(), 1, 3)]
+        );
+        assert!(d.shape_changed());
+        assert!(!old.diff(&old).shape_changed());
     }
 
     #[test]

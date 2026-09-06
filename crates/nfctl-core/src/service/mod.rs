@@ -1,10 +1,14 @@
 //! Use cases. Everything the CLI and TUI do goes through here, so both share one
 //! implementation of every multi-step Numaflow procedure.
 
+pub mod apply;
+pub mod lifecycle;
 pub mod logs;
 mod pipeline;
 pub mod status;
 
+pub use apply::{ApplyReport, check};
+pub use lifecycle::{PauseReport, RecycleReport, pause, recycle, resume, wait_for_phase};
 pub use logs::{ContainerSelect, TailHandle, TailOptions};
 pub use pipeline::PipelineService;
 pub use status::{EdgeView, PipelineView, VertexView, pipeline_view};
