@@ -1,0 +1,15 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out_ctx(&cli, &live).await"
+---
+demo/simple-pipeline  phase=Running  health=healthy  desired=Running
+Pipeline data flow is healthy (D1)
+
+VERTEX  KIND    PARTS  RATE/1m  RATE/5m  PENDING
+in      source  1      -        -        -
+cat     map     1      120.5    118.0    42
+out     sink    1      -        -        -
+
+EDGE        PENDING  ACK-PENDING  USAGE  FULL  WATERMARK
+in -> cat   42       3            0%     no    -
+cat -> out  -        -            -      no    -

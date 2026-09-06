@@ -39,10 +39,8 @@ pub fn into_isb(o: IsbObject) -> Result<IsbService, Error> {
         .as_deref()
         .map(IsbPhase::parse_lenient)
         .unwrap_or_default();
-    let ready = st
-        .conditions
-        .iter()
-        .any(|c| c.kind == "Ready" && c.status == "True");
+    // The ISB controller reports Configured/Deployed/ChildrenResourcesHealthy; no `Ready`.
+    let ready = !st.conditions.is_empty() && st.conditions.iter().all(|c| c.status == "True");
     Ok(IsbService {
         name,
         version: js.version.unwrap_or_default(),
@@ -55,4 +53,32 @@ pub fn into_isb(o: IsbObject) -> Result<IsbService, Error> {
         phase,
         healthy: ready && matches!(phase, IsbPhase::Running | IsbPhase::Deleting),
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn healthy_when_running_and_all_conditions_true() {
+        let obj: IsbObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "numaflow.numaproj.io/v1alpha1", "kind": "InterStepBufferService",
+            "metadata": {"name": "default", "namespace": "demo"},
+            "spec": {"jetstream": {"version": "2.10.3", "replicas": 3, "persistence": {"volumeSize": "3Gi"}}},
+            "status": {
+                "phase": "Running", "type": "jetstream", "observedGeneration": 1,
+                "conditions": [
+                    {"type": "ChildrenResourcesHealthy", "status": "True", "reason": "Healthy"},
+                    {"type": "Configured", "status": "True"},
+                    {"type": "Deployed", "status": "True"}
+                ]
+            }
+        }))
+        .unwrap();
+        let isb = into_isb(obj).unwrap();
+        assert_eq!(isb.phase, IsbPhase::Running);
+        assert!(isb.persistent);
+        assert!(isb.healthy);
+    }
 }

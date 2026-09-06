@@ -1389,6 +1389,7 @@ dependencies = [
  "futures",
  "insta",
  "nfctl-core",
+ "nfctl-daemon",
  "nfctl-graph",
  "nfctl-k8s",
  "predicates",

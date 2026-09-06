@@ -34,9 +34,18 @@ impl PipelineService {
         self.cluster.get_pipeline(key).await
     }
 
-    /// The daemon factory, for services layered on top (status, top).
-    #[must_use]
-    pub fn daemons(&self) -> &Arc<dyn DaemonConnector> {
-        &self.daemons
+    /// CRD state fused with daemon runtime data. Never fails because of the daemon.
+    pub async fn view(
+        &self,
+        key: &PipelineKey,
+        now: crate::model::Timestamp,
+    ) -> Result<super::PipelineView> {
+        super::pipeline_view(self.cluster.as_ref(), self.daemons.as_ref(), key, now).await
+    }
+
+    pub async fn list_isb(&self, ns: &Namespace) -> Result<Vec<crate::model::IsbService>> {
+        let mut v = self.cluster.list_isb(ns).await?;
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(v)
     }
 }

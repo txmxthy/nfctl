@@ -199,7 +199,7 @@ impl Dialer {
                 match attempt.await {
                     Ok(f) => Ok(TokioIo::new(f)),
                     Err(e) => {
-                        // Forget the pod; the next dial re-resolves.
+                        // Drop the cached pod; the next dial re-resolves.
                         *cached_pod
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;

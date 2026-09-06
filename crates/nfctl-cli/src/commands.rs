@@ -5,7 +5,7 @@ use clap::CommandFactory;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use nfctl_core::model::{
-    ContainerName, Namespace, PipelineKey, PipelineName, Selector, TaggedLine, Timestamp,
+    ContainerName, IsbName, Namespace, PipelineKey, PipelineName, Selector, TaggedLine, Timestamp,
     VertexName,
 };
 use nfctl_core::ports::ClusterPort;
@@ -13,7 +13,7 @@ use nfctl_core::service::PipelineService;
 use nfctl_core::service::logs::{ContainerSelect, TailOptions, snapshot, tail};
 use nfctl_core::{Error, Result};
 
-use crate::cli::{Cli, Command, DagFormat, OutputFormat};
+use crate::cli::{Cli, Command, DagFormat, IsbCommand, OutputFormat};
 use crate::output;
 
 /// What a command produces: a finished string, or lines as they arrive.
@@ -194,6 +194,32 @@ pub async fn run(cli: &Cli, ctx: &Context) -> Result<Output> {
                 .collect(),
         ));
     }
+    if let Command::Top {
+        name,
+        interval,
+        once: false,
+    } = &cli.command
+    {
+        let ns = ctx.namespace(cli)?;
+        let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
+        let key = PipelineKey::new(ns, name);
+        let fmt = cli.globals.output;
+        let service = ctx.service.clone();
+        let every = Duration::from_secs((*interval).max(1));
+        let frames = futures::stream::unfold((service, key), move |(service, key)| async move {
+            let frame = match service.view(&key, Timestamp::now()).await {
+                Ok(v) => output::view(&v, fmt).unwrap_or_else(|e| format!("error: {e}\n")),
+                Err(e) => format!("error: {e}\n"),
+            };
+            tokio::time::sleep(every).await;
+            // Clear screen + home, then the frame (no trailing newline: the printer adds one).
+            Some((
+                format!("\x1b[2J\x1b[H{}", frame.trim_end_matches('\n')),
+                (service, key),
+            ))
+        });
+        return Ok(Output::Lines(Box::pin(frames)));
+    }
     run_text(cli, ctx).await.map(Output::Text)
 }
 
@@ -245,11 +271,23 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
             }
         }
         // Handled by `run_offline`; listed so the match stays exhaustive.
+        Command::Status { name }
+        | Command::Top {
+            name, once: true, ..
+        } => {
+            let ns = ctx.namespace(cli)?;
+            let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
+            let v = ctx
+                .service
+                .view(&PipelineKey::new(ns, name), ctx.now)
+                .await?;
+            output::view(&v, fmt)
+        }
+        Command::Isb { command } => run_isb(cli, ctx, command).await,
+        // Handled above; listed so the match stays exhaustive.
         Command::Completions { .. }
         | Command::Logs { .. }
         | Command::Top { .. }
-        | Command::Status { .. }
-        | Command::Isb { .. }
         | Command::Pause { .. }
         | Command::Resume { .. }
         | Command::Recycle { .. }
@@ -258,5 +296,34 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
         | Command::Scale { .. }
         | Command::Mvtx
         | Command::Tui => unreachable!("handled before run_text"),
+    }
+}
+
+async fn run_isb(cli: &Cli, ctx: &Context, command: &IsbCommand) -> Result<String> {
+    let fmt = cli.globals.output;
+    let ns = ctx.namespace(cli)?;
+    match command {
+        IsbCommand::Ls => output::isbs(&ctx.service.list_isb(&ns).await?, fmt),
+        IsbCommand::Inspect { name } => {
+            let name = IsbName::new(name).map_err(|e| invalid_arg("isbsvc", name, e))?;
+            let isb = ctx
+                .service
+                .list_isb(&ns)
+                .await?
+                .into_iter()
+                .find(|i| i.name == name)
+                .ok_or_else(|| Error::NotFound {
+                    kind: "isbsvc",
+                    name: name.to_string(),
+                })?;
+            let users: Vec<_> = ctx
+                .service
+                .list(Some(&ns))
+                .await?
+                .into_iter()
+                .filter(|p| p.spec.isb == name)
+                .collect();
+            output::isb_detail(&isb, &users, fmt)
+        }
     }
 }

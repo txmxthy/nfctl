@@ -1,0 +1,10 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out(&[\"isb\", \"inspect\", \"default\"]).await"
+---
+NAME     PHASE    HEALTHY  REPLICAS  VERSION  PERSISTENT
+default  Running  yes      3         2.10.3   yes
+
+PIPELINE         PHASE    VERTICES
+paused-pipeline  Paused   3
+simple-pipeline  Running  3

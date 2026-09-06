@@ -33,6 +33,10 @@ pub struct Globals {
     /// Output format
     #[arg(short, long, global = true, default_value = "table", value_enum)]
     pub output: OutputFormat,
+
+    /// Talk to the pipeline daemon at this URL instead of port-forwarding
+    #[arg(long, global = true, env = "NFCTL_DAEMON_URL", value_name = "URL")]
+    pub daemon_url: Option<String>,
 }
 
 impl Globals {
@@ -100,13 +104,25 @@ pub enum Command {
         timestamps: bool,
     },
 
-    /// Live phase, rates, pending and buffer usage (preview: not implemented yet, see docs/roadmap.md)
-    Top { name: String },
+    /// Phase, health, rates, pending and buffer usage, refreshed live
+    Top {
+        /// Pipeline name
+        name: String,
+        /// Refresh interval in seconds
+        #[arg(short, long, default_value_t = 2, value_name = "SECS")]
+        interval: u64,
+        /// Render once and exit
+        #[arg(long)]
+        once: bool,
+    },
 
-    /// Status fused from the CRD and the daemon (preview: not implemented yet, see docs/roadmap.md)
-    Status { name: String },
+    /// Phase, health, rates, pending and buffer usage, once
+    Status {
+        /// Pipeline name
+        name: String,
+    },
 
-    /// Inter-step buffer services (preview: not implemented yet, see docs/roadmap.md)
+    /// Inter-step buffer services
     Isb {
         #[command(subcommand)]
         command: IsbCommand,
@@ -170,9 +186,6 @@ impl Command {
     #[must_use]
     pub fn stub_name(&self) -> Option<&'static str> {
         Some(match self {
-            Command::Top { .. } => "top",
-            Command::Status { .. } => "status",
-            Command::Isb { .. } => "isb",
             Command::Pause { .. } => "pause",
             Command::Resume { .. } => "resume",
             Command::Recycle { .. } => "recycle",
@@ -185,6 +198,9 @@ impl Command {
             | Command::Get { .. }
             | Command::Dag { .. }
             | Command::Logs { .. }
+            | Command::Top { .. }
+            | Command::Status { .. }
+            | Command::Isb { .. }
             | Command::Completions { .. } => {
                 return None;
             }

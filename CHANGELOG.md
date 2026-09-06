@@ -11,3 +11,5 @@ All notable changes to this project are documented here. Format follows
 - `nfctl ls`, `nfctl get`, `nfctl completions`; table, wide, JSON and YAML output; every other command is a visible stub (exit 4).
 - `nfctl dag`: box-drawing, Mermaid or DOT rendering of a pipeline topology; ASCII fits the terminal width.
 - `nfctl logs`: multi-pod log tailing tagged by pod and container; `-f` follows through pod replacement and container restarts, resuming from the last timestamp seen.
+- `nfctl status` / `nfctl top`: pipeline phase and health fused with per-vertex rates and pending and per-edge buffer usage and watermark lag, read from the pipeline daemon through an automatic port-forward. `--daemon-url` for in-cluster use.
+- `nfctl isb ls` / `isb inspect`.

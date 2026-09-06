@@ -37,6 +37,7 @@ pub struct TailCall {
 #[derive(Debug, Default)]
 struct State {
     pipelines: Vec<Pipeline>,
+    isbs: Vec<IsbService>,
     pods: Vec<PodRef>,
     pod_watchers: Vec<mpsc::Sender<Result<PodEvent>>>,
     scripts: HashMap<(PodName, ContainerName), VecDeque<LogScript>>,
@@ -86,6 +87,10 @@ impl FakeCluster {
         }
         g.pod_watchers
             .retain(|tx| tx.try_send(Ok(ev.clone())).is_ok());
+    }
+
+    pub fn add_isbs(&self, isbs: impl IntoIterator<Item = IsbService>) {
+        self.lock().isbs.extend(isbs);
     }
 
     /// Add pipelines to the cluster.
@@ -162,7 +167,7 @@ impl ClusterPort for FakeCluster {
     }
 
     async fn list_isb(&self, _ns: &Namespace) -> Result<Vec<IsbService>> {
-        Ok(vec![])
+        Ok(self.lock().isbs.clone())
     }
 
     async fn list_pods(&self, _ns: &Namespace, _selector: &Selector) -> Result<Vec<PodRef>> {

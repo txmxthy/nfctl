@@ -16,6 +16,7 @@ path = "src/main.rs"
 nfctl-core.workspace = true
 nfctl-k8s.workspace = true
 nfctl-graph.workspace = true
+nfctl-daemon.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 futures.workspace = true

@@ -3,9 +3,11 @@
 
 pub mod logs;
 mod pipeline;
+pub mod status;
 
 pub use logs::{ContainerSelect, TailHandle, TailOptions};
 pub use pipeline::PipelineService;
+pub use status::{EdgeView, PipelineView, VertexView, pipeline_view};
 
 use async_trait::async_trait;
 

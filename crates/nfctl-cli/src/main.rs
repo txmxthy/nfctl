@@ -8,7 +8,8 @@ use std::sync::Arc;
 use clap::Parser;
 use futures::StreamExt;
 use nfctl_cli::{Cli, Context, Output, run, run_offline};
-use nfctl_core::service::{NoDaemon, PipelineService};
+use nfctl_core::ports::DaemonConnector;
+use nfctl_core::service::PipelineService;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -50,10 +51,19 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<Output> {
     })
     .await?;
     let cluster: Arc<dyn nfctl_core::ports::ClusterPort> =
-        Arc::new(nfctl_k8s::KubeCluster::new(conn.client));
+        Arc::new(nfctl_k8s::KubeCluster::new(conn.client.clone()));
+    let daemon_opts = nfctl_daemon::ClientOptions::default();
+    let daemons: Arc<dyn DaemonConnector> = match &cli.globals.daemon_url {
+        Some(url) => Arc::new(nfctl_daemon::DirectConnector::new(url, None, daemon_opts)?),
+        None => Arc::new(nfctl_daemon::PortForwardConnector::new(
+            conn.client,
+            Arc::clone(&cluster),
+            daemon_opts,
+        )),
+    };
     let ctx = Context {
         cluster: Arc::clone(&cluster),
-        service: PipelineService::new(cluster, Arc::new(NoDaemon)),
+        service: PipelineService::new(cluster, daemons),
         default_namespace: conn.default_namespace,
         now: nfctl_core::model::Timestamp::now(),
         terminal_width: terminal_size::terminal_size().map(|(w, _)| usize::from(w.0)),

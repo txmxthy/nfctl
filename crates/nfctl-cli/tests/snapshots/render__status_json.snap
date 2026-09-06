@@ -1,0 +1,186 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out_ctx(&cli, &live).await"
+---
+{
+  "pipeline": {
+    "key": {
+      "namespace": "demo",
+      "name": "simple-pipeline"
+    },
+    "meta": {
+      "generation": 1,
+      "created": "1970-01-01T00:00:00Z",
+      "instance": null,
+      "resume_strategy": null
+    },
+    "spec": {
+      "isb": "default",
+      "lifecycle": {
+        "desired": "Running",
+        "pause_grace": 30,
+        "deletion_grace": 30
+      },
+      "limits": {
+        "read_batch_size": 500,
+        "buffer_max_length": 30000,
+        "buffer_usage_limit": 0.8
+      },
+      "topology": {
+        "vertices": [
+          {
+            "name": "in",
+            "kind": "source",
+            "partitions": 1,
+            "scale": {
+              "min": null,
+              "max": null,
+              "disabled": false
+            },
+            "image": null
+          },
+          {
+            "name": "cat",
+            "kind": "map",
+            "partitions": 1,
+            "scale": {
+              "min": null,
+              "max": null,
+              "disabled": false
+            },
+            "image": null
+          },
+          {
+            "name": "out",
+            "kind": "sink",
+            "partitions": 1,
+            "scale": {
+              "min": null,
+              "max": null,
+              "disabled": false
+            },
+            "image": null
+          }
+        ],
+        "edges": [
+          {
+            "from": "in",
+            "to": "cat",
+            "conditions": null,
+            "on_full": "retryUntilSuccess"
+          },
+          {
+            "from": "cat",
+            "to": "out",
+            "conditions": null,
+            "on_full": "retryUntilSuccess"
+          }
+        ]
+      }
+    },
+    "status": {
+      "phase": "Running",
+      "message": null,
+      "conditions": [],
+      "observed_generation": null,
+      "drained_on_pause": false,
+      "counts": {
+        "total": 3,
+        "sources": 1,
+        "sinks": 1,
+        "udfs": 1,
+        "map_udfs": 1,
+        "reduce_udfs": 0
+      },
+      "pause_started": null,
+      "last_updated": null
+    }
+  },
+  "health": {
+    "status": "healthy",
+    "message": "Pipeline data flow is healthy",
+    "code": "D1"
+  },
+  "vertices": [
+    {
+      "name": "in",
+      "kind": "source",
+      "partitions": 1,
+      "rate": {
+        "m1": null,
+        "m5": null,
+        "m15": null,
+        "default": null
+      },
+      "pending": {
+        "m1": null,
+        "m5": null,
+        "m15": null,
+        "default": null
+      }
+    },
+    {
+      "name": "cat",
+      "kind": "map",
+      "partitions": 1,
+      "rate": {
+        "m1": 120.5,
+        "m5": 118.0,
+        "m15": null,
+        "default": 119.0
+      },
+      "pending": {
+        "m1": 42,
+        "m5": null,
+        "m15": null,
+        "default": 42
+      }
+    },
+    {
+      "name": "out",
+      "kind": "sink",
+      "partitions": 1,
+      "rate": {
+        "m1": null,
+        "m5": null,
+        "m15": null,
+        "default": null
+      },
+      "pending": {
+        "m1": null,
+        "m5": null,
+        "m15": null,
+        "default": null
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "in",
+      "to": "cat",
+      "buffers": [
+        {
+          "name": "default-simple-pipeline-cat-0",
+          "from": "in",
+          "to": "cat",
+          "pending": 42,
+          "ack_pending": 3,
+          "total": 45,
+          "length": 30000,
+          "usage": 0.0015,
+          "usage_limit": 0.8,
+          "is_full": false
+        }
+      ],
+      "watermark": null
+    },
+    {
+      "from": "cat",
+      "to": "out",
+      "buffers": [],
+      "watermark": null
+    }
+  ],
+  "warnings": [],
+  "at": "1970-01-04T04:00:00Z"
+}

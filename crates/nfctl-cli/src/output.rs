@@ -155,3 +155,204 @@ pub fn serialised<T: Serialize>(value: &T, fmt: OutputFormat) -> Result<String> 
     }
     Ok(s)
 }
+
+fn opt_i64(v: Option<i64>) -> String {
+    v.map_or_else(|| "-".to_owned(), |n| n.to_string())
+}
+
+fn opt_rate(v: Option<f64>) -> String {
+    v.map_or_else(|| "-".to_owned(), |r| format!("{r:.1}"))
+}
+
+fn opt_pct(v: Option<f64>) -> String {
+    v.map_or_else(|| "-".to_owned(), |f| format!("{:.0}%", f * 100.0))
+}
+
+fn vertex_table(vertices: &[nfctl_core::service::VertexView]) -> String {
+    let mut t = Table::new(vec![
+        "VERTEX", "KIND", "PARTS", "RATE/1m", "RATE/5m", "PENDING",
+    ]);
+    for x in vertices {
+        t.row(vec![
+            x.name.to_string(),
+            x.kind.as_str().to_owned(),
+            x.partitions.to_string(),
+            opt_rate(x.rate.m1),
+            opt_rate(x.rate.m5),
+            opt_i64(x.pending.default.or(x.pending.m1)),
+        ]);
+    }
+    t.render()
+}
+
+fn edge_table(edges: &[nfctl_core::service::EdgeView], at: Timestamp) -> String {
+    let mut t = Table::new(vec![
+        "EDGE",
+        "PENDING",
+        "ACK-PENDING",
+        "USAGE",
+        "FULL",
+        "WATERMARK",
+    ]);
+    for e in edges {
+        let ack = e
+            .buffers
+            .iter()
+            .filter_map(|b| b.ack_pending)
+            .reduce(|a, b| a + b);
+        let wm = e.watermark.as_ref().map_or_else(
+            || "-".to_owned(),
+            |w| {
+                if !w.enabled {
+                    return "disabled".to_owned();
+                }
+                match w.per_partition.iter().flatten().max() {
+                    Some(ts) => ts
+                        .elapsed_until(at)
+                        .map_or_else(|| "ahead".to_owned(), |d| format!("{} ago", age(Some(d)))),
+                    None => "-".to_owned(),
+                }
+            },
+        );
+        t.row(vec![
+            format!("{} -> {}", e.from, e.to),
+            opt_i64(e.pending()),
+            opt_i64(ack),
+            opt_pct(e.usage()),
+            if e.is_full() {
+                "yes".to_owned()
+            } else {
+                "no".to_owned()
+            },
+            wm,
+        ]);
+    }
+    t.render()
+}
+
+/// The `top`/`status` screen.
+pub fn view(v: &nfctl_core::service::PipelineView, fmt: OutputFormat) -> Result<String> {
+    if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+        return serialised(v, fmt);
+    }
+    let p = &v.pipeline;
+    let mut out = String::new();
+    let health = v
+        .health
+        .as_ref()
+        .map_or_else(|| "unknown".to_owned(), |h| h.status.as_str().to_owned());
+    let _ = writeln!(
+        out,
+        "{}  phase={}  health={}  desired={}",
+        p.key,
+        p.status.phase.as_str(),
+        health,
+        p.spec.lifecycle.desired.as_str()
+    );
+    if let Some(h) = &v.health
+        && !h.message.is_empty()
+    {
+        let _ = writeln!(out, "{} ({})", h.message, h.code);
+    }
+    if let Some(m) = &p.status.message {
+        let _ = writeln!(out, "{m}");
+    }
+    if p.status.phase == nfctl_core::model::PipelinePhase::Pausing
+        || p.status.phase == nfctl_core::model::PipelinePhase::Paused
+    {
+        let drained = match v.drained() {
+            Some(true) => "drained",
+            Some(false) => "draining",
+            None => "drain state unknown",
+        };
+        let _ = writeln!(
+            out,
+            "pause: {drained}; controller reports drainedOnPause={}",
+            p.status.drained_on_pause
+        );
+    }
+    out.push('\n');
+
+    out.push_str(&vertex_table(&v.vertices));
+    out.push('\n');
+    out.push_str(&edge_table(&v.edges, v.at));
+    for w in &v.warnings {
+        let _ = writeln!(out, "\nwarning: {w}");
+    }
+    Ok(out)
+}
+
+/// `isb ls`.
+pub fn isbs(items: &[nfctl_core::model::IsbService], fmt: OutputFormat) -> Result<String> {
+    if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+        return serialised(&items, fmt);
+    }
+    if items.is_empty() {
+        return Ok("No inter-step buffer services found.\n".to_owned());
+    }
+    let mut t = Table::new(vec![
+        "NAME",
+        "PHASE",
+        "HEALTHY",
+        "REPLICAS",
+        "VERSION",
+        "PERSISTENT",
+    ]);
+    for i in items {
+        t.row(vec![
+            i.name.to_string(),
+            format!("{:?}", i.phase),
+            if i.healthy {
+                "yes".to_owned()
+            } else {
+                "no".to_owned()
+            },
+            i.replicas.to_string(),
+            i.version.clone(),
+            if i.persistent {
+                "yes".to_owned()
+            } else {
+                "no".to_owned()
+            },
+        ]);
+    }
+    Ok(t.render())
+}
+
+/// `isb inspect`: the service plus the pipelines that use it.
+pub fn isb_detail(
+    isb: &nfctl_core::model::IsbService,
+    users: &[Pipeline],
+    fmt: OutputFormat,
+) -> Result<String> {
+    if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+        #[derive(Serialize)]
+        struct Detail<'a> {
+            service: &'a nfctl_core::model::IsbService,
+            pipelines: Vec<&'a nfctl_core::model::PipelineKey>,
+        }
+        return serialised(
+            &Detail {
+                service: isb,
+                pipelines: users.iter().map(|p| &p.key).collect(),
+            },
+            fmt,
+        );
+    }
+    let mut out = isbs(std::slice::from_ref(isb), fmt)?;
+    out.push('\n');
+    if users.is_empty() {
+        out.push_str("No pipelines use this service.\n");
+    } else {
+        let mut t = Table::new(vec!["PIPELINE", "PHASE", "VERTICES"]);
+        for p in users {
+            t.row(vec![
+                p.key.name.to_string(),
+                p.status.phase.as_str().to_owned(),
+                p.status.counts.total.to_string(),
+            ]);
+        }
+        out.push_str(&t.render());
+    }
+    Ok(out)
+}

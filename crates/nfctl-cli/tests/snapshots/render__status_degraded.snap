@@ -1,0 +1,18 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out_ctx(&cli, &ctx()).await"
+---
+demo/paused-pipeline  phase=Paused  health=unknown  desired=Running
+waiting for buffers to drain
+pause: drain state unknown; controller reports drainedOnPause=false
+
+VERTEX  KIND    PARTS  RATE/1m  RATE/5m  PENDING
+in      source  1      -        -        -
+cat     map     1      -        -        -
+out     sink    1      -        -        -
+
+EDGE        PENDING  ACK-PENDING  USAGE  FULL  WATERMARK
+in -> cat   -        -            -      no    -
+cat -> out  -        -            -      no    -
+
+warning: health: daemon: no health configured
