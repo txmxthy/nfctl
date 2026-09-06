@@ -62,8 +62,17 @@ pub enum Command {
         name: String,
     },
 
-    /// Render a pipeline's topology (preview: not implemented yet, see docs/roadmap.md)
-    Dag { name: String },
+    /// Render a pipeline's topology
+    Dag {
+        /// Pipeline name
+        name: String,
+        /// Diagram format (`-o json|yaml` prints the topology model instead)
+        #[arg(short, long, default_value = "ascii", value_enum)]
+        format: DagFormat,
+        /// Fit the ASCII render to this many columns (default: terminal width)
+        #[arg(short, long, value_name = "COLS")]
+        width: Option<usize>,
+    },
 
     /// Tail logs across a pipeline's pods (preview: not implemented yet, see docs/roadmap.md)
     Logs {
@@ -121,6 +130,13 @@ pub enum Command {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DagFormat {
+    Ascii,
+    Mermaid,
+    Dot,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum IsbCommand {
     /// List ISB services
@@ -134,7 +150,6 @@ impl Command {
     #[must_use]
     pub fn stub_name(&self) -> Option<&'static str> {
         Some(match self {
-            Command::Dag { .. } => "dag",
             Command::Logs { .. } => "logs",
             Command::Top { .. } => "top",
             Command::Status { .. } => "status",
@@ -147,7 +162,12 @@ impl Command {
             Command::Scale { .. } => "scale",
             Command::Mvtx => "mvtx",
             Command::Tui => "tui",
-            Command::Ls | Command::Get { .. } | Command::Completions { .. } => return None,
+            Command::Ls
+            | Command::Get { .. }
+            | Command::Dag { .. }
+            | Command::Completions { .. } => {
+                return None;
+            }
         })
     }
 }

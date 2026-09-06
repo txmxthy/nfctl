@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 nfctl-core.workspace = true
 nfctl-k8s.workspace = true
+nfctl-graph.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 serde.workspace = true
@@ -23,6 +24,7 @@ serde_yaml_ng = "0.10"
 time.workspace = true
 tokio.workspace = true
 unicode-width = "0.2"
+terminal_size = "0.4"
 
 [dev-dependencies]
 nfctl-core = { workspace = true, features = ["fake"] }

@@ -1,0 +1,24 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+expression: "render(&complex(), Format::Dot, None)"
+---
+digraph pipeline {
+  rankdir=LR;
+  node [fontname="monospace"];
+  "kafka-in" [shape=cds];
+  "http-in" [shape=cds];
+  "decode" [shape=box];
+  "enrich" [shape=box];
+  "window-agg" [shape=hexagon];
+  "warehouse" [shape=box3d];
+  "alerts" [shape=box3d];
+  "dlq" [shape=box3d];
+  "kafka-in" -> "decode";
+  "http-in" -> "decode";
+  "decode" -> "enrich" [label="ok"];
+  "decode" -> "dlq" [label="not ok"];
+  "enrich" -> "enrich";
+  "enrich" -> "window-agg";
+  "enrich" -> "alerts" [style=dashed];
+  "window-agg" -> "warehouse";
+}

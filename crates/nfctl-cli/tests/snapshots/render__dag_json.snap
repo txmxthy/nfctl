@@ -1,0 +1,55 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out(&[\"dag\", \"simple-pipeline\", \"-o\", \"json\"]).await"
+---
+{
+  "vertices": [
+    {
+      "name": "in",
+      "kind": "source",
+      "partitions": 1,
+      "scale": {
+        "min": null,
+        "max": null,
+        "disabled": false
+      },
+      "image": null
+    },
+    {
+      "name": "cat",
+      "kind": "map",
+      "partitions": 1,
+      "scale": {
+        "min": null,
+        "max": null,
+        "disabled": false
+      },
+      "image": null
+    },
+    {
+      "name": "out",
+      "kind": "sink",
+      "partitions": 1,
+      "scale": {
+        "min": null,
+        "max": null,
+        "disabled": false
+      },
+      "image": null
+    }
+  ],
+  "edges": [
+    {
+      "from": "in",
+      "to": "cat",
+      "conditions": null,
+      "on_full": "retryUntilSuccess"
+    },
+    {
+      "from": "cat",
+      "to": "out",
+      "conditions": null,
+      "on_full": "retryUntilSuccess"
+    }
+  ]
+}

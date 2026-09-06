@@ -1,0 +1,14 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+expression: "render(&even_odd(), Format::Mermaid, None)"
+---
+flowchart LR
+  in(["in"])
+  even_or_odd["even-or-odd"]
+  even_sink[["even-sink"]]
+  odd_sink[["odd-sink"]]
+  number_sink[["number-sink"]]
+  in --> even_or_odd
+  even_or_odd -->|even-tag| even_sink
+  even_or_odd -->|odd-tag| odd_sink
+  even_or_odd -->|even-tag, odd-tag| number_sink

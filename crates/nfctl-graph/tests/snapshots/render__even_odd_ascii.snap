@@ -1,0 +1,16 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+assertion_line: 123
+expression: "render(&even_odd(), Format::Ascii, None)"
+---
+                                                ┌─────────────┐
+                                             ┌─▶│ even-sink   │
+                                             │  └─────────────┘
+           ┌─────────────┐                   │
+┌────┐     │ even-or-odd │─even-tag──────────┘  ┌─────────────┐
+│ in │────▶│             │─odd-tag─────────────▶│ odd-sink    │
+└────┘     │             │─even-tag, odd-tag─┐  └─────────────┘
+           └─────────────┘                   │
+                                             │  ┌─────────────┐
+                                             └─▶│ number-sink │
+                                                └─────────────┘

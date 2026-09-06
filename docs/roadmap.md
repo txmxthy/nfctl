@@ -4,7 +4,7 @@
 |---|---|---|
 | `ls`, `get` | done | M1 |
 | `completions` | done | M1 |
-| `dag` | planned | M2 |
+| `dag` | done | M2 |
 | `logs` | planned | M3 |
 | `top`, `status` | planned | M4 |
 | `isb ls`, `isb inspect` | planned | M4 |

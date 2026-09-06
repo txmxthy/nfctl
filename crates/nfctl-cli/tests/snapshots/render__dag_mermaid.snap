@@ -1,0 +1,10 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out(&[\"dag\", \"simple-pipeline\", \"-f\", \"mermaid\"]).await"
+---
+flowchart LR
+  in(["in"])
+  cat["cat"]
+  out[["out"]]
+  in --> cat
+  cat --> out

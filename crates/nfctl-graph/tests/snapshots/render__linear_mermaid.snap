@@ -1,0 +1,10 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+expression: "render(&linear(), Format::Mermaid, None)"
+---
+flowchart LR
+  in(["in"])
+  cat["cat"]
+  out[["out"]]
+  in --> cat
+  cat --> out

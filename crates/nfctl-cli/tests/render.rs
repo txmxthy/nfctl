@@ -23,6 +23,7 @@ fn ctx() -> Context {
         default_namespace: Namespace::new("demo").unwrap(),
         // 3 days, 4 hours after the epoch the fixtures were created at.
         now: Timestamp::new(OffsetDateTime::UNIX_EPOCH + time::Duration::hours(76)),
+        terminal_width: Some(100),
     }
 }
 
@@ -57,6 +58,19 @@ async fn get_table_and_yaml() {
     insta::assert_snapshot!(
         "get_yaml",
         out(&["get", "simple-pipeline", "-o", "yaml"]).await
+    );
+}
+
+#[tokio::test]
+async fn dag_formats() {
+    insta::assert_snapshot!("dag_ascii", out(&["dag", "simple-pipeline"]).await);
+    insta::assert_snapshot!(
+        "dag_mermaid",
+        out(&["dag", "simple-pipeline", "-f", "mermaid"]).await
+    );
+    insta::assert_snapshot!(
+        "dag_json",
+        out(&["dag", "simple-pipeline", "-o", "json"]).await
     );
 }
 

@@ -1,0 +1,8 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+assertion_line: 143
+expression: "out(&[\"dag\", \"simple-pipeline\"]).await"
+---
+┌────┐     ┌─────┐     ┌─────┐
+│ in │────▶│ cat │────▶│ out │
+└────┘     └─────┘     └─────┘

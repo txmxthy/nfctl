@@ -1,0 +1,16 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+assertion_line: 124
+expression: "render(&complex(), Format::Ascii, None)"
+---
+┌──────────┐                          ┌────────┐
+│ kafka-in │─┐                     ┌─▶│ dlq    │
+└──────────┘ │   ┌────────┐        │  └────────┘     ┌────────────┐     ┌───────────┐
+             ├──▶│ decode │─not ok─┘             ┌──▶│ window-agg │────▶│ warehouse │
+┌──────────┐ │   │        │─ok─────┐  ┌────────┐ │   └────────────┘     └───────────┘
+│ http-in  │─┘   └────────┘        └─▶│ enrich │─┤
+└──────────┘                          └────────┘ │   ┌────────────┐
+                                          │ ▲    └──▶│ alerts     │
+                                          │ │        └────────────┘
+                                          │ │
+                                          └─┘

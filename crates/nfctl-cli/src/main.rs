@@ -41,6 +41,7 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<String> {
         service: PipelineService::new(cluster, Arc::new(NoDaemon)),
         default_namespace: conn.default_namespace,
         now: nfctl_core::model::Timestamp::now(),
+        terminal_width: terminal_size::terminal_size().map(|(w, _)| usize::from(w.0)),
     };
     run(cli, &ctx).await
 }

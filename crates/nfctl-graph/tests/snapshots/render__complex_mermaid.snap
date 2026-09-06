@@ -1,0 +1,21 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+expression: "render(&complex(), Format::Mermaid, None)"
+---
+flowchart LR
+  kafka_in(["kafka-in"])
+  http_in(["http-in"])
+  decode["decode"]
+  enrich["enrich"]
+  window_agg{{"window-agg"}}
+  warehouse[["warehouse"]]
+  alerts[["alerts"]]
+  dlq[["dlq"]]
+  kafka_in --> decode
+  http_in --> decode
+  decode -->|ok| enrich
+  decode -->|not ok| dlq
+  enrich --> enrich
+  enrich --> window_agg
+  enrich -.-> alerts
+  window_agg --> warehouse

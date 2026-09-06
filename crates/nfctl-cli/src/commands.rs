@@ -3,7 +3,7 @@ use nfctl_core::model::{Namespace, PipelineKey, PipelineName, Timestamp};
 use nfctl_core::service::PipelineService;
 use nfctl_core::{Error, Result};
 
-use crate::cli::{Cli, Command, OutputFormat};
+use crate::cli::{Cli, Command, DagFormat, OutputFormat};
 use crate::output;
 
 /// Everything a command needs besides its arguments. Built once in `main`.
@@ -13,6 +13,8 @@ pub struct Context {
     pub default_namespace: Namespace,
     /// Injected so "AGE" columns are deterministic in tests.
     pub now: Timestamp,
+    /// Columns available for ASCII diagrams; `None` when not a terminal.
+    pub terminal_width: Option<usize>,
 }
 
 fn invalid_arg(what: &'static str, value: &str, e: impl std::fmt::Display) -> Error {
@@ -72,9 +74,31 @@ pub async fn run(cli: &Cli, ctx: &Context) -> Result<String> {
                 }
             }
         }
+        Command::Dag {
+            name,
+            format,
+            width,
+        } => {
+            let ns = ctx.namespace(cli)?;
+            let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
+            let p = ctx.service.get(&PipelineKey::new(ns, name)).await?;
+            match fmt {
+                OutputFormat::Json | OutputFormat::Yaml => {
+                    output::serialised(&p.spec.topology, fmt)
+                }
+                OutputFormat::Table | OutputFormat::Wide => {
+                    let format = match format {
+                        DagFormat::Ascii => nfctl_graph::Format::Ascii,
+                        DagFormat::Mermaid => nfctl_graph::Format::Mermaid,
+                        DagFormat::Dot => nfctl_graph::Format::Dot,
+                    };
+                    let width = width.or(ctx.terminal_width);
+                    Ok(nfctl_graph::render(&p.spec.topology, format, width))
+                }
+            }
+        }
         // Handled by `run_offline`; listed so the match stays exhaustive.
         Command::Completions { .. }
-        | Command::Dag { .. }
         | Command::Logs { .. }
         | Command::Top { .. }
         | Command::Status { .. }
