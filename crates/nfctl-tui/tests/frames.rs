@@ -108,3 +108,62 @@ fn crossterm_key(c: char) -> crossterm::event::KeyEvent {
         crossterm::event::KeyModifiers::NONE,
     )
 }
+
+#[tokio::test]
+async fn detail_routes_every_edge() {
+    use nfctl_core::model::{Edge, OnFull, ScaleSpec, Topology, Vertex, VertexKind};
+    let v = |n: &str, k: VertexKind| Vertex {
+        name: VertexName::new(n).unwrap(),
+        kind: k,
+        partitions: 1,
+        scale: ScaleSpec::default(),
+        image: None,
+    };
+    let e = |a: &str, b: &str| Edge {
+        from: VertexName::new(a).unwrap(),
+        to: VertexName::new(b).unwrap(),
+        conditions: None,
+        on_full: OnFull::default(),
+    };
+    let topology = Topology::new(
+        vec![
+            v("src", VertexKind::Source),
+            v("shard", VertexKind::Map),
+            v("hot-0", VertexKind::Map),
+            v("hot-1", VertexKind::Map),
+            v("cold", VertexKind::Map),
+            v("sink-a", VertexKind::Sink),
+            v("sink-b", VertexKind::Sink),
+        ],
+        vec![
+            e("src", "shard"),
+            e("shard", "hot-0"),
+            e("shard", "hot-1"),
+            e("hot-0", "cold"),
+            e("hot-1", "cold"),
+            e("cold", "sink-a"),
+            e("cold", "sink-b"),
+            e("shard", "sink-b"), // skips two columns: routed through a lane
+            e("cold", "shard"),   // back edge (UDF cycle): also a lane
+        ],
+    )
+    .unwrap();
+    let mut fx = fixture();
+    let mut p = fx.pipelines[0].clone();
+    p.key.name = nfctl_core::model::PipelineName::new("routing").unwrap();
+    p.spec.topology = topology;
+    fx.pipelines = vec![p.clone()];
+    let cluster = FakeCluster::from_fixture(&fx);
+    let daemons = FakeDaemons::from_fixture(&fx);
+    let view = pipeline_view(
+        &cluster,
+        &daemons,
+        &p.key,
+        Timestamp::parse_rfc3339("2026-01-01T00:00:10Z").unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut panel = DetailPanel::new(p.key.clone());
+    panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(view)))));
+    insta::assert_snapshot!(frame(&panel, 120, 30));
+}

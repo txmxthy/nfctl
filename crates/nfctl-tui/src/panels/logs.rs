@@ -5,7 +5,7 @@ use nfctl_core::model::{PipelineKey, TaggedLine, VertexName};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::event::{Action, AppEvent};
 use crate::panels::pressed;
@@ -118,15 +118,30 @@ impl Model for LogsPanel {
             frame.render_widget(Paragraph::new(format!("error: {e}")), inner);
             return;
         }
-        let page = usize::from(inner.height.max(1));
-        let start = self
-            .scroll
-            .unwrap_or_else(|| self.lines.len().saturating_sub(page));
+        let width = usize::from(inner.width.max(1));
+        let rows = |l: &TaggedLine| {
+            let n = l.pod.as_str().len() + 1 + l.container.as_str().len() + 1 + l.line.text.len();
+            n.div_ceil(width).max(1)
+        };
+        // Following: as many trailing entries as fit once wrapped. Pinned: from `scroll`.
+        let start = self.scroll.unwrap_or_else(|| {
+            let mut budget = usize::from(inner.height);
+            let mut start = self.lines.len();
+            for l in self.lines.iter().rev() {
+                let h = rows(l);
+                if h > budget {
+                    break;
+                }
+                budget -= h;
+                start -= 1;
+            }
+            start
+        });
         let text: Vec<Line> = self
             .lines
             .iter()
             .skip(start)
-            .take(page)
+            .take(usize::from(inner.height))
             .map(|l| {
                 Line::from(vec![
                     Span::styled(format!("{}/{} ", l.pod, l.container), style::key()),
@@ -134,6 +149,6 @@ impl Model for LogsPanel {
                 ])
             })
             .collect();
-        frame.render_widget(Paragraph::new(text), inner);
+        frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), inner);
     }
 }

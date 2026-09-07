@@ -19,5 +19,6 @@ All notable changes to this project are documented here. Format follows
 - `nfctl mvtx ls|get|status|logs|pause|resume`: MonoVertex support, including its daemon (metrics and health) and its pause/resume semantics.
 - `nfctl map`: the whole command surface as one tree (or JSON), for pruning.
 - Lists span all namespaces unless `-n` is given, and single-resource commands resolve a bare name across namespaces (error if ambiguous). Fits a namespace-per-pipeline layout.
+- TUI: every edge is drawn (fan-out, fan-in, column-skipping and back edges); tables size columns to their content; log lines wrap.
 - `--fixture FILE`: run any command, including the TUI, against in-memory fakes loaded from a YAML/JSON fixture. Golden-frame tests and cluster-free recordings use the same file.
 - Demo: `just demo-up/down`, synthetic example pipelines under `examples/`, vhs tapes and recordings under `docs/demo/`.

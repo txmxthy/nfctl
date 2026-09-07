@@ -15,6 +15,7 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 tokio = { workspace = true, features = ["sync", "time", "rt"] }
 futures.workspace = true
 tracing.workspace = true
+unicode-width = "0.2"
 
 [dev-dependencies]
 nfctl-core = { workspace = true, features = ["fake"] }

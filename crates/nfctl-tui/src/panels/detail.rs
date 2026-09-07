@@ -106,9 +106,7 @@ impl Model for DetailPanel {
             return;
         };
         let p = &v.pipeline;
-        let ranks = p.spec.topology.ranks();
-        let tallest = ranks.iter().map(Vec::len).max().unwrap_or(1);
-        let cards_h = u16::try_from(tallest).unwrap_or(1) * cards::CARD_HEIGHT;
+        let cards_h = cards::Plan::new(&p.spec.topology, inner.width).height();
         let [head, dag, edges, warn] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Length(cards_h),
@@ -165,43 +163,41 @@ impl Model for DetailPanel {
 }
 
 fn edge_table(v: &PipelineView) -> Table<'_> {
-    let rows = v.edges.iter().map(|e| {
-        let usage = e
-            .usage()
-            .map_or_else(|| "-".to_owned(), |u| format!("{:.0}%", u * 100.0));
-        let wm = e.watermark.as_ref().map_or_else(
-            || "-".to_owned(),
-            |w| {
-                w.per_partition
-                    .iter()
-                    .flatten()
-                    .max()
-                    .and_then(|ts| ts.elapsed_until(v.at))
-                    .map_or_else(|| "-".to_owned(), |d| format!("{}s ago", d.as_secs()))
-            },
-        );
-        Row::new(vec![
-            format!("{} -> {}", e.from, e.to),
-            e.pending()
-                .map_or_else(|| "-".to_owned(), |n| n.to_string()),
-            usage,
-            if e.is_full() {
-                "FULL".to_owned()
-            } else {
-                String::new()
-            },
-            wm,
-        ])
-    });
-    Table::new(
-        rows,
-        [
-            Constraint::Length(30),
-            Constraint::Length(10),
-            Constraint::Length(8),
-            Constraint::Length(6),
-            Constraint::Min(8),
-        ],
-    )
-    .header(Row::new(["EDGE", "PENDING", "USAGE", "", "WATERMARK"]).style(style::title()))
+    const HEADER: [&str; 5] = ["EDGE", "PENDING", "USAGE", "", "WATERMARK"];
+    let cells: Vec<Vec<String>> = v
+        .edges
+        .iter()
+        .map(|e| {
+            let usage = e
+                .usage()
+                .map_or_else(|| "-".to_owned(), |u| format!("{:.0}%", u * 100.0));
+            let wm = e.watermark.as_ref().map_or_else(
+                || "-".to_owned(),
+                |w| {
+                    w.per_partition
+                        .iter()
+                        .flatten()
+                        .max()
+                        .and_then(|ts| ts.elapsed_until(v.at))
+                        .map_or_else(|| "-".to_owned(), |d| format!("{}s ago", d.as_secs()))
+                },
+            );
+            vec![
+                format!("{} -> {}", e.from, e.to),
+                e.pending()
+                    .map_or_else(|| "-".to_owned(), |n| n.to_string()),
+                usage,
+                if e.is_full() {
+                    "FULL".to_owned()
+                } else {
+                    String::new()
+                },
+                wm,
+            ]
+        })
+        .collect();
+    let widths = crate::table::fit(&HEADER, &cells);
+    Table::new(cells.into_iter().map(Row::new), widths)
+        .column_spacing(2)
+        .header(Row::new(HEADER).style(style::title()))
 }

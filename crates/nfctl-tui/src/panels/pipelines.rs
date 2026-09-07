@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 use nfctl_core::model::{Namespace, Pipeline};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Row, Table, TableState};
 
@@ -18,6 +18,15 @@ pub struct PipelinesPanel {
     error: Option<String>,
     loading: bool,
 }
+
+const HEADER: [&str; 6] = [
+    "NAMESPACE",
+    "NAME",
+    "PHASE",
+    "VERTICES",
+    "DESIRED",
+    "MESSAGE",
+];
 
 impl PipelinesPanel {
     pub fn new(ns: Option<Namespace>) -> Self {
@@ -119,39 +128,38 @@ impl Model for PipelinesPanel {
             );
             return;
         }
-        let header = Row::new([
-            "NAMESPACE",
-            "NAME",
-            "PHASE",
-            "VERTICES",
-            "DESIRED",
-            "MESSAGE",
-        ])
-        .style(style::title());
-        let rows = self.items.iter().map(|p| {
+        let header = Row::new(HEADER).style(style::title());
+        let cells: Vec<Vec<String>> = self
+            .items
+            .iter()
+            .map(|p| {
+                vec![
+                    p.key.namespace.to_string(),
+                    p.key.name.to_string(),
+                    p.status.phase.as_str().to_owned(),
+                    p.status.counts.total.to_string(),
+                    p.spec.lifecycle.desired.as_str().to_owned(),
+                    p.status.message.clone().unwrap_or_default(),
+                ]
+            })
+            .collect();
+        let widths = crate::table::fit(&HEADER, &cells);
+        let rows = self.items.iter().zip(cells).map(|(p, c)| {
+            let mut c = c.into_iter();
             Row::new(vec![
-                Line::raw(p.key.namespace.to_string()),
-                Line::raw(p.key.name.to_string()),
-                Line::styled(p.status.phase.as_str(), style::phase(p.status.phase)),
-                Line::raw(p.status.counts.total.to_string()),
-                Line::raw(p.spec.lifecycle.desired.as_str()),
-                Line::styled(p.status.message.clone().unwrap_or_default(), style::dim()),
+                Line::raw(c.next().unwrap_or_default()),
+                Line::raw(c.next().unwrap_or_default()),
+                Line::styled(c.next().unwrap_or_default(), style::phase(p.status.phase)),
+                Line::raw(c.next().unwrap_or_default()),
+                Line::raw(c.next().unwrap_or_default()),
+                Line::styled(c.next().unwrap_or_default(), style::dim()),
             ])
         });
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(14),
-                Constraint::Length(28),
-                Constraint::Length(9),
-                Constraint::Length(9),
-                Constraint::Length(8),
-                Constraint::Min(10),
-            ],
-        )
-        .header(header)
-        .block(block)
-        .row_highlight_style(style::selected());
+        let table = Table::new(rows, widths)
+            .column_spacing(2)
+            .header(header)
+            .block(block)
+            .row_highlight_style(style::selected());
         let mut state = self.state;
         frame.render_stateful_widget(table, area, &mut state);
     }

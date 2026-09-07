@@ -10,6 +10,7 @@ mod cards;
 mod event;
 pub mod panels;
 mod style;
+mod table;
 mod worker;
 
 pub use app::run;
