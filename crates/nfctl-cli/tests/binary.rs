@@ -21,7 +21,38 @@ fn completions_do_not_need_a_cluster() {
         .args(["completions", "fish"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("complete -c nfctl"));
+        .stdout(predicates::str::contains("COMPLETE=fish nfctl"));
+}
+
+/// The shell calls back with the line after `--`; names come from the fixture.
+#[test]
+fn dynamic_completion_offers_fixture_resources() {
+    let complete = |args: &[&str]| -> String {
+        let out = Command::cargo_bin("nfctl")
+            .unwrap()
+            .env("COMPLETE", "fish")
+            .env("NFCTL_FIXTURE", "../../examples/fixtures/demo.yaml")
+            .arg("--")
+            .args(args)
+            .assert()
+            .success();
+        // An empty current token also lists flags; only names matter here.
+        String::from_utf8_lossy(&out.get_output().stdout)
+            .lines()
+            .filter(|l| !l.starts_with('-'))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        complete(&["nfctl", "get", "f"]).trim(),
+        "fanout\tRunning · default"
+    );
+    let vertices = complete(&["nfctl", "logs", "fanout", "e"]);
+    assert_eq!(vertices.trim(), "even-or-odd\neven-sink");
+    assert!(complete(&["nfctl", "mvtx", "get", ""]).starts_with("mono\t"));
+    assert!(complete(&["nfctl", "isb", "inspect", ""]).starts_with("default\t"));
+    // A namespace on the line narrows the candidates.
+    assert_eq!(complete(&["nfctl", "-n", "nowhere", "get", ""]).trim(), "");
 }
 
 #[test]

@@ -1,6 +1,9 @@
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap_complete::engine::ArgValueCompleter;
+
+use crate::complete;
 
 /// Operate Numaflow pipelines from the terminal.
 #[derive(Debug, Parser)]
@@ -15,7 +18,7 @@ pub struct Cli {
 #[derive(Debug, Clone, Args)]
 pub struct Globals {
     /// Namespace. Without it, lists span every namespace and a bare name resolves across them
-    #[arg(short, long, global = true, env = "NFCTL_NAMESPACE")]
+    #[arg(short, long, global = true, env = "NFCTL_NAMESPACE", add = ArgValueCompleter::new(complete::namespaces))]
     pub namespace: Option<String>,
 
     /// All namespaces (already the default without -n; kept for muscle memory)
@@ -71,12 +74,14 @@ pub enum Command {
     /// Show one pipeline
     Get {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
     },
 
     /// Render a pipeline's topology
     Dag {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// Diagram format (`-o json|yaml` prints the topology model instead)
         #[arg(short, long, default_value = "ascii", value_enum)]
@@ -92,8 +97,10 @@ pub enum Command {
     /// Logs from every pod of a pipeline (or one vertex), tagged by pod and container
     Logs {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// Restrict to one vertex
+        #[arg(add = ArgValueCompleter::new(complete::vertices))]
         vertex: Option<String>,
         /// Container(s) to read; default is `numa` plus the pod's default container
         #[arg(short, long = "container", value_name = "NAME")]
@@ -118,6 +125,7 @@ pub enum Command {
     /// Phase, health, rates, pending and buffer usage, refreshed live
     Top {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// Refresh interval in seconds
         #[arg(short, long, default_value_t = 2, value_name = "SECS")]
@@ -130,6 +138,7 @@ pub enum Command {
     /// Phase, health, rates, pending and buffer usage, once
     Status {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
     },
 
@@ -142,6 +151,7 @@ pub enum Command {
     /// Pause a pipeline: sources stop, buffers drain, pods scale to zero
     Pause {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// Block until the phase is Paused and report whether buffers drained
         #[arg(short, long)]
@@ -157,6 +167,7 @@ pub enum Command {
     /// Resume a paused pipeline
     Resume {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// `fast` restores the replica counts from before the pause; `slow` starts at the minimum
         #[arg(short, long, default_value = "fast", value_enum)]
@@ -169,8 +180,10 @@ pub enum Command {
     /// Restart one vertex (delete its pods) or a whole pipeline (pause, drain, resume)
     Recycle {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// Restrict to one vertex
+        #[arg(add = ArgValueCompleter::new(complete::vertices))]
         vertex: Option<String>,
         /// Give up waiting for the pause after this many seconds
         #[arg(long, default_value_t = 120, value_name = "SECS")]
@@ -183,6 +196,7 @@ pub enum Command {
     /// Block until a pipeline reaches a phase
     Wait {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// Phase to wait for
         #[arg(short, long, value_enum)]
@@ -208,8 +222,10 @@ pub enum Command {
     /// Set a vertex's replica count
     Scale {
         /// Pipeline name
+        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
         name: String,
         /// Vertex name
+        #[arg(add = ArgValueCompleter::new(complete::vertices))]
         vertex: String,
         /// Replica count
         replicas: u32,
@@ -267,11 +283,20 @@ pub enum MvtxCommand {
     #[command(alias = "list", about = "List MonoVertices")]
     Ls,
     #[command(about = "Show one MonoVertex")]
-    Get { name: String },
+    Get {
+        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
+        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
+        name: String,
+    },
     #[command(about = "Phase, health, rate and pending from the MonoVertex daemon")]
-    Status { name: String },
+    Status {
+        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
+        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
+        name: String,
+    },
     #[command(about = "Logs from the MonoVertex pods")]
     Logs {
+        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
         name: String,
         /// Keep following
         #[arg(short, long)]
@@ -285,12 +310,14 @@ pub enum MvtxCommand {
     },
     /// Pause: set desired phase Paused
     Pause {
+        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
         name: String,
         #[arg(long)]
         dry_run: bool,
     },
     /// Resume: set desired phase Running and hand replicas back to the autoscaler
     Resume {
+        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
         name: String,
         #[arg(long)]
         dry_run: bool,
@@ -302,7 +329,10 @@ pub enum IsbCommand {
     /// List ISB services
     Ls,
     /// Inspect one ISB service
-    Inspect { name: String },
+    Inspect {
+        #[arg(add = ArgValueCompleter::new(complete::isbs))]
+        name: String,
+    },
 }
 
 impl Command {

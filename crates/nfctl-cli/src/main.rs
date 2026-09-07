@@ -5,16 +5,30 @@ use std::io::Write as _;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{CommandFactory as _, Parser};
 use futures::StreamExt;
 use nfctl_cli::{Cli, Context, Output, run, run_offline};
 use nfctl_core::ports::DaemonConnector;
 use nfctl_core::service::PipelineService;
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
+    // Shell completion requests are answered here and exit; nothing may have
+    // written to stdout yet. Runs outside the async runtime because a
+    // completer that queries the cluster builds its own.
+    clap_complete::CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
-    match execute(&cli).await {
+    let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    else {
+        eprintln!("nfctl: cannot start the async runtime");
+        return ExitCode::FAILURE;
+    };
+    rt.block_on(async_main(&cli))
+}
+
+async fn async_main(cli: &Cli) -> ExitCode {
+    match execute(cli).await {
         Ok(Output::Text(out)) => {
             let mut stdout = std::io::stdout().lock();
             // A closed pipe (`| head`) is not an error worth reporting.

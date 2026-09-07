@@ -29,7 +29,7 @@ nfctl scale <pipeline> <vertex> <n>
 nfctl apply -f spec.yaml [--check]        refuses changes that need delete-and-recreate
 nfctl mvtx ls|get|status|logs|pause|resume  MonoVertex equivalents
 nfctl tui                                 the same, interactive
-nfctl completions <shell>
+nfctl completions <shell>                 tab-completes resource names from the cluster
 nfctl map                                 every command and option as one tree
 ```
 
@@ -101,6 +101,22 @@ cargo install --path crates/nfctl-cli
 ```
 
 Prebuilt binaries and a Homebrew tap are on the roadmap.
+
+Shell completion is dynamic: it completes pipeline, vertex, MonoVertex, ISB and
+namespace names from the cluster you are pointed at (or from `--fixture`), with a
+30-second cache so repeated Tabs are instant. Register it in your shell's startup
+file, once per shell start:
+
+```
+nfctl completions fish | source                        # fish
+source <(nfctl completions bash)                       # bash
+source <(nfctl completions zsh)                        # zsh
+nfctl completions elvish | eval                        # elvish
+nfctl completions powershell | Out-String | Invoke-Expression   # powershell
+```
+
+The snippet calls `nfctl` on each Tab; a cluster that does not answer within
+1.5 s completes from the last cache, or nothing.
 
 ## Demo
 

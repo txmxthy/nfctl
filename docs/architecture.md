@@ -64,3 +64,14 @@ a palette index to a hue.
 
 The box-drawing `dag` output is drawn by orthodag (ADR 0004), whose styled spans
 say which flow painted each cell, so the CLI can colour it.
+
+## Completions
+
+`nfctl` completes its own resource names. The shell snippet from
+`nfctl completions <shell>` calls the binary back with `COMPLETE=<shell>` and the
+line so far; `main` answers that before anything else runs. Each positional has
+a completer in `crates/nfctl-cli/src/complete.rs` that reads the line
+(`--context`, `-n`, `--fixture`, the pipeline already typed) and asks a catalog
+built from the fixture, a cache under `$XDG_CACHE_HOME/nfctl` younger than 30 s,
+or one cluster round-trip bounded to 1.5 s. A completer cannot report errors, so
+every failure degrades to the stale cache or an empty list.

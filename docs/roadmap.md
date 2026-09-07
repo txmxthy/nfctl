@@ -18,7 +18,7 @@
 | corpus tests + benches (private seed) | done | M9 |
 | `tui`: shard collapse (`x`), edge bundling, tag colours, badges, scroll | done | M10 |
 | `dag --expand-shards`, coloured `dag -f ascii` | done | M10 |
-| `completions` from live resources (dynamic) | planned | M11 |
+| `completions` from live resources (dynamic) | done | M11 |
 | ServingPipeline | planned | later |
 
 Statuses: `done` · `wip` · `stub` (command exists, exits 4 with this pointer) · `planned`.

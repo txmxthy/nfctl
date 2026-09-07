@@ -170,11 +170,10 @@ pub fn run_offline(cli: &Cli) -> Option<Result<String>> {
                 OutputFormat::Table | OutputFormat::Wide => Ok(crate::map::render(&node)),
             })
         }
-        Command::Completions { shell } => {
-            let mut buf = Vec::new();
-            clap_complete::generate(*shell, &mut Cli::command(), "nfctl", &mut buf);
-            Some(Ok(String::from_utf8_lossy(&buf).into_owned()))
-        }
+        Command::Completions { shell } => Some(
+            crate::complete::registration(*shell)
+                .ok_or_else(|| Error::Usage(format!("no dynamic completion for {shell}"))),
+        ),
         _ => None,
     }
 }

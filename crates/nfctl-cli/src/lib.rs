@@ -3,6 +3,7 @@
 
 mod cli;
 mod commands;
+pub mod complete;
 pub mod map;
 mod output;
 
