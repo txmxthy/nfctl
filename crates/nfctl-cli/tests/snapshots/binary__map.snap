@@ -1,0 +1,86 @@
+---
+source: crates/nfctl-cli/tests/binary.rs
+expression: text
+---
+nfctl
+├── -n/--namespace  NAMESPACE  — Namespace (defaults to the kubeconfig context's namespace)  (global)
+├── -A/--all-namespaces  — All namespaces  (global)
+├── --context  CONTEXT  — kubeconfig context  (global)
+├── --request-timeout  SECS  = 20  — Per-request timeout in seconds  (global)
+├── -o/--output  OUTPUT [table|wide|json|yaml]  = table  — Output format  (global)
+├── --daemon-url  URL  — Talk to the pipeline daemon at this URL instead of port-forwarding  (global)
+├── ls  List pipelines
+├── get  Show one pipeline
+│   └── name  NAME  — Pipeline name
+├── dag  Render a pipeline's topology
+│   ├── name  NAME  — Pipeline name
+│   ├── -f/--format  FORMAT [ascii|mermaid|dot]  = ascii  — Diagram format (`-o json|yaml` prints the topology model instead)
+│   └── -w/--width  COLS  — Fit the ASCII render to this many columns (default: terminal width)
+├── logs  Logs from every pod of a pipeline (or one vertex), tagged by pod and container
+│   ├── name  NAME  — Pipeline name
+│   ├── vertex  VERTEX  — Restrict to one vertex
+│   ├── -c/--container  NAME  — Container(s) to read; default is `numa` plus the pod's default container
+│   ├── --all-containers  — Every non-init container
+│   ├── -f/--follow  — Keep following; new pods are picked up and restarts resumed
+│   ├── --since  DURATION  — Only lines newer than this, e.g. `10m`, `2h`
+│   ├── --tail  N  — Last N lines of each container's backlog
+│   └── --timestamps  — Prefix each line with its timestamp
+├── top  Phase, health, rates, pending and buffer usage, refreshed live
+│   ├── name  NAME  — Pipeline name
+│   ├── -i/--interval  SECS  = 2  — Refresh interval in seconds
+│   └── --once  — Render once and exit
+├── status  Phase, health, rates, pending and buffer usage, once
+│   └── name  NAME  — Pipeline name
+├── isb  Inter-step buffer services
+│   ├── ls  List ISB services
+│   └── inspect  Inspect one ISB service
+│       └── name  NAME
+├── pause  Pause a pipeline: sources stop, buffers drain, pods scale to zero
+│   ├── name  NAME  — Pipeline name
+│   ├── -w/--wait  — Block until the phase is Paused and report whether buffers drained
+│   ├── --timeout  SECS  = 120  — Give up waiting after this many seconds
+│   └── --dry-run  — Validate on the server without changing anything
+├── resume  Resume a paused pipeline
+│   ├── name  NAME  — Pipeline name
+│   ├── -s/--strategy  STRATEGY [fast|slow]  = fast  — `fast` restores the replica counts from before the pause; `slow` starts at the minimum
+│   └── --dry-run  — Validate on the server without changing anything
+├── recycle  Restart one vertex (delete its pods) or a whole pipeline (pause, drain, resume)
+│   ├── name  NAME  — Pipeline name
+│   ├── vertex  VERTEX  — Restrict to one vertex
+│   ├── --timeout  SECS  = 120  — Give up waiting for the pause after this many seconds
+│   └── --dry-run  — Show what would happen without changing anything
+├── wait  Block until a pipeline reaches a phase
+│   ├── name  NAME  — Pipeline name
+│   ├── -p/--phase  PHASE [running|paused|pausing|failed]  — Phase to wait for
+│   └── --timeout  SECS  = 300  — Give up after this many seconds
+├── apply  Apply a Pipeline manifest, refusing changes that need delete-and-recreate
+│   ├── -f/--file  FILE  — Manifest file (`-` for stdin)
+│   ├── --check  — Report what would change and exit 3 on a blocking change, without applying
+│   └── --dry-run  — Server-side dry run (still runs the checks)
+├── scale  Set a vertex's replica count
+│   ├── name  NAME  — Pipeline name
+│   ├── vertex  VERTEX  — Vertex name
+│   ├── replicas  REPLICAS  — Replica count
+│   └── --dry-run  — Validate on the server without changing anything
+├── mvtx  MonoVertex operations
+│   ├── ls  List MonoVertices
+│   ├── get  Show one MonoVertex
+│   │   └── name  NAME
+│   ├── status  Phase, health, rate and pending from the MonoVertex daemon
+│   │   └── name  NAME
+│   ├── logs  Logs from the MonoVertex pods
+│   │   ├── name  NAME
+│   │   ├── -f/--follow  — Keep following
+│   │   ├── --all-containers  — Every non-init container (default: `numa` plus the pod's default container)
+│   │   └── --tail  N  — Last N lines of each container's backlog
+│   ├── pause  Pause: set desired phase Paused
+│   │   ├── name  NAME
+│   │   └── --dry-run
+│   └── resume  Resume: set desired phase Running and hand replicas back to the autoscaler
+│       ├── name  NAME
+│       └── --dry-run
+├── tui  Interactive terminal UI
+│   └── -i/--interval  SECS  = 2  — Refresh interval in seconds
+├── map  Every command and option in one tree: the whole surface, for pruning
+└── completions  Generate shell completions
+    └── shell  SHELL [bash|elvish|fish|powershell|zsh]

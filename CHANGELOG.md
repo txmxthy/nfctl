@@ -17,4 +17,5 @@ All notable changes to this project are documented here. Format follows
 - `nfctl apply`: server-side apply with `--check`, which refuses immutable changes (ISB, instance, vertex type, reduce partitions) and warns on topology or image changes that risk in-flight data.
 - `nfctl tui`: pipelines list, pipeline detail with vertex cards laid out by rank and live rates/pending, and a following log view. One worker task owns all I/O; panels are message-driven.
 - `nfctl mvtx ls|get|status|logs|pause|resume`: MonoVertex support, including its daemon (metrics and health) and its pause/resume semantics.
+- `nfctl map`: the whole command surface as one tree (or JSON), for pruning.
 - Demo: `just demo-up/down`, synthetic example pipelines under `examples/`, vhs tapes and recordings under `docs/demo/`.

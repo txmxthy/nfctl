@@ -91,6 +91,15 @@ pub fn run_offline(cli: &Cli) -> Option<Result<String>> {
         return Some(Err(Error::Unimplemented(name)));
     }
     match &cli.command {
+        Command::Map => {
+            let node = crate::map::describe(&Cli::command());
+            Some(match cli.globals.output {
+                OutputFormat::Json | OutputFormat::Yaml => {
+                    output::serialised(&node, cli.globals.output)
+                }
+                OutputFormat::Table | OutputFormat::Wide => Ok(crate::map::render(&node)),
+            })
+        }
         Command::Completions { shell } => {
             let mut buf = Vec::new();
             clap_complete::generate(*shell, &mut Cli::command(), "nfctl", &mut buf);
@@ -240,6 +249,7 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
         | Command::Logs { .. }
         | Command::Top { .. }
         | Command::Tui { .. }
+        | Command::Map
         | Command::Mvtx { .. } => unreachable!("handled before run_text"),
     }
 }

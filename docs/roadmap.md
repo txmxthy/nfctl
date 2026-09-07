@@ -4,6 +4,7 @@
 |---|---|---|
 | `ls`, `get` | done | M1 |
 | `completions` | done | M1 |
+| `map` | done | — |
 | `dag` | done | M2 |
 | `logs` | done | M3 |
 | `top`, `status` | done | M4 |

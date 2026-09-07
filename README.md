@@ -30,6 +30,7 @@ nfctl apply -f spec.yaml [--check]        refuses changes that need delete-and-r
 nfctl mvtx ls|get|status|logs|pause|resume  MonoVertex equivalents
 nfctl tui                                 the same, interactive
 nfctl completions <shell>
+nfctl map                                 every command and option as one tree
 ```
 
 Global flags: `-n/--namespace`, `-A`, `--context`, `--request-timeout`, `-o`,

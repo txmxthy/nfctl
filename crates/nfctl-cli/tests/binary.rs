@@ -25,6 +25,23 @@ fn completions_do_not_need_a_cluster() {
 }
 
 #[test]
+fn map_prints_the_whole_surface_offline() {
+    let out = Command::cargo_bin("nfctl")
+        .unwrap()
+        .arg("map")
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    insta::assert_snapshot!("map", text);
+    Command::cargo_bin("nfctl")
+        .unwrap()
+        .args(["map", "-o", "json"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("\"children\""));
+}
+
+#[test]
 fn help_lists_every_command() {
     let out = Command::cargo_bin("nfctl")
         .unwrap()
@@ -33,6 +50,7 @@ fn help_lists_every_command() {
         .success();
     let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
     for cmd in [
+        "map",
         "ls",
         "get",
         "dag",

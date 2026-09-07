@@ -3,6 +3,7 @@
 
 mod cli;
 mod commands;
+pub mod map;
 mod output;
 
 pub use cli::{Cli, Command, Globals, OutputFormat};

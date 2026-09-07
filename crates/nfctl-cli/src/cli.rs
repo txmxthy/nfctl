@@ -207,7 +207,7 @@ pub enum Command {
         dry_run: bool,
     },
 
-    /// `MonoVertex` operations
+    #[command(about = "MonoVertex operations")]
     Mvtx {
         #[command(subcommand)]
         command: MvtxCommand,
@@ -219,6 +219,9 @@ pub enum Command {
         #[arg(short, long, default_value_t = 2, value_name = "SECS")]
         interval: u64,
     },
+
+    /// Every command and option in one tree: the whole surface, for pruning
+    Map,
 
     /// Generate shell completions
     Completions {
@@ -254,9 +257,9 @@ pub enum MvtxCommand {
     Ls,
     #[command(about = "Show one MonoVertex")]
     Get { name: String },
-    /// Phase, health, rate and pending from the `MonoVertex` daemon
+    #[command(about = "Phase, health, rate and pending from the MonoVertex daemon")]
     Status { name: String },
-    /// Logs from the `MonoVertex` pods
+    #[command(about = "Logs from the MonoVertex pods")]
     Logs {
         name: String,
         /// Keep following
