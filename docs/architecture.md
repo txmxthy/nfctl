@@ -3,7 +3,7 @@
 ```mermaid
 flowchart LR
     cli[nfctl-cli] --> core[nfctl-core]
-    tui[nfctl-tui\n(later)] --> core
+    tui[nfctl-tui] --> core
     cli --> graph[nfctl-graph]
     graph --> core
     k8s[nfctl-k8s] --> core
