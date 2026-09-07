@@ -1,0 +1,17 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+assertion_line: 168
+expression: "render_with(&sharded(), Format::Mermaid, collapsed)"
+---
+flowchart LR
+  in(["in"])
+  router["router"]
+  worker_x2["worker ×2"]
+  merge["merge"]
+  out[["out"]]
+  audit[["audit"]]
+  in --> router
+  router -->|shard-*| worker_x2
+  worker_x2 --> merge
+  merge --> out
+  router -->|audit| audit

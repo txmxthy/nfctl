@@ -1,0 +1,12 @@
+---
+source: crates/nfctl-graph/tests/render.rs
+assertion_line: 172
+expression: "render_with(&sharded(), Format::Ascii, collapsed)"
+---
+                                 ┌───────────┐     ┌───────┐     ┌─────┐
+                              ┌─▶│ worker ×2 │────▶│ merge │────▶│ out │
+┌────┐     ┌────────┐         │  └───────────┘     └───────┘     └─────┘
+│ in │────▶│ router │─shard-*─┘
+└────┘     │        │─audit───┐  ┌───────────┐
+           └────────┘         └─▶│ audit     │
+                                 └───────────┘

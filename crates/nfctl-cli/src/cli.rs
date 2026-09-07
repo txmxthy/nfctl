@@ -38,6 +38,10 @@ pub struct Globals {
     #[arg(long, global = true, env = "NFCTL_DAEMON_URL", value_name = "URL")]
     pub daemon_url: Option<String>,
 
+    /// Disable colour (also honours the `NO_COLOR` environment variable)
+    #[arg(long, global = true)]
+    pub no_color: bool,
+
     /// Answer from this fixture file instead of a cluster (demos, tests, screenshots)
     #[arg(long, global = true, env = "NFCTL_FIXTURE", value_name = "FILE", conflicts_with_all = ["context", "daemon_url"])]
     pub fixture: Option<String>,
@@ -80,6 +84,9 @@ pub enum Command {
         /// Fit the ASCII render to this many columns (default: terminal width)
         #[arg(short, long, value_name = "COLS")]
         width: Option<usize>,
+        /// Draw every shard (`name-0`, `name-1`, ...) instead of one `name ×N` node
+        #[arg(long)]
+        expand_shards: bool,
     },
 
     /// Logs from every pod of a pipeline (or one vertex), tagged by pod and container

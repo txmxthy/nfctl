@@ -133,3 +133,88 @@ fn ascii_fits_width() {
     assert!(max(&narrow) <= 72, "narrow render is {} cols", max(&narrow));
     insta::assert_snapshot!("complex_ascii_narrow", narrow);
 }
+
+fn sharded() -> Topology {
+    Topology::new(
+        vec![
+            v("in", VertexKind::Source),
+            v("router", VertexKind::Map),
+            v("worker-0", VertexKind::Map),
+            v("worker-1", VertexKind::Map),
+            v("merge", VertexKind::Map),
+            v("out", VertexKind::Sink),
+            v("audit", VertexKind::Sink),
+        ],
+        vec![
+            e("in", "router"),
+            tagged("router", "worker-0", TagOperator::Or, &["shard-0"]),
+            tagged("router", "worker-1", TagOperator::Or, &["shard-1"]),
+            e("worker-0", "merge"),
+            e("worker-1", "merge"),
+            e("merge", "out"),
+            tagged("router", "audit", TagOperator::Or, &["audit"]),
+        ],
+    )
+    .unwrap()
+}
+
+#[test]
+fn shards_collapse_unless_expanded() {
+    use nfctl_graph::{RenderOptions, render_with};
+    let collapsed = RenderOptions {
+        collapse_shards: true,
+        ..RenderOptions::default()
+    };
+    insta::assert_snapshot!(
+        "sharded_mermaid_collapsed",
+        render_with(&sharded(), Format::Mermaid, collapsed)
+    );
+    insta::assert_snapshot!(
+        "sharded_ascii_collapsed",
+        render_with(&sharded(), Format::Ascii, collapsed)
+    );
+    let expanded = render_with(&sharded(), Format::Ascii, RenderOptions::default());
+    assert_eq!(expanded, render(&sharded(), Format::Ascii, None));
+    assert!(expanded.contains("worker-1") && !expanded.contains("×2"));
+}
+
+/// Colour adds SGR sequences around edge runs and nothing else.
+#[test]
+fn ascii_colour_is_only_escapes() {
+    use nfctl_graph::{RenderOptions, render_with};
+    let opts = RenderOptions {
+        colour: true,
+        collapse_shards: true,
+        ..RenderOptions::default()
+    };
+    let coloured = render_with(&sharded(), Format::Ascii, opts);
+    let plain = render_with(
+        &sharded(),
+        Format::Ascii,
+        RenderOptions {
+            colour: false,
+            ..opts
+        },
+    );
+    let stripped: String = {
+        let mut out = String::new();
+        let mut chars = coloured.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                for c in chars.by_ref() {
+                    if c == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+    let trim = |s: &str| s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+    assert_eq!(trim(&stripped), trim(&plain));
+    // Two tag combinations, two hues; untagged edges are dim.
+    assert!(coloured.contains("\x1b[36m") && coloured.contains("\x1b[35m"));
+    assert!(coloured.contains("\x1b[2m"));
+}

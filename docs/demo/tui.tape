@@ -2,8 +2,8 @@
 Output docs/demo/tui.gif
 Set Shell fish
 Set FontSize 14
-Set Width 1100
-Set Height 600
+Set Width 1200
+Set Height 640
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
 Env NFCTL_FIXTURE examples/fixtures/demo.yaml
@@ -23,6 +23,20 @@ Sleep 2s
 Screenshot docs/demo/tui-logs.png
 Sleep 1s
 Escape
+Sleep 500ms
+Escape
+Sleep 500ms
+Type "jjjj"
+Sleep 500ms
+Enter
+Sleep 2s
+Screenshot docs/demo/tui-sharded.png
+Sleep 1s
+Type "x"
+Sleep 1s
+Screenshot docs/demo/tui-sharded-expanded.png
+Sleep 1s
+Type "x"
 Sleep 500ms
 Escape
 Sleep 500ms

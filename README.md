@@ -16,7 +16,7 @@ every mutating one.
 ```
 nfctl ls                                  pipelines in a namespace (-A for all)
 nfctl get <pipeline> [-o wide|json|yaml]
-nfctl dag <pipeline> [-f ascii|mermaid|dot]
+nfctl dag <pipeline> [-f ascii|mermaid|dot] [--expand-shards]
 nfctl logs <pipeline> [vertex] [-f] [-c container] [--since 10m] [--tail N]
 nfctl status <pipeline>                   phase + health + rates + pending + buffer usage
 nfctl top <pipeline> [-i 2]               the same, refreshing
@@ -34,7 +34,8 @@ nfctl map                                 every command and option as one tree
 ```
 
 Global flags: `-n/--namespace`, `--context`, `--request-timeout`, `-o`, `--daemon-url`
-(skip the port-forward when running in-cluster), `--fixture` (no cluster at all).
+(skip the port-forward when running in-cluster), `--fixture` (no cluster at all),
+`--no-color` (`NO_COLOR` in the environment does the same).
 
 Without `-n`, lists span every namespace and a bare pipeline name resolves to the
 namespace it lives in; the tool refuses only when the same name exists in several.
@@ -53,6 +54,25 @@ namespace it lives in; the tool refuses only when the same name exists in severa
                                              │  ┌───────────┐
                                              └─▶│ all-sink  │
                                                 └───────────┘
+```
+
+Shards (`worker-0`, `worker-1`, ... with the same neighbours) draw as one
+`worker ×N` node unless `--expand-shards`. On a terminal, edges that carry tag
+conditions are coloured by tag combination: every edge with the same set of tags
+shares a hue, untagged edges are dim. The TUI does the same, and adds the tags
+as a badge row on the card they arrive at:
+
+```
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│in  source     │────▶│router  map    │──┬─▶│worker ×3  map │────▶│merge  map     │────▶│out  sink      │
+│900.0/s pend 12│     │900.0/s pend 12│  │  │900.0/s pend 36│     │900.0/s pend 12│     │900.0/s pend 12│
+└───────────────┘     └───────────────┘  │  │shard-*        │     └───────────────┘     └───────────────┘
+                                         │  └───────────────┘
+                                         │  ┌───────────────┐
+                                         └─▶│audit  sink    │
+                                            │45.0/s pend 12 │
+                                            │audit          │
+                                            └───────────────┘
 ```
 
 ### `status`
@@ -96,7 +116,8 @@ stills used to review layout, so what is tested is what is shown.
 | | |
 |---|---|
 | ![pipelines](docs/demo/tui-pipelines.png) | ![detail](docs/demo/tui-detail.png) |
-| ![status](docs/demo/status.png) | ![dag](docs/demo/dag.png) |
+| ![sharded detail](docs/demo/tui-sharded.png) | ![dag](docs/demo/dag.png) |
+| ![status](docs/demo/status.png) | |
 
 Animated: [tui](docs/demo/tui.gif) · [ls](docs/demo/ls.gif) · [logs through a pod
 restart](docs/demo/logs.gif) · [top](docs/demo/top.gif) · [pause and resume](docs/demo/pause.gif)

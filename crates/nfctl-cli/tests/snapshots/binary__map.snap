@@ -1,5 +1,6 @@
 ---
 source: crates/nfctl-cli/tests/binary.rs
+assertion_line: 35
 expression: text
 ---
 nfctl
@@ -9,6 +10,7 @@ nfctl
 ├── --request-timeout  SECS  = 20  — Per-request timeout in seconds  (global)
 ├── -o/--output  OUTPUT [table|wide|json|yaml]  = table  — Output format  (global)
 ├── --daemon-url  URL  — Talk to the pipeline daemon at this URL instead of port-forwarding  (global)
+├── --no-color  — Disable colour (also honours the `NO_COLOR` environment variable)  (global)
 ├── --fixture  FILE  — Answer from this fixture file instead of a cluster (demos, tests, screenshots)  (global)
 ├── ls  List pipelines
 ├── get  Show one pipeline
@@ -16,7 +18,8 @@ nfctl
 ├── dag  Render a pipeline's topology
 │   ├── name  NAME  — Pipeline name
 │   ├── -f/--format  FORMAT [ascii|mermaid|dot]  = ascii  — Diagram format (`-o json|yaml` prints the topology model instead)
-│   └── -w/--width  COLS  — Fit the ASCII render to this many columns (default: terminal width)
+│   ├── -w/--width  COLS  — Fit the ASCII render to this many columns (default: terminal width)
+│   └── --expand-shards  — Draw every shard (`name-0`, `name-1`, ...) instead of one `name ×N` node
 ├── logs  Logs from every pod of a pipeline (or one vertex), tagged by pod and container
 │   ├── name  NAME  — Pipeline name
 │   ├── vertex  VERTEX  — Restrict to one vertex

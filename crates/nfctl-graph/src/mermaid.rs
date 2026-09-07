@@ -2,6 +2,8 @@ use std::fmt::Write as _;
 
 use nfctl_core::model::{Edge, OnFull, TagCondition, TagOperator, Topology, VertexKind};
 
+use crate::layout::ViewGraph;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {
     #[default]
@@ -88,6 +90,31 @@ pub fn to_mermaid(t: &Topology, dir: Direction) -> String {
     for e in t.edges() {
         out.push_str(&edge_line(e));
         out.push('\n');
+    }
+    out
+}
+
+/// Emit a `flowchart` of a view graph: shard groups are one node labelled
+/// `stem ×N`. Edges keep the view graph's order, which the ASCII colouring
+/// relies on.
+#[must_use]
+pub fn view_to_mermaid(g: &ViewGraph, dir: Direction) -> String {
+    let id = |label: &str| node_id(&label.replace(" ×", "_x"));
+    let mut out = String::new();
+    let _ = writeln!(out, "flowchart {}", dir.keyword());
+    for n in &g.nodes {
+        let (open, close) = delims(n.kind);
+        let _ = writeln!(out, "  {}{open}{}{close}", id(&n.label), quote(&n.label));
+    }
+    for e in &g.edges {
+        let arrow = if e.lossy { "-.->" } else { "-->" };
+        let from = id(&g.nodes[e.from.0 as usize].label);
+        let to = id(&g.nodes[e.to.0 as usize].label);
+        if e.tags.is_empty() {
+            let _ = writeln!(out, "  {from} {arrow} {to}");
+        } else {
+            let _ = writeln!(out, "  {from} {arrow}|{}| {to}", edge_text(&e.label()));
+        }
     }
     out
 }

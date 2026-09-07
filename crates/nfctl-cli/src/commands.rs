@@ -59,6 +59,8 @@ pub struct Context {
     pub now: Timestamp,
     /// Columns available for ASCII diagrams; `None` when not a terminal.
     pub terminal_width: Option<usize>,
+    /// ANSI colour in diagrams: a terminal, and neither `--no-color` nor `NO_COLOR`.
+    pub colour: bool,
 }
 
 impl std::fmt::Debug for Context {
@@ -268,6 +270,7 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
             name,
             format,
             width,
+            expand_shards,
         } => {
             let p = ctx
                 .service
@@ -283,8 +286,12 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
                         DagFormat::Mermaid => nfctl_graph::Format::Mermaid,
                         DagFormat::Dot => nfctl_graph::Format::Dot,
                     };
-                    let width = width.or(ctx.terminal_width);
-                    Ok(nfctl_graph::render(&p.spec.topology, format, width))
+                    let opts = nfctl_graph::RenderOptions {
+                        width: width.or(ctx.terminal_width),
+                        collapse_shards: !expand_shards,
+                        colour: ctx.colour,
+                    };
+                    Ok(nfctl_graph::render_with(&p.spec.topology, format, opts))
                 }
             }
         }
@@ -622,6 +629,7 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
             ctx.service.clone(),
             ns,
             Duration::from_secs((*interval).max(1)),
+            nfctl_tui::Palette::detect(cli.globals.no_color),
         )
         .await
         .map_err(|e| Error::Cluster(Box::new(e)))?;

@@ -16,6 +16,7 @@ use crate::event::{Action, AppEvent};
 use crate::panels::detail::DetailPanel;
 use crate::panels::logs::LogsPanel;
 use crate::panels::pipelines::PipelinesPanel;
+use crate::style::Palette;
 use crate::worker::{Worker, WorkerMessage};
 use crate::{Model, style};
 
@@ -45,7 +46,9 @@ impl Panel {
     fn keys(&self) -> &'static str {
         match self {
             Panel::Pipelines(_) => "j/k move  enter detail  l logs  r refresh  q quit",
-            Panel::Detail(_) => "j/k vertex  enter vertex logs  l pipeline logs  esc back  q quit",
+            Panel::Detail(_) => {
+                "j/k vertex  ←/→ scroll  x shards  enter vertex logs  l pipeline logs  esc back  q quit"
+            }
             Panel::Logs(_) => "j/k scroll  G follow  esc back  q quit",
         }
     }
@@ -55,6 +58,7 @@ impl Panel {
 struct App {
     stack: Vec<Panel>,
     ns: Option<Namespace>,
+    palette: Palette,
     tx: mpsc::Sender<WorkerMessage>,
 }
 
@@ -85,8 +89,8 @@ impl App {
             None => true,
             Some(Action::Quit) => false,
             Some(Action::OpenDetail(key)) => {
-                self.push(Panel::Detail(Box::new(DetailPanel::new(key))))
-                    .await;
+                let panel = DetailPanel::new(key).with_palette(self.palette);
+                self.push(Panel::Detail(Box::new(panel))).await;
                 true
             }
             Some(Action::OpenLogs(key, vertex)) => {
@@ -133,11 +137,13 @@ pub async fn run(
     service: PipelineService,
     ns: Option<Namespace>,
     tick: Duration,
+    palette: Palette,
 ) -> std::io::Result<()> {
     let (tx, mut replies) = Worker::spawn(cluster, service);
     let mut app = App {
         stack: Vec::new(),
         ns: ns.clone(),
+        palette,
         tx,
     };
     app.push(Panel::Pipelines(Box::new(PipelinesPanel::new(ns))))

@@ -3,6 +3,7 @@
 
 mod common;
 
+use nfctl_graph::layout::{LayoutOptions, ViewGraph, layout};
 use nfctl_graph::{Direction, Format, from_mermaid, render, to_mermaid};
 
 #[test]
@@ -29,6 +30,43 @@ fn corpus_imports_and_renders() {
                 render(&t, Format::Ascii, Some(120)),
                 "determinism"
             );
+            for g in [ViewGraph::collapsed(&t), ViewGraph::expanded(&t)] {
+                let opts = LayoutOptions {
+                    card_w: 18,
+                    card_h: 4,
+                };
+                let start = std::time::Instant::now();
+                let l = layout(&g, opts);
+                let took = start.elapsed();
+                assert!(took.as_millis() < 50, "{name}/{pl}: layout took {took:?}");
+                assert_eq!(l, layout(&g, opts), "{name}/{pl}: layout determinism");
+                assert_eq!(
+                    l.routes.len(),
+                    g.edges.len(),
+                    "{name}/{pl}: a route per edge"
+                );
+                for r in &l.routes {
+                    let e = &g.edges[r.edge.0 as usize];
+                    let (from, to) = (l.card(e.from).unwrap(), l.card(e.to).unwrap());
+                    assert_eq!(
+                        r.polyline[0],
+                        (from.x + 18, from.y + 1),
+                        "{name}/{pl}: route start"
+                    );
+                    assert_eq!(r.head, (to.x - 1, to.y + 1), "{name}/{pl}: route head");
+                    assert_eq!(
+                        r.colour.is_some(),
+                        !e.tags.is_empty(),
+                        "{name}/{pl}: colour iff tagged"
+                    );
+                }
+                assert!(
+                    l.width <= 600 && l.height <= 400,
+                    "{name}/{pl}: {}x{}",
+                    l.width,
+                    l.height
+                );
+            }
         }
     }
     if !files.is_empty() {

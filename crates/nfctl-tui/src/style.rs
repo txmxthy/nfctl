@@ -38,3 +38,52 @@ pub fn key() -> Style {
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD)
 }
+
+/// Edge colours by tag combination; monochrome when colour is off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Palette {
+    colour: bool,
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Self { colour: true }
+    }
+}
+
+impl Palette {
+    const HUES: [Color; 6] = [
+        Color::Cyan,
+        Color::Magenta,
+        Color::Yellow,
+        Color::Green,
+        Color::Blue,
+        Color::Red,
+    ];
+
+    /// `no_color` is the CLI flag; `NO_COLOR` in the environment also disables.
+    #[must_use]
+    pub fn detect(no_color: bool) -> Self {
+        let env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+        Self {
+            colour: !(no_color || env),
+        }
+    }
+
+    #[must_use]
+    pub fn monochrome() -> Self {
+        Self { colour: false }
+    }
+
+    /// Untagged edges are dim; tagged edges take their slot's hue.
+    #[must_use]
+    pub fn edge(self, c: Option<nfctl_graph::layout::EdgeColour>) -> Style {
+        match c {
+            Some(c) if self.colour => {
+                Style::default().fg(Self::HUES[usize::from(c.0) % Self::HUES.len()])
+            }
+            Some(_) => Style::default().add_modifier(Modifier::BOLD),
+            None => dim(),
+        }
+    }
+}

@@ -66,6 +66,7 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<Output> {
             default_namespace,
             now: nfctl_core::model::Timestamp::now(),
             terminal_width: terminal_size::terminal_size().map(|(w, _)| usize::from(w.0)),
+            colour: colour_enabled(cli),
         };
         return run(cli, &ctx).await;
     }
@@ -91,6 +92,15 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<Output> {
         default_namespace: conn.default_namespace,
         now: nfctl_core::model::Timestamp::now(),
         terminal_width: terminal_size::terminal_size().map(|(w, _)| usize::from(w.0)),
+        colour: colour_enabled(cli),
     };
     run(cli, &ctx).await
+}
+
+/// Colour only on a terminal, and only when neither `--no-color` nor the
+/// `NO_COLOR` environment variable (<https://no-color.org>) says otherwise.
+fn colour_enabled(cli: &Cli) -> bool {
+    use std::io::IsTerminal as _;
+    let env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+    std::io::stdout().is_terminal() && !cli.globals.no_color && !env
 }

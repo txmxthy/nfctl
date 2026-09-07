@@ -16,8 +16,8 @@
 | `tui` | done | M7 |
 | `mvtx ls/get/status/logs/pause/resume` | done | M8 |
 | corpus tests + benches (private seed) | done | M9 |
-| `tui`: shard collapse (`x`), edge bundling, tag colours, badges, scroll | planned | M10 |
-| `dag --expand-shards`, coloured `dag -f ascii` | planned | M10 |
+| `tui`: shard collapse (`x`), edge bundling, tag colours, badges, scroll | done | M10 |
+| `dag --expand-shards`, coloured `dag -f ascii` | done | M10 |
 | `completions` from live resources (dynamic) | planned | M11 |
 | ServingPipeline | planned | later |
 

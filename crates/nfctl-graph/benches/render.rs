@@ -5,6 +5,7 @@
 mod common;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use nfctl_graph::layout::{LayoutOptions, ViewGraph, layout};
 use nfctl_graph::{Direction, Format, from_mermaid, render, to_mermaid};
 
 fn bench(c: &mut Criterion) {
@@ -22,6 +23,18 @@ fn bench(c: &mut Criterion) {
             });
             c.bench_function(&format!("ascii/{name}/{pl}"), |b| {
                 b.iter(|| render(&t, Format::Ascii, Some(160)));
+            });
+            let g = ViewGraph::collapsed(&t);
+            c.bench_function(&format!("layout/{name}/{pl}"), |b| {
+                b.iter(|| {
+                    layout(
+                        &g,
+                        LayoutOptions {
+                            card_w: 18,
+                            card_h: 4,
+                        },
+                    )
+                });
             });
             std::hint::black_box(mmd);
         }

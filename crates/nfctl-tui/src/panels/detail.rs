@@ -1,13 +1,15 @@
 use crossterm::event::KeyCode;
-use nfctl_core::model::PipelineKey;
+use nfctl_core::model::{PipelineKey, TagCondition, TagOperator, VertexName};
 use nfctl_core::service::PipelineView;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table};
 
+use crate::cards::CardView;
 use crate::event::{Action, AppEvent};
 use crate::panels::pressed;
+use crate::style::Palette;
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, cards, style};
 
@@ -17,6 +19,12 @@ pub struct DetailPanel {
     view: Option<PipelineView>,
     error: Option<String>,
     selected: usize,
+    expand_shards: bool,
+    /// Leftmost visible card column. A `Cell` so drawing can pull it to the selection.
+    scroll: std::cell::Cell<usize>,
+    /// Scroll so the selected card is visible on the next draw.
+    follow: bool,
+    palette: Palette,
 }
 
 impl DetailPanel {
@@ -26,7 +34,17 @@ impl DetailPanel {
             view: None,
             error: None,
             selected: 0,
+            expand_shards: false,
+            scroll: std::cell::Cell::new(0),
+            follow: false,
+            palette: Palette::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_palette(mut self, palette: Palette) -> Self {
+        self.palette = palette;
+        self
     }
 
     fn selected_vertex(&self) -> Option<&nfctl_core::service::VertexView> {
@@ -42,6 +60,33 @@ impl DetailPanel {
         }
         let next = self.selected.saturating_add_signed(delta);
         self.selected = next.min(n - 1);
+        self.follow = true;
+    }
+
+    /// The scroll to draw with: the stored one, pulled so the selection is visible.
+    fn scroll_for(&self, cards: &CardView, width: u16) -> usize {
+        let cols = cards.layout.col_x.len();
+        let mut scroll = self.scroll.get().min(cols.saturating_sub(1));
+        if self.follow
+            && let Some(col) = self
+                .selected_vertex()
+                .and_then(|v| cards.column_of(v.name.as_str()))
+        {
+            if col < scroll {
+                scroll = col;
+            }
+            while cards.last_visible(scroll, width) < col && scroll < col {
+                scroll += 1;
+            }
+        }
+        self.scroll.set(scroll);
+        scroll
+    }
+
+    fn columns(&self) -> usize {
+        self.view
+            .as_ref()
+            .map_or(0, |v| v.pipeline.spec.topology.ranks().len())
     }
 }
 
@@ -69,12 +114,27 @@ impl Model for DetailPanel {
                 Some(KeyCode::Esc | KeyCode::Char('h') | KeyCode::Backspace) => {
                     (Some(Action::Back), vec![])
                 }
-                Some(KeyCode::Char('j') | KeyCode::Down | KeyCode::Right) => {
+                Some(KeyCode::Char('j') | KeyCode::Down) => {
                     self.move_by(1);
                     (None, vec![])
                 }
-                Some(KeyCode::Char('k') | KeyCode::Up | KeyCode::Left) => {
+                Some(KeyCode::Char('k') | KeyCode::Up) => {
                     self.move_by(-1);
+                    (None, vec![])
+                }
+                Some(KeyCode::Right) => {
+                    self.scroll
+                        .set((self.scroll.get() + 1).min(self.columns().saturating_sub(1)));
+                    self.follow = false;
+                    (None, vec![])
+                }
+                Some(KeyCode::Left) => {
+                    self.scroll.set(self.scroll.get().saturating_sub(1));
+                    self.follow = false;
+                    (None, vec![])
+                }
+                Some(KeyCode::Char('x')) => {
+                    self.expand_shards = !self.expand_shards;
                     (None, vec![])
                 }
                 Some(KeyCode::Char('r')) => (None, self.on_enter()),
@@ -106,7 +166,9 @@ impl Model for DetailPanel {
             return;
         };
         let p = &v.pipeline;
-        let cards_h = cards::Plan::new(&p.spec.topology, inner.width).height();
+        let cards = CardView::new(&p.spec.topology, inner.width, self.expand_shards);
+        let scroll = self.scroll_for(&cards, inner.width);
+        let cards_h = cards.height();
         let [head, dag, edges, warn] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Length(cards_h),
@@ -143,7 +205,10 @@ impl Model for DetailPanel {
             frame,
             dag,
             v,
+            &cards,
+            scroll,
             self.selected_vertex().map(|x| x.name.as_str()),
+            self.palette,
         );
 
         frame.render_widget(edge_table(v), edges);
@@ -163,7 +228,18 @@ impl Model for DetailPanel {
 }
 
 fn edge_table(v: &PipelineView) -> Table<'_> {
-    const HEADER: [&str; 5] = ["EDGE", "PENDING", "USAGE", "", "WATERMARK"];
+    const HEADER: [&str; 6] = ["EDGE", "TAGS", "PENDING", "USAGE", "", "WATERMARK"];
+    let tags = |from: &VertexName, to: &VertexName| -> String {
+        v.pipeline
+            .spec
+            .topology
+            .edges()
+            .iter()
+            .find(|t| &t.from == from && &t.to == to)
+            .and_then(|t| t.conditions.as_ref())
+            .map(tag_label)
+            .unwrap_or_default()
+    };
     let cells: Vec<Vec<String>> = v
         .edges
         .iter()
@@ -184,6 +260,7 @@ fn edge_table(v: &PipelineView) -> Table<'_> {
             );
             vec![
                 format!("{} -> {}", e.from, e.to),
+                tags(&e.from, &e.to),
                 e.pending()
                     .map_or_else(|| "-".to_owned(), |n| n.to_string()),
                 usage,
@@ -200,4 +277,17 @@ fn edge_table(v: &PipelineView) -> Table<'_> {
     Table::new(cells.into_iter().map(Row::new), widths)
         .column_spacing(2)
         .header(Row::new(HEADER).style(style::title()))
+}
+
+fn tag_label(c: &TagCondition) -> String {
+    match c.operator {
+        TagOperator::Or => c.values.join(", "),
+        TagOperator::And => c.values.join(" & "),
+        TagOperator::Not => c
+            .values
+            .iter()
+            .map(|v| format!("not {v}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
 }

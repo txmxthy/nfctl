@@ -387,6 +387,174 @@ pipelines:
       reduce_udfs: 0
     pause_started: null
     last_updated: null
+- key:
+    namespace: default
+    name: sharded
+  meta:
+    generation: 2
+    created: '2026-01-01T00:00:00Z'
+    instance: null
+    resume_strategy: null
+  spec:
+    isb: default
+    lifecycle:
+      desired: Running
+      pause_grace: 30
+      deletion_grace: 30
+    limits:
+      read_batch_size: 500
+      buffer_max_length: 30000
+      buffer_usage_limit: 0.8
+    topology:
+      vertices:
+      - name: in
+        kind: source
+        partitions: 1
+        scale:
+          min: null
+          max: null
+          disabled: false
+        image: null
+      - name: router
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-shard:stable
+      - name: worker-0
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-cat:stable
+      - name: worker-1
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-cat:stable
+      - name: worker-2
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-cat:stable
+      - name: merge
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-cat:stable
+      - name: out
+        kind: sink
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: null
+      - name: audit
+        kind: sink
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: null
+      edges:
+      - from: in
+        to: router
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: router
+        to: worker-0
+        conditions:
+          operator: or
+          values:
+          - shard-0
+        on_full: retryUntilSuccess
+      - from: router
+        to: worker-1
+        conditions:
+          operator: or
+          values:
+          - shard-1
+        on_full: retryUntilSuccess
+      - from: router
+        to: worker-2
+        conditions:
+          operator: or
+          values:
+          - shard-2
+        on_full: retryUntilSuccess
+      - from: worker-0
+        to: merge
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: worker-1
+        to: merge
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: worker-2
+        to: merge
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: merge
+        to: out
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: router
+        to: audit
+        conditions:
+          operator: or
+          values:
+          - audit
+        on_full: retryUntilSuccess
+  status:
+    phase: Running
+    message: null
+    conditions:
+    - kind: Configured
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: DaemonServiceHealthy
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: Deployed
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: SideInputsManagersHealthy
+      ok: true
+      reason: NoSideInputs
+      message: No Side Inputs attached to the pipeline
+    - kind: VerticesHealthy
+      ok: true
+      reason: Successful
+      message: All vertices are healthy
+    observed_generation: 2
+    drained_on_pause: false
+    counts:
+      total: 8
+      sources: 1
+      sinks: 2
+      udfs: 5
+      map_udfs: 5
+      reduce_udfs: 0
+    pause_started: null
+    last_updated: null
 monovertices:
 - key:
     namespace: default
@@ -612,6 +780,237 @@ daemons:
       - null
     - from: even-or-odd
       to: all-sink
+      enabled: true
+      per_partition:
+      - null
+  sharded:
+    health:
+      status: healthy
+      message: Pipeline data flow is healthy
+      code: D1
+    buffers:
+    - name: default-sharded-router-0
+      from: in
+      to: router
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-worker-0-0
+      from: router
+      to: worker-0
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-worker-1-0
+      from: router
+      to: worker-1
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-worker-2-0
+      from: router
+      to: worker-2
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-merge-0
+      from: worker-0
+      to: merge
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-merge-0
+      from: worker-1
+      to: merge
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-merge-0
+      from: worker-2
+      to: merge
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-out-0
+      from: merge
+      to: out
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    - name: default-sharded-audit-0
+      from: router
+      to: audit
+      pending: 12
+      ack_pending: 4
+      total: 16
+      length: 30000
+      usage: 0.0005
+      usage_limit: 0.8
+      is_full: false
+    metrics:
+    - vertex: in
+      rate:
+        m1: 900.0
+        m5: 900.0
+        m15: 900.0
+        default: 900.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    - vertex: router
+      rate:
+        m1: 900.0
+        m5: 900.0
+        m15: 900.0
+        default: 900.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    - vertex: worker-0
+      rate:
+        m1: 300.0
+        m5: 300.0
+        m15: 300.0
+        default: 300.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    - vertex: worker-1
+      rate:
+        m1: 300.0
+        m5: 300.0
+        m15: 300.0
+        default: 300.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    - vertex: worker-2
+      rate:
+        m1: 300.0
+        m5: 300.0
+        m15: 300.0
+        default: 300.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    - vertex: merge
+      rate:
+        m1: 900.0
+        m5: 900.0
+        m15: 900.0
+        default: 900.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    - vertex: out
+      rate:
+        m1: 900.0
+        m5: 900.0
+        m15: 900.0
+        default: 900.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    - vertex: audit
+      rate:
+        m1: 45.0
+        m5: 45.0
+        m15: 45.0
+        default: 45.0
+      pending:
+        m1: 12
+        m5: 12
+        m15: 12
+        default: 12
+    watermarks:
+    - from: in
+      to: router
+      enabled: true
+      per_partition:
+      - null
+    - from: router
+      to: worker-0
+      enabled: true
+      per_partition:
+      - null
+    - from: router
+      to: worker-1
+      enabled: true
+      per_partition:
+      - null
+    - from: router
+      to: worker-2
+      enabled: true
+      per_partition:
+      - null
+    - from: worker-0
+      to: merge
+      enabled: true
+      per_partition:
+      - null
+    - from: worker-1
+      to: merge
+      enabled: true
+      per_partition:
+      - null
+    - from: worker-2
+      to: merge
+      enabled: true
+      per_partition:
+      - null
+    - from: merge
+      to: out
+      enabled: true
+      per_partition:
+      - null
+    - from: router
+      to: audit
       enabled: true
       per_partition:
       - null

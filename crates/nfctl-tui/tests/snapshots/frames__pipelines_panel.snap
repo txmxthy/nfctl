@@ -1,5 +1,6 @@
 ---
 source: crates/nfctl-tui/tests/frames.rs
+assertion_line: 37
 expression: "frame(&panel, 100, 12)"
 ---
 "┌ pipelines (all namespaces) ──────────────────────────────────────────────────────────────────────┐"
@@ -8,7 +9,7 @@ expression: "frame(&panel, 100, 12)"
 "│default    linear      Running  3         Running                                                 │"
 "│default    partitions  Running  3         Running                                                 │"
 "│default    scaling     Running  3         Running                                                 │"
-"│                                                                                                  │"
+"│default    sharded     Running  8         Running                                                 │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"

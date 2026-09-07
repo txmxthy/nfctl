@@ -18,13 +18,13 @@ just demo-down    # removes everything again
 Script, one tape per step:
 
 1. `ls` — pipelines with phase; `-o json | jq` shows it scripts.
-2. `dag` — the fanout pipeline as box-drawing text, then as Mermaid.
+2. `dag` — the sharded pipeline as box-drawing text (shards as one node, then expanded), then Mermaid.
 3. `logs` — every pod of a vertex, tagged; `-f` keeps following through pod replacement.
 4. `top` — rates, pending, buffer usage and watermark lag refreshing live.
 5. `pause --wait` → `status` → `resume --strategy slow`: a drained pause and a slow ramp-up.
 6. `apply --check` on two edits of the fanout pipeline: one warns, one is refused (exit 3).
 7. `recycle` a vertex and watch the replacement pod pick up in `logs -f`.
-8. `tui`: list → detail → vertex logs and back.
+8. `tui`: list → detail → vertex logs and back, then the sharded pipeline collapsed and expanded (`x`).
 
 The gifs next to the tapes are what `just record` produced last. The tapes assume a shell with `nfctl` on PATH and the local context selected
 (`NFCTL_CONTEXT=<local-context>` works too).

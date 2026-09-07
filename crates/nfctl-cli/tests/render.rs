@@ -51,6 +51,7 @@ fn ctx_with_daemon(cluster: FakeCluster, daemon: FakeDaemon) -> Context {
         // 3 days, 4 hours after the epoch the fixtures were created at.
         now: Timestamp::new(OffsetDateTime::UNIX_EPOCH + time::Duration::hours(76)),
         terminal_width: Some(100),
+        colour: false,
     }
 }
 
