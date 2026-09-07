@@ -5,8 +5,8 @@ use clap::CommandFactory;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use nfctl_core::model::{
-    ContainerName, IsbName, Namespace, PipelineKey, PipelineName, Selector, TaggedLine, Timestamp,
-    VertexName,
+    ContainerName, IsbName, MonoVertexKey, Namespace, PipelineKey, PipelineName, Selector,
+    TaggedLine, Timestamp, VertexName,
 };
 use nfctl_core::model::{PipelinePhase, ResumeStrategy};
 use nfctl_core::ports::ClusterPort;
@@ -14,7 +14,7 @@ use nfctl_core::service::logs::{ContainerSelect, TailOptions, snapshot, tail};
 use nfctl_core::service::{PipelineService, lifecycle};
 use nfctl_core::{Error, Result};
 
-use crate::cli::{Cli, Command, DagFormat, IsbCommand, OutputFormat, Phase, Strategy};
+use crate::cli::{Cli, Command, DagFormat, IsbCommand, MvtxCommand, OutputFormat, Phase, Strategy};
 use crate::output;
 
 /// What a command produces: a finished string, or lines as they arrive.
@@ -136,6 +136,9 @@ pub async fn run(cli: &Cli, ctx: &Context) -> Result<Output> {
     if let Some(out) = run_logs(cli, ctx).await? {
         return Ok(out);
     }
+    if let Command::Mvtx { command } = &cli.command {
+        return run_mvtx(cli, ctx, command).await;
+    }
     if let Command::Top {
         name,
         interval,
@@ -237,7 +240,7 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
         | Command::Logs { .. }
         | Command::Top { .. }
         | Command::Tui { .. }
-        | Command::Mvtx => unreachable!("handled before run_text"),
+        | Command::Mvtx { .. } => unreachable!("handled before run_text"),
     }
 }
 
@@ -563,4 +566,130 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
         return Ok(Some(Output::Text(String::new())));
     }
     Ok(None)
+}
+
+fn monovertex_key(cli: &Cli, ctx: &Context, name: &str) -> Result<MonoVertexKey> {
+    let namespace = ctx.namespace(cli)?;
+    let name = PipelineName::new(name).map_err(|e| invalid_arg("monovertex", name, e))?;
+    Ok(MonoVertexKey { namespace, name })
+}
+
+async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Output> {
+    let fmt = cli.globals.output;
+    let cluster = ctx.cluster.as_ref();
+    match command {
+        MvtxCommand::Ls => {
+            let ns = if cli.globals.all_namespaces {
+                None
+            } else {
+                Some(ctx.namespace(cli)?)
+            };
+            let mut items = cluster.list_monovertices(ns.as_ref()).await?;
+            items.sort_by(|a, b| {
+                (&a.key.namespace, &a.key.name).cmp(&(&b.key.namespace, &b.key.name))
+            });
+            output::monovertices(&items, fmt, cli.globals.all_namespaces, ctx.now).map(Output::Text)
+        }
+        MvtxCommand::Get { name } => {
+            let key = monovertex_key(cli, ctx, name)?;
+            let m = cluster.get_monovertex(&key).await?;
+            match fmt {
+                OutputFormat::Json | OutputFormat::Yaml => output::serialised(&m, fmt),
+                OutputFormat::Table | OutputFormat::Wide => output::monovertices(
+                    std::slice::from_ref(&m),
+                    OutputFormat::Wide,
+                    false,
+                    ctx.now,
+                ),
+            }
+            .map(Output::Text)
+        }
+        MvtxCommand::Status { name } => {
+            let key = monovertex_key(cli, ctx, name)?;
+            let m = cluster.get_monovertex(&key).await?;
+            let mut warnings = Vec::new();
+            let (health, metrics) = match ctx.service.daemons().connect_monovertex(&key).await {
+                Ok(d) => (
+                    d.health()
+                        .await
+                        .map_err(|e| warnings.push(format!("health: {e}")))
+                        .ok(),
+                    d.vertex_metrics(None)
+                        .await
+                        .map_err(|e| warnings.push(format!("metrics: {e}")))
+                        .ok(),
+                ),
+                Err(e) => {
+                    warnings.push(format!("daemon unavailable: {e}"));
+                    (None, None)
+                }
+            };
+            output::monovertex_status(&m, health.as_ref(), metrics.as_deref(), &warnings, fmt)
+                .map(Output::Text)
+        }
+        MvtxCommand::Logs {
+            name,
+            follow,
+            all_containers,
+            tail: tail_lines,
+        } => run_mvtx_logs(cli, ctx, name, *follow, *all_containers, *tail_lines).await,
+        MvtxCommand::Pause { name, dry_run } => {
+            let key = monovertex_key(cli, ctx, name)?;
+            cluster
+                .set_monovertex_lifecycle(&key, nfctl_core::model::DesiredPhase::Paused, *dry_run)
+                .await?;
+            Ok(Output::Text(format!(
+                "{key}: pause{}\n",
+                if *dry_run { " accepted (dry run)" } else { "" }
+            )))
+        }
+        MvtxCommand::Resume { name, dry_run } => {
+            let key = monovertex_key(cli, ctx, name)?;
+            cluster
+                .set_monovertex_lifecycle(&key, nfctl_core::model::DesiredPhase::Running, *dry_run)
+                .await?;
+            Ok(Output::Text(format!(
+                "{key}: resume{}\n",
+                if *dry_run { " accepted (dry run)" } else { "" }
+            )))
+        }
+    }
+}
+
+async fn run_mvtx_logs(
+    cli: &Cli,
+    ctx: &Context,
+    name: &str,
+    follow: bool,
+    all_containers: bool,
+    tail_lines: Option<u32>,
+) -> Result<Output> {
+    let key = monovertex_key(cli, ctx, name)?;
+    let cluster = ctx.cluster.as_ref();
+    let selector = Selector::monovertex_pods(&key.name);
+    let containers = if all_containers {
+        ContainerSelect::All
+    } else {
+        ContainerSelect::Default
+    };
+    let opts = TailOptions {
+        containers,
+        tail_lines,
+        ..TailOptions::default()
+    };
+    if follow {
+        let (lines, handle) = tail(Arc::clone(&ctx.cluster), key.namespace, selector, opts).await?;
+        let stream = lines.map(move |l| {
+            let _keep = &handle;
+            format_line(&l, false)
+        });
+        return Ok(Output::Lines(Box::pin(stream)));
+    }
+    let lines = snapshot(cluster, &key.namespace, &selector, &opts).await?;
+    if lines.is_empty() {
+        return Ok(Output::Text("No pods found.\n".to_owned()));
+    }
+    Ok(Output::Text(
+        lines.iter().map(|l| format_line(l, false) + "\n").collect(),
+    ))
 }

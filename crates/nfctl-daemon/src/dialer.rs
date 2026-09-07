@@ -10,7 +10,7 @@ use hyper_util::client::legacy::connect::{Connected, Connection};
 use hyper_util::rt::TokioIo;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, ListParams, Portforwarder};
-use nfctl_core::model::{PipelineName, Selector};
+use nfctl_core::model::Selector;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -28,8 +28,8 @@ type BoxIo = Pin<Box<dyn AsyncIo>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DialError {
-    #[error("no running daemon pod for pipeline `{0}`")]
-    NoDaemonPod(PipelineName),
+    #[error("no running daemon pod matching `{0}`")]
+    NoDaemonPod(String),
     #[error("port-forward: {0}")]
     PortForward(#[source] kube::Error),
     #[error("port-forward stream for port {0} was not available")]
@@ -112,7 +112,7 @@ pub enum Dialer {
     /// Resolve the daemon pod by label, port-forward, TLS.
     PodForward {
         pods: Api<Pod>,
-        pipeline: PipelineName,
+        selector: Selector,
         tls: TlsConnector,
         /// Last pod that worked; cleared on failure so a rescheduled daemon is found.
         cached_pod: Arc<Mutex<Option<String>>>,
@@ -128,7 +128,7 @@ pub enum Dialer {
 impl std::fmt::Debug for Dialer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Dialer::PodForward { pipeline, .. } => write!(f, "PodForward({pipeline})"),
+            Dialer::PodForward { selector, .. } => write!(f, "PodForward({selector})"),
             Dialer::Direct { host, port, tls } => {
                 write!(f, "Direct({host}:{port}, tls={})", tls.is_some())
             }
@@ -139,7 +139,7 @@ impl std::fmt::Debug for Dialer {
 impl Dialer {
     async fn resolve_pod(
         pods: &Api<Pod>,
-        pipeline: &PipelineName,
+        selector: &Selector,
         cache: &Mutex<Option<String>>,
     ) -> Result<String, DialError> {
         if let Some(name) = cache
@@ -149,7 +149,7 @@ impl Dialer {
         {
             return Ok(name);
         }
-        let sel = Selector::daemon_pods(pipeline).to_string();
+        let sel = selector.to_string();
         let list = pods
             .list(&ListParams::default().labels(&sel))
             .await
@@ -160,7 +160,7 @@ impl Dialer {
         });
         let name = running
             .and_then(|p| p.metadata.name)
-            .ok_or_else(|| DialError::NoDaemonPod(pipeline.clone()))?;
+            .ok_or_else(|| DialError::NoDaemonPod(sel.clone()))?;
         *cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(name.clone());
@@ -173,11 +173,11 @@ impl Dialer {
         match self {
             Dialer::PodForward {
                 pods,
-                pipeline,
+                selector,
                 tls,
                 cached_pod,
             } => {
-                let name = Self::resolve_pod(&pods, &pipeline, &cached_pod).await?;
+                let name = Self::resolve_pod(&pods, &selector, &cached_pod).await?;
                 let attempt = async {
                     let mut pf = pods
                         .portforward(&name, &[DAEMON_PORT])

@@ -54,9 +54,18 @@ impl CallError {
     }
 }
 
-/// [`DaemonPort`] over the daemon's JSON API, bound to one pipeline.
+/// Which daemon flavour: the URL layout differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flavour {
+    Pipeline,
+    /// One daemon per `MonoVertex`; metrics and status paths carry no name.
+    MonoVertex,
+}
+
+/// [`DaemonPort`] over the daemon's JSON API, bound to one pipeline or `MonoVertex`.
 #[derive(Clone)]
 pub struct HttpDaemonClient {
+    flavour: Flavour,
     http: Client<Dialer, Empty<Bytes>>,
     /// `scheme://host` placeholder; the dialer decides the real destination.
     base: String,
@@ -78,6 +87,7 @@ impl HttpDaemonClient {
     pub(crate) fn new(
         dialer: Dialer,
         secure: bool,
+        flavour: Flavour,
         key: PipelineKey,
         topology: Option<Topology>,
         opts: ClientOptions,
@@ -92,6 +102,7 @@ impl HttpDaemonClient {
             "http://daemon".to_owned()
         };
         Self {
+            flavour,
             http,
             base,
             key,
@@ -152,7 +163,19 @@ impl HttpDaemonClient {
     }
 
     fn path(&self, rest: &str) -> String {
-        format!("/api/v1/pipelines/{}/{rest}", self.key.name)
+        match self.flavour {
+            Flavour::Pipeline => format!("/api/v1/pipelines/{}/{rest}", self.key.name),
+            Flavour::MonoVertex => format!("/api/v1/{rest}"),
+        }
+    }
+
+    fn not_for_monovertex(&self, what: &'static str) -> Result<()> {
+        match self.flavour {
+            Flavour::Pipeline => Ok(()),
+            Flavour::MonoVertex => Err(Error::Daemon(
+                format!("{what}: a MonoVertex has no inter-step buffers").into(),
+            )),
+        }
     }
 
     /// Resolve a buffer's edge from its name using the topology.
@@ -188,6 +211,7 @@ impl HttpDaemonClient {
 #[async_trait]
 impl DaemonPort for HttpDaemonClient {
     async fn buffers(&self) -> Result<Vec<BufferInfo>> {
+        self.not_for_monovertex("buffers")?;
         let d: dto::ListBuffersDto = self.get_json(&self.path("buffers")).await?;
         d.buffers
             .into_iter()
@@ -199,6 +223,7 @@ impl DaemonPort for HttpDaemonClient {
     }
 
     async fn buffer(&self, name: &BufferName) -> Result<BufferInfo> {
+        self.not_for_monovertex("buffer")?;
         let d: dto::GetBufferDto = self
             .get_json(&self.path(&format!("buffers/{name}")))
             .await?;
@@ -211,6 +236,20 @@ impl DaemonPort for HttpDaemonClient {
     }
 
     async fn vertex_metrics(&self, vertex: Option<&VertexName>) -> Result<Vec<VertexMetrics>> {
+        if self.flavour == Flavour::MonoVertex {
+            let d: dto::MonoVertexMetricsDto = self.get_json(&self.path("metrics")).await?;
+            let m = d.metrics.unwrap_or_default();
+            let vm = dto::VertexMetricsDto {
+                vertex: if m.mono_vertex.is_empty() {
+                    self.key.name.to_string()
+                } else {
+                    m.mono_vertex
+                },
+                processing_rates: m.processing_rates,
+                pendings: m.pendings,
+            };
+            return Ok(vec![dto::metrics_from(&vm).map_err(Error::daemon)?]);
+        }
         let names: Vec<VertexName> = match (vertex, &self.topology) {
             (Some(v), _) => vec![v.clone()],
             (None, Some(t)) => t.vertices().iter().map(|v| v.name.clone()).collect(),
@@ -233,6 +272,7 @@ impl DaemonPort for HttpDaemonClient {
     }
 
     async fn watermarks(&self) -> Result<Vec<EdgeWatermark>> {
+        self.not_for_monovertex("watermarks")?;
         let d: dto::WatermarksDto = self.get_json(&self.path("watermarks")).await?;
         d.pipeline_watermarks
             .into_iter()
@@ -246,9 +286,11 @@ impl DaemonPort for HttpDaemonClient {
     }
 
     async fn vertex_errors(&self, vertex: &VertexName) -> Result<Vec<ReplicaErrors>> {
-        let d: dto::GetErrorsDto = self
-            .get_json(&self.path(&format!("vertices/{vertex}/errors")))
-            .await?;
+        let rest = match self.flavour {
+            Flavour::Pipeline => format!("vertices/{vertex}/errors"),
+            Flavour::MonoVertex => format!("mono-vertices/{vertex}/errors"),
+        };
+        let d: dto::GetErrorsDto = self.get_json(&self.path(&rest)).await?;
         Ok(d.errors.into_iter().map(dto::errors_from).collect())
     }
 }

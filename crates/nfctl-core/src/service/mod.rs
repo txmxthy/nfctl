@@ -31,4 +31,13 @@ impl DaemonConnector for NoDaemon {
             format!("no daemon adapter configured for {key}").into(),
         ))
     }
+
+    async fn connect_monovertex(
+        &self,
+        key: &crate::model::MonoVertexKey,
+    ) -> Result<Box<dyn DaemonPort>> {
+        Err(Error::Daemon(
+            format!("no daemon adapter configured for {key}").into(),
+        ))
+    }
 }

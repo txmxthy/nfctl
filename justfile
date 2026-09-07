@@ -31,10 +31,12 @@ demo-up: (_require_ctx)
     kubectl --context {{demo_ctx}} apply -n numaflow-system -f https://raw.githubusercontent.com/numaproj/numaflow/{{numaflow_version}}/config/install.yaml
     kubectl --context {{demo_ctx}} apply -f examples/isbsvc.yaml
     kubectl --context {{demo_ctx}} apply -f examples/pipelines/
+    kubectl --context {{demo_ctx}} apply -f examples/monovertex.yaml
     kubectl --context {{demo_ctx}} wait --for=jsonpath='{.status.phase}'=Running pipeline --all --timeout=300s
 
 demo-down: (_require_ctx)
     -kubectl --context {{demo_ctx}} delete -f examples/pipelines/ --ignore-not-found
+    -kubectl --context {{demo_ctx}} delete -f examples/monovertex.yaml --ignore-not-found
     -kubectl --context {{demo_ctx}} delete -f examples/isbsvc.yaml --ignore-not-found
     -kubectl --context {{demo_ctx}} delete namespace numaflow-system --ignore-not-found
 

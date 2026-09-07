@@ -10,10 +10,10 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::model::{
     BufferInfo, BufferName, ContainerName, DesiredPhase, EdgeWatermark, IsbName, IsbService,
-    Lifecycle, Limits, LogLine, LogOptions, Namespace, ObjectMeta, Pipeline, PipelineHealth,
-    PipelineKey, PipelinePhase, PipelineSpec, PipelineStatus, PodEvent, PodName, PodRef,
-    ReplicaErrors, ResumeStrategy, ScaleSpec, Selector, Timestamp, Topology, Vertex, VertexCounts,
-    VertexKind, VertexMetrics, VertexName,
+    Lifecycle, Limits, LogLine, LogOptions, MonoVertex, MonoVertexKey, MonoVertexPhase, Namespace,
+    ObjectMeta, Pipeline, PipelineHealth, PipelineKey, PipelinePhase, PipelineSpec, PipelineStatus,
+    PodEvent, PodName, PodRef, ReplicaErrors, ResumeStrategy, ScaleSpec, Selector, Timestamp,
+    Topology, Vertex, VertexCounts, VertexKind, VertexMetrics, VertexName,
 };
 use crate::ports::{ClusterPort, DaemonConnector, DaemonPort};
 use crate::{Error, Result};
@@ -37,6 +37,7 @@ pub struct TailCall {
 #[derive(Debug, Default)]
 struct State {
     pipelines: Vec<Pipeline>,
+    monovertices: Vec<MonoVertex>,
     isbs: Vec<IsbService>,
     manifests: HashMap<String, Pipeline>,
     scaled: Vec<(PipelineKey, VertexName, u32)>,
@@ -99,6 +100,10 @@ impl FakeCluster {
     #[must_use]
     pub fn scale_calls(&self) -> Vec<(PipelineKey, VertexName, u32)> {
         self.lock().scaled.clone()
+    }
+
+    pub fn add_monovertices(&self, mvs: impl IntoIterator<Item = MonoVertex>) {
+        self.lock().monovertices.extend(mvs);
     }
 
     pub fn add_isbs(&self, isbs: impl IntoIterator<Item = IsbService>) {
@@ -222,6 +227,53 @@ impl ClusterPort for FakeCluster {
 
     async fn list_isb(&self, _ns: &Namespace) -> Result<Vec<IsbService>> {
         Ok(self.lock().isbs.clone())
+    }
+
+    async fn list_monovertices(&self, ns: Option<&Namespace>) -> Result<Vec<MonoVertex>> {
+        Ok(self
+            .lock()
+            .monovertices
+            .iter()
+            .filter(|m| ns.is_none_or(|ns| &m.key.namespace == ns))
+            .cloned()
+            .collect())
+    }
+
+    async fn get_monovertex(&self, key: &MonoVertexKey) -> Result<MonoVertex> {
+        self.lock()
+            .monovertices
+            .iter()
+            .find(|m| &m.key == key)
+            .cloned()
+            .ok_or_else(|| Error::NotFound {
+                kind: "monovertex",
+                name: key.to_string(),
+            })
+    }
+
+    async fn set_monovertex_lifecycle(
+        &self,
+        key: &MonoVertexKey,
+        desired: DesiredPhase,
+        dry_run: bool,
+    ) -> Result<()> {
+        let mut g = self.lock();
+        let m = g
+            .monovertices
+            .iter_mut()
+            .find(|m| &m.key == key)
+            .ok_or_else(|| Error::NotFound {
+                kind: "monovertex",
+                name: key.to_string(),
+            })?;
+        if !dry_run {
+            m.desired = desired;
+            m.phase = match desired {
+                DesiredPhase::Running => MonoVertexPhase::Running,
+                DesiredPhase::Paused => MonoVertexPhase::Paused,
+            };
+        }
+        Ok(())
     }
 
     async fn list_pods(&self, _ns: &Namespace, _selector: &Selector) -> Result<Vec<PodRef>> {
@@ -348,6 +400,35 @@ pub struct FakeDaemons(pub FakeDaemon);
 impl DaemonConnector for FakeDaemons {
     async fn connect(&self, _key: &PipelineKey) -> Result<Box<dyn DaemonPort>> {
         Ok(Box::new(self.0.clone()))
+    }
+
+    async fn connect_monovertex(&self, _key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>> {
+        Ok(Box::new(self.0.clone()))
+    }
+}
+
+/// A running `MonoVertex` for tests.
+#[must_use]
+pub fn sample_monovertex(
+    ns: &'static str,
+    name: &'static str,
+    phase: MonoVertexPhase,
+) -> MonoVertex {
+    MonoVertex {
+        key: MonoVertexKey {
+            namespace: lit(ns),
+            name: lit(name),
+        },
+        desired: DesiredPhase::Running,
+        phase,
+        replicas: 1,
+        desired_replicas: Some(1),
+        ready_replicas: Some(1),
+        has_transformer: true,
+        has_map: false,
+        message: None,
+        conditions: vec![],
+        created: Some(Timestamp::new(time::OffsetDateTime::UNIX_EPOCH)),
     }
 }
 

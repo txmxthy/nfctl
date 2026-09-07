@@ -7,6 +7,7 @@ come from a real deployment.
 | File | Shows |
 |---|---|
 | `isbsvc.yaml` | The JetStream inter-step buffer service every pipeline uses |
+| `monovertex.yaml` | A MonoVertex with transformer, map and user-defined sink |
 | `pipelines/linear.yaml` | generator → map → log; steady 5 msg/s for `top` |
 | `pipelines/fanout.yaml` | conditional edges to three sinks; the `dag` showcase |
 | `pipelines/scaling.yaml` | autoscaling bounds per vertex |

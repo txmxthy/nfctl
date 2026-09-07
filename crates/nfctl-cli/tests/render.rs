@@ -7,11 +7,12 @@ use clap::Parser;
 use futures::StreamExt;
 use nfctl_cli::{Cli, Context, Output, run};
 use nfctl_core::fake::{
-    FakeCluster, FakeDaemon, FakeDaemons, LogScript, sample_pipeline, sample_pod,
+    FakeCluster, FakeDaemon, FakeDaemons, LogScript, sample_monovertex, sample_pipeline, sample_pod,
 };
 use nfctl_core::model::{
-    BufferInfo, BufferName, Fraction, Health, IsbName, IsbPhase, IsbService, LogLine, Namespace,
-    PipelineHealth, PipelinePhase, PodEvent, Timestamp, VertexMetrics, VertexName, Windows,
+    BufferInfo, BufferName, Fraction, Health, IsbName, IsbPhase, IsbService, LogLine,
+    MonoVertexPhase, Namespace, PipelineHealth, PipelinePhase, PodEvent, Timestamp, VertexMetrics,
+    VertexName, Windows,
 };
 use nfctl_core::ports::ClusterPort;
 use nfctl_core::service::PipelineService;
@@ -26,6 +27,7 @@ fn ctx_with(cluster: FakeCluster) -> Context {
 }
 
 fn ctx_with_daemon(cluster: FakeCluster, daemon: FakeDaemon) -> Context {
+    cluster.add_monovertices([sample_monovertex("demo", "mono", MonoVertexPhase::Running)]);
     cluster.add_isbs([IsbService {
         name: IsbName::new("default").unwrap(),
         version: "2.10.3".into(),
@@ -349,4 +351,25 @@ async fn apply_check_blocks_and_warns() {
         "demo/simple-pipeline: no topology changes\n"
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn mvtx_commands() {
+    insta::assert_snapshot!("mvtx_ls", out(&["mvtx", "ls", "-o", "wide"]).await);
+    insta::assert_snapshot!("mvtx_status", out(&["mvtx", "status", "mono"]).await);
+    assert_eq!(out(&["mvtx", "pause", "mono"]).await, "demo/mono: pause\n");
+    let ctx = ctx();
+    assert_eq!(
+        out_ctx(&Cli::parse_from(["nfctl", "mvtx", "pause", "mono"]), &ctx).await,
+        "demo/mono: pause\n"
+    );
+    assert!(
+        out_ctx(&Cli::parse_from(["nfctl", "mvtx", "get", "mono"]), &ctx)
+            .await
+            .contains("Paused")
+    );
+    assert_eq!(
+        out_ctx(&Cli::parse_from(["nfctl", "mvtx", "resume", "mono"]), &ctx).await,
+        "demo/mono: resume\n"
+    );
 }

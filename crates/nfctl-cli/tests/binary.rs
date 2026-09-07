@@ -4,13 +4,14 @@
 use assert_cmd::Command;
 
 #[test]
-fn stub_exits_4_and_points_at_roadmap() {
-    Command::cargo_bin("nfctl")
-        .unwrap()
-        .args(["mvtx"])
-        .assert()
-        .code(4)
-        .stderr(predicates::str::contains("roadmap"));
+fn unimplemented_error_exits_4() {
+    // No stub commands remain; the exit-code contract is kept by the error type.
+    assert_eq!(nfctl_core::Error::Unimplemented("x").exit_code(), 4);
+    assert!(
+        nfctl_core::Error::Unimplemented("x")
+            .to_string()
+            .contains("roadmap")
+    );
 }
 
 #[test]

@@ -1,0 +1,22 @@
+# Demo MonoVertex: user-defined source with a transformer, a map, and a log sink.
+apiVersion: numaflow.numaproj.io/v1alpha1
+kind: MonoVertex
+metadata:
+  name: mono
+spec:
+  scale:
+    min: 1
+  source:
+    udsource:
+      container:
+        image: quay.io/numaio/numaflow-rs/simple-source:stable
+    transformer:
+      container:
+        image: quay.io/numaio/numaflow-rs/source-transformer-now:stable
+  udf:
+    container:
+      image: quay.io/numaio/numaflow-go/map-cat:stable
+  sink:
+    udsink:
+      container:
+        image: quay.io/numaio/numaflow-rs/sink-log:stable

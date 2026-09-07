@@ -3,6 +3,7 @@
 
 mod ids;
 mod isb;
+mod monovertex;
 mod pipeline;
 mod pods;
 mod runtime;
@@ -14,6 +15,7 @@ pub use ids::{
     VertexName,
 };
 pub use isb::{IsbPhase, IsbService};
+pub use monovertex::{MonoVertex, MonoVertexKey, MonoVertexName, MonoVertexPhase};
 pub use pipeline::{
     Condition, DesiredPhase, Lifecycle, Limits, ObjectMeta, Pipeline, PipelinePhase, PipelineSpec,
     PipelineStatus, ResumeStrategy, VertexCounts,

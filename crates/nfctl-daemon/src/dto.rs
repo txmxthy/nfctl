@@ -109,6 +109,23 @@ pub(crate) struct VertexMetricsDto {
     pub pendings: HashMap<String, Option<i64>>,
 }
 
+/// The `MonoVertex` daemon's metrics payload: same maps, different envelope.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MonoVertexMetricsInnerDto {
+    #[serde(default)]
+    pub mono_vertex: String,
+    #[serde(default, deserialize_with = "de_f64_map")]
+    pub processing_rates: HashMap<String, Option<f64>>,
+    #[serde(default, deserialize_with = "de_i64_map")]
+    pub pendings: HashMap<String, Option<i64>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct MonoVertexMetricsDto {
+    pub metrics: Option<MonoVertexMetricsInnerDto>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct VertexMetricsListDto {

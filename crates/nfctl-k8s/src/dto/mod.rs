@@ -2,6 +2,7 @@
 //! Unknown fields are ignored so newer operators keep working.
 
 pub mod isb;
+pub mod monovertex;
 pub mod pipeline;
 pub mod pod;
 
@@ -15,6 +16,14 @@ pub fn isb_resource() -> ApiResource {
     ApiResource::from_gvk_with_plural(
         &GroupVersionKind::gvk(GROUP, VERSION, "InterStepBufferService"),
         "interstepbufferservices",
+    )
+}
+
+#[must_use]
+pub fn monovertex_resource() -> ApiResource {
+    ApiResource::from_gvk_with_plural(
+        &GroupVersionKind::gvk(GROUP, VERSION, "MonoVertex"),
+        "monovertices",
     )
 }
 

@@ -13,6 +13,7 @@
 | `apply --check` | done | M5 |
 | `scale` | done | M5 |
 | `tui` | done | M7 |
-| `mvtx …` | stub | M8 |
+| `mvtx ls/get/status/logs/pause/resume` | done | M8 |
+| ServingPipeline | planned | later |
 
 Statuses: `done` · `wip` · `stub` (command exists, exits 4 with this pointer) · `planned`.

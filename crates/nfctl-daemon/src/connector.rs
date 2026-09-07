@@ -4,12 +4,12 @@ use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use kube::Client;
 use kube::api::Api;
-use nfctl_core::model::{PipelineKey, Topology};
+use nfctl_core::model::{MonoVertexKey, PipelineKey, Selector, Topology};
 use nfctl_core::ports::{ClusterPort, DaemonConnector, DaemonPort};
 use nfctl_core::{Error, Result};
 use tokio_rustls::TlsConnector;
 
-use crate::client::{ClientOptions, HttpDaemonClient};
+use crate::client::{ClientOptions, Flavour, HttpDaemonClient};
 use crate::dialer::{DAEMON_PORT, Dialer};
 
 /// Reaches each pipeline's daemon through a port-forward to its pod.
@@ -52,15 +52,35 @@ impl DaemonConnector for PortForwardConnector {
         let pods: Api<Pod> = Api::namespaced(self.client.clone(), key.namespace.as_str());
         let dialer = Dialer::PodForward {
             pods,
-            pipeline: key.name.clone(),
+            selector: Selector::daemon_pods(&key.name),
             tls: self.tls.clone(),
             cached_pod: Arc::new(Mutex::new(None)),
         };
         Ok(Box::new(HttpDaemonClient::new(
             dialer,
             true,
+            Flavour::Pipeline,
             key.clone(),
             topology,
+            self.opts,
+        )))
+    }
+
+    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>> {
+        let pods: Api<Pod> = Api::namespaced(self.client.clone(), key.namespace.as_str());
+        let dialer = Dialer::PodForward {
+            pods,
+            selector: Selector::monovertex_daemon_pods(&key.name),
+            tls: self.tls.clone(),
+            cached_pod: Arc::new(Mutex::new(None)),
+        };
+        let pkey = PipelineKey::new(key.namespace.clone(), key.name.clone());
+        Ok(Box::new(HttpDaemonClient::new(
+            dialer,
+            true,
+            Flavour::MonoVertex,
+            pkey,
+            None,
             self.opts,
         )))
     }
@@ -120,8 +140,29 @@ impl DaemonConnector for DirectConnector {
         Ok(Box::new(HttpDaemonClient::new(
             dialer,
             self.secure,
+            Flavour::Pipeline,
             key.clone(),
             self.topology.clone(),
+            self.opts,
+        )))
+    }
+
+    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>> {
+        let tls = self
+            .secure
+            .then(|| TlsConnector::from(crate::tls::insecure_client_config()));
+        let dialer = Dialer::Direct {
+            host: self.host.clone(),
+            port: self.port,
+            tls,
+        };
+        let pkey = PipelineKey::new(key.namespace.clone(), key.name.clone());
+        Ok(Box::new(HttpDaemonClient::new(
+            dialer,
+            self.secure,
+            Flavour::MonoVertex,
+            pkey,
+            None,
             self.opts,
         )))
     }

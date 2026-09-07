@@ -23,6 +23,7 @@ pub mod labels {
     pub const COMPONENT_DAEMON: &str = "daemon";
     pub const COMPONENT_ISBSVC: &str = "isbsvc";
     pub const COMPONENT_MONO_VERTEX: &str = "mono-vertex";
+    pub const COMPONENT_MONO_VERTEX_DAEMON: &str = "mono-vertex-daemon";
 
     /// The main container on every vertex pod.
     pub const MAIN_CONTAINER: &str = "numa";
@@ -43,6 +44,27 @@ impl Selector {
         if let Some(v) = vertex {
             m.insert(labels::VERTEX_NAME, v.to_string());
         }
+        Self(m)
+    }
+
+    /// Pods of a `MonoVertex`.
+    #[must_use]
+    pub fn monovertex_pods(name: &PipelineName) -> Self {
+        let mut m = BTreeMap::new();
+        m.insert(labels::COMPONENT, labels::COMPONENT_MONO_VERTEX.to_owned());
+        m.insert(labels::MONO_VERTEX_NAME, name.to_string());
+        Self(m)
+    }
+
+    /// A `MonoVertex`'s daemon pod(s).
+    #[must_use]
+    pub fn monovertex_daemon_pods(name: &PipelineName) -> Self {
+        let mut m = BTreeMap::new();
+        m.insert(
+            labels::COMPONENT,
+            labels::COMPONENT_MONO_VERTEX_DAEMON.to_owned(),
+        );
+        m.insert(labels::MONO_VERTEX_NAME, name.to_string());
         Self(m)
     }
 

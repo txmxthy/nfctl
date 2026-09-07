@@ -7,13 +7,15 @@ use kube::api::{Api, DeleteParams, DynamicObject, ListParams, LogParams, Patch, 
 use kube::runtime::{WatchStreamExt, watcher};
 use nfctl_core::model::ContainerName;
 use nfctl_core::model::{
-    DesiredPhase, IsbService, LogLine, LogOptions, Namespace, Pipeline, PipelineKey, PodEvent,
-    PodName, PodRef, ResumeStrategy, Selector, Timestamp, VertexName, labels,
+    DesiredPhase, IsbService, LogLine, LogOptions, MonoVertex, MonoVertexKey, Namespace, Pipeline,
+    PipelineKey, PodEvent, PodName, PodRef, ResumeStrategy, Selector, Timestamp, VertexName,
+    labels,
 };
 use nfctl_core::ports::ClusterPort;
 use nfctl_core::{Error, Result};
 
 use crate::dto::isb::{IsbObject, into_isb};
+use crate::dto::monovertex::{MonoVertexObject, into_monovertex};
 use crate::dto::pipeline::{PipelineObject, into_pipeline};
 use crate::dto::pod::into_pod_ref;
 
@@ -48,6 +50,14 @@ impl KubeCluster {
             self.client.clone(),
             ns.as_str(),
             &crate::dto::isb_resource(),
+        )
+    }
+
+    fn monovertices(&self, ns: &Namespace) -> Api<MonoVertexObject> {
+        Api::namespaced_with(
+            self.client.clone(),
+            ns.as_str(),
+            &crate::dto::monovertex_resource(),
         )
     }
 
@@ -290,6 +300,53 @@ impl ClusterPort for KubeCluster {
             .await
             .map_err(|e| map_kube(e, "namespace", ns.as_str()))?;
         list.items.into_iter().map(into_isb).collect()
+    }
+
+    async fn list_monovertices(&self, ns: Option<&Namespace>) -> Result<Vec<MonoVertex>> {
+        let api = match ns {
+            Some(ns) => self.monovertices(ns),
+            None => Api::all_with(self.client.clone(), &crate::dto::monovertex_resource()),
+        };
+        let list = api
+            .list(&ListParams::default())
+            .await
+            .map_err(|e| map_kube(e, "namespace", ns.map_or("*", Namespace::as_str)))?;
+        list.items.into_iter().map(into_monovertex).collect()
+    }
+
+    async fn get_monovertex(&self, key: &MonoVertexKey) -> Result<MonoVertex> {
+        let obj = self
+            .monovertices(&key.namespace)
+            .get(key.name.as_str())
+            .await
+            .map_err(|e| map_kube(e, "monovertex", &key.to_string()))?;
+        into_monovertex(obj)
+    }
+
+    async fn set_monovertex_lifecycle(
+        &self,
+        key: &MonoVertexKey,
+        desired: DesiredPhase,
+        dry_run: bool,
+    ) -> Result<()> {
+        let body = match desired {
+            DesiredPhase::Paused => {
+                serde_json::json!({ "spec": { "lifecycle": { "desiredPhase": "Paused" } } })
+            }
+            // Clearing replicas hands control back to the autoscaler.
+            DesiredPhase::Running => {
+                serde_json::json!({ "spec": { "lifecycle": { "desiredPhase": "Running" }, "replicas": null } })
+            }
+        };
+        let pp = PatchParams {
+            dry_run,
+            ..PatchParams::default()
+        };
+        self.monovertices(&key.namespace)
+            .patch(key.name.as_str(), &pp, &Patch::Merge(&body))
+            .await
+            .map_err(|e| map_kube(e, "monovertex", &key.to_string()))?;
+        Ok(())
     }
 
     async fn list_pods(&self, ns: &Namespace, selector: &Selector) -> Result<Vec<PodRef>> {

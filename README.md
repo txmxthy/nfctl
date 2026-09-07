@@ -8,8 +8,8 @@ phase, draw the DAG, or run a safe pause → drain → resume. `nfctl` does thos
 things in one static binary, with `-o json` on every command and `--dry-run` on
 every mutating one.
 
-> Status: pre-alpha. Commands below work against Numaflow 1.6+; see
-> [docs/roadmap.md](docs/roadmap.md) for what is still a stub.
+> Status: pre-alpha. Commands below work against Numaflow 1.6+. ServingPipeline is
+> not covered yet; see [docs/roadmap.md](docs/roadmap.md).
 
 ## Commands
 
@@ -27,6 +27,7 @@ nfctl recycle <pipeline> [vertex]         restart a vertex's pods, or pause-drai
 nfctl wait <pipeline> --phase paused
 nfctl scale <pipeline> <vertex> <n>
 nfctl apply -f spec.yaml [--check]        refuses changes that need delete-and-recreate
+nfctl mvtx ls|get|status|logs|pause|resume  MonoVertex equivalents
 nfctl tui                                 the same, interactive
 nfctl completions <shell>
 ```

@@ -207,8 +207,11 @@ pub enum Command {
         dry_run: bool,
     },
 
-    #[command(about = "MonoVertex operations (preview: not implemented yet, see docs/roadmap.md)")]
-    Mvtx,
+    /// `MonoVertex` operations
+    Mvtx {
+        #[command(subcommand)]
+        command: MvtxCommand,
+    },
 
     /// Interactive terminal UI
     Tui {
@@ -246,6 +249,41 @@ pub enum DagFormat {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum MvtxCommand {
+    #[command(alias = "list", about = "List MonoVertices")]
+    Ls,
+    #[command(about = "Show one MonoVertex")]
+    Get { name: String },
+    /// Phase, health, rate and pending from the `MonoVertex` daemon
+    Status { name: String },
+    /// Logs from the `MonoVertex` pods
+    Logs {
+        name: String,
+        /// Keep following
+        #[arg(short, long)]
+        follow: bool,
+        /// Every non-init container (default: `numa` plus the pod's default container)
+        #[arg(long)]
+        all_containers: bool,
+        /// Last N lines of each container's backlog
+        #[arg(long, value_name = "N")]
+        tail: Option<u32>,
+    },
+    /// Pause: set desired phase Paused
+    Pause {
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Resume: set desired phase Running and hand replicas back to the autoscaler
+    Resume {
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum IsbCommand {
     /// List ISB services
     Ls,
@@ -254,28 +292,10 @@ pub enum IsbCommand {
 }
 
 impl Command {
-    /// The roadmap name of a command that is still a stub.
+    /// The roadmap name of a command that is still a stub. Every command is
+    /// implemented today; this stays so a future preview command exits 4 cleanly.
     #[must_use]
     pub fn stub_name(&self) -> Option<&'static str> {
-        Some(match self {
-            Command::Mvtx => "mvtx",
-            Command::Ls
-            | Command::Get { .. }
-            | Command::Dag { .. }
-            | Command::Logs { .. }
-            | Command::Top { .. }
-            | Command::Status { .. }
-            | Command::Isb { .. }
-            | Command::Pause { .. }
-            | Command::Resume { .. }
-            | Command::Recycle { .. }
-            | Command::Wait { .. }
-            | Command::Apply { .. }
-            | Command::Scale { .. }
-            | Command::Tui { .. }
-            | Command::Completions { .. } => {
-                return None;
-            }
-        })
+        None
     }
 }

@@ -8,8 +8,8 @@ use crate::Result;
 use crate::model::LogOptions;
 use crate::model::{
     BufferInfo, BufferName, ContainerName, DesiredPhase, EdgeWatermark, IsbService, LogLine,
-    Namespace, Pipeline, PipelineHealth, PipelineKey, PodEvent, PodName, PodRef, ReplicaErrors,
-    ResumeStrategy, Selector, VertexMetrics, VertexName,
+    MonoVertex, MonoVertexKey, Namespace, Pipeline, PipelineHealth, PipelineKey, PodEvent, PodName,
+    PodRef, ReplicaErrors, ResumeStrategy, Selector, VertexMetrics, VertexName,
 };
 
 /// Kubernetes: CRDs, pods and logs.
@@ -55,6 +55,17 @@ pub trait ClusterPort: Send + Sync {
 
     async fn list_isb(&self, ns: &Namespace) -> Result<Vec<IsbService>>;
 
+    async fn list_monovertices(&self, ns: Option<&Namespace>) -> Result<Vec<MonoVertex>>;
+    async fn get_monovertex(&self, key: &MonoVertexKey) -> Result<MonoVertex>;
+    /// Pause, or resume. Resuming clears `spec.replicas` so autoscaling takes over
+    /// again (`MonoVertex` has no resume-strategy annotation).
+    async fn set_monovertex_lifecycle(
+        &self,
+        key: &MonoVertexKey,
+        desired: DesiredPhase,
+        dry_run: bool,
+    ) -> Result<()>;
+
     async fn list_pods(&self, ns: &Namespace, selector: &Selector) -> Result<Vec<PodRef>>;
     async fn watch_pods(
         &self,
@@ -96,4 +107,8 @@ pub trait DaemonPort: Send + Sync {
 #[async_trait]
 pub trait DaemonConnector: Send + Sync {
     async fn connect(&self, key: &PipelineKey) -> Result<Box<dyn DaemonPort>>;
+
+    /// A `MonoVertex`'s daemon: `vertex_metrics` and `health` work; buffers and
+    /// watermarks do not exist for a `MonoVertex` and return an error.
+    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>>;
 }
