@@ -7,10 +7,12 @@
 mod ascii;
 mod dot;
 mod mermaid;
+mod mermaid_in;
 
 pub use ascii::render_ascii;
 pub use dot::to_dot;
 pub use mermaid::{Direction, to_mermaid};
+pub use mermaid_in::{ImportError, from_mermaid};
 
 use nfctl_core::model::Topology;
 

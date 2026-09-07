@@ -10,11 +10,18 @@ authors.workspace = true
 
 [dependencies]
 nfctl-core.workspace = true
+thiserror.workspace = true
 orthodag = { path = "../../../orthodag", version = "0.1.0", features = ["mermaid"] }
 
 [dev-dependencies]
 nfctl-core = { workspace = true, features = ["fake"] }
 insta.workspace = true
+criterion = { version = "0.7", default-features = false }
+serde_yaml_ng = "0.10"
+
+[[bench]]
+name = "render"
+harness = false
 
 [lints]
 workspace = true

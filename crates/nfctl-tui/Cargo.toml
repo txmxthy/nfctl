@@ -19,6 +19,7 @@ unicode-width = "0.2"
 
 [dev-dependencies]
 nfctl-core = { workspace = true, features = ["fake"] }
+nfctl-graph.workspace = true
 insta.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 crossterm = "0.29"

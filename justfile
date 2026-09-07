@@ -22,6 +22,22 @@ deny:
 # what CI runs
 ci: lint test deny
 
+# criterion benches over the private corpus (silently empty without it)
+bench:
+    cargo bench -p nfctl-graph --bench render
+
+# anonymise Mermaid diagrams into the private corpus: just corpus OUT IN_DIR...
+corpus out +dirs:
+    python3 scripts/anonymise-mermaid.py --check {{out}} {{dirs}}
+
+# synthetic --fixture file from the private corpus
+corpus-fixture:
+    cargo run -q -p nfctl-graph --example corpus_fixture -- testdata/private testdata/private/fixture.yaml
+
+# ASCII renders of every corpus pipeline, for eyeballing (testdata/private/out/)
+corpus-render:
+    cargo run -q -p nfctl-graph --example corpus_render -- testdata/private testdata/private/out
+
 # live tests need a local demo cluster (see docs/demo/demo.md)
 test-live: (_require_ctx)
     NFCTL_TEST_CONTEXT={{demo_ctx}} cargo test --workspace --all-features -- --ignored
