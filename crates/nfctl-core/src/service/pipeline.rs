@@ -49,7 +49,7 @@ impl PipelineService {
         self.daemons.as_ref()
     }
 
-    pub async fn list_isb(&self, ns: &Namespace) -> Result<Vec<crate::model::IsbService>> {
+    pub async fn list_isb(&self, ns: Option<&Namespace>) -> Result<Vec<crate::model::IsbService>> {
         let mut v = self.cluster.list_isb(ns).await?;
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)

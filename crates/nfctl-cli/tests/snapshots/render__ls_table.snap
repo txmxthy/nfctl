@@ -2,6 +2,7 @@
 source: crates/nfctl-cli/tests/render.rs
 expression: "out(&[\"ls\"]).await"
 ---
-NAME             PHASE    VERTICES  SOURCES  SINKS  UDFS  AGE
-paused-pipeline  Paused   3         1        1      1     3d
-simple-pipeline  Running  3         1        1      1     3d
+NAMESPACE  NAME             PHASE    VERTICES  SOURCES  SINKS  UDFS  AGE
+demo       paused-pipeline  Paused   3         1        1      1     3d
+demo       simple-pipeline  Running  3         1        1      1     3d
+other      elsewhere        Failed   3         1        1      1     3d

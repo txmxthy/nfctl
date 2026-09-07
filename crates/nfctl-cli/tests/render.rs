@@ -373,3 +373,39 @@ async fn mvtx_commands() {
         "demo/mono: resume\n"
     );
 }
+
+#[tokio::test]
+async fn bare_names_resolve_across_namespaces_unless_ambiguous() {
+    let c = FakeCluster::default();
+    c.add_pipelines([
+        sample_pipeline("team-a", "shared-name", PipelinePhase::Running),
+        sample_pipeline("team-b", "shared-name", PipelinePhase::Paused),
+    ]);
+    let ctx = ctx_with(c);
+    // `elsewhere` lives only in `other`, so no -n is needed.
+    assert!(
+        out_ctx(&Cli::parse_from(["nfctl", "get", "elsewhere"]), &ctx)
+            .await
+            .contains("Failed")
+    );
+    let err = run(&Cli::parse_from(["nfctl", "get", "shared-name"]), &ctx)
+        .await
+        .err()
+        .unwrap();
+    assert!(matches!(err, nfctl_core::Error::Usage(_)), "{err}");
+    assert!(
+        err.to_string().contains("team-a/shared-name") && err.to_string().contains("pass -n"),
+        "{err}"
+    );
+    assert!(
+        out_ctx(
+            &Cli::parse_from(["nfctl", "get", "shared-name", "-n", "team-b"]),
+            &ctx
+        )
+        .await
+        .contains("Paused")
+    );
+    // Lists span the cluster by default and show the namespace column.
+    let all = out_ctx(&Cli::parse_from(["nfctl", "ls"]), &ctx).await;
+    assert!(all.starts_with("NAMESPACE") && all.contains("team-a") && all.contains("other"));
+}

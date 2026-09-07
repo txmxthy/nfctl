@@ -2,5 +2,5 @@
 source: crates/nfctl-cli/tests/render.rs
 expression: "out(&[\"mvtx\", \"ls\", \"-o\", \"wide\"]).await"
 ---
-NAME  PHASE    REPLICAS  READY  AGE  DESIRED  TRANSFORMER  MAP  MESSAGE
-mono  Running  1         1      3d   Running  yes          no
+NAMESPACE  NAME  PHASE    REPLICAS  READY  AGE  DESIRED  TRANSFORMER  MAP  MESSAGE
+demo       mono  Running  1         1      3d   Running  yes          no

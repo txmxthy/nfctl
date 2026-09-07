@@ -188,5 +188,98 @@ expression: "out(&[\"ls\", \"-o\", \"json\"]).await"
       "pause_started": null,
       "last_updated": null
     }
+  },
+  {
+    "key": {
+      "namespace": "other",
+      "name": "elsewhere"
+    },
+    "meta": {
+      "generation": 1,
+      "created": "1970-01-01T00:00:00Z",
+      "instance": null,
+      "resume_strategy": null
+    },
+    "spec": {
+      "isb": "default",
+      "lifecycle": {
+        "desired": "Running",
+        "pause_grace": 30,
+        "deletion_grace": 30
+      },
+      "limits": {
+        "read_batch_size": 500,
+        "buffer_max_length": 30000,
+        "buffer_usage_limit": 0.8
+      },
+      "topology": {
+        "vertices": [
+          {
+            "name": "in",
+            "kind": "source",
+            "partitions": 1,
+            "scale": {
+              "min": null,
+              "max": null,
+              "disabled": false
+            },
+            "image": null
+          },
+          {
+            "name": "cat",
+            "kind": "map",
+            "partitions": 1,
+            "scale": {
+              "min": null,
+              "max": null,
+              "disabled": false
+            },
+            "image": null
+          },
+          {
+            "name": "out",
+            "kind": "sink",
+            "partitions": 1,
+            "scale": {
+              "min": null,
+              "max": null,
+              "disabled": false
+            },
+            "image": null
+          }
+        ],
+        "edges": [
+          {
+            "from": "in",
+            "to": "cat",
+            "conditions": null,
+            "on_full": "retryUntilSuccess"
+          },
+          {
+            "from": "cat",
+            "to": "out",
+            "conditions": null,
+            "on_full": "retryUntilSuccess"
+          }
+        ]
+      }
+    },
+    "status": {
+      "phase": "Failed",
+      "message": null,
+      "conditions": [],
+      "observed_generation": null,
+      "drained_on_pause": false,
+      "counts": {
+        "total": 3,
+        "sources": 1,
+        "sinks": 1,
+        "udfs": 1,
+        "map_udfs": 1,
+        "reduce_udfs": 0
+      },
+      "pause_started": null,
+      "last_updated": null
+    }
   }
 ]

@@ -293,12 +293,15 @@ impl ClusterPort for KubeCluster {
         Ok(())
     }
 
-    async fn list_isb(&self, ns: &Namespace) -> Result<Vec<IsbService>> {
-        let list = self
-            .isbs(ns)
+    async fn list_isb(&self, ns: Option<&Namespace>) -> Result<Vec<IsbService>> {
+        let api = match ns {
+            Some(ns) => self.isbs(ns),
+            None => Api::all_with(self.client.clone(), &crate::dto::isb_resource()),
+        };
+        let list = api
             .list(&ListParams::default())
             .await
-            .map_err(|e| map_kube(e, "namespace", ns.as_str()))?;
+            .map_err(|e| map_kube(e, "namespace", ns.map_or("*", Namespace::as_str)))?;
         list.items.into_iter().map(into_isb).collect()
     }
 

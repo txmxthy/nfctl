@@ -75,11 +75,79 @@ fn invalid_arg(what: &'static str, value: &str, e: impl std::fmt::Display) -> Er
 }
 
 impl Context {
+    /// The namespace for manifests that do not name one: the kubeconfig default.
     fn namespace(&self, cli: &Cli) -> Result<Namespace> {
         match &cli.globals.namespace {
             Some(ns) => Namespace::new(ns).map_err(|e| invalid_arg("namespace", ns, e)),
             None => Ok(self.default_namespace.clone()),
         }
+    }
+
+    /// `Some` only when `-n` was given. Lists span the cluster otherwise: with a
+    /// namespace per pipeline, the kubeconfig's namespace is rarely the right one.
+    fn scope(cli: &Cli) -> Result<Option<Namespace>> {
+        match &cli.globals.namespace {
+            Some(ns) => Namespace::new(ns)
+                .map(Some)
+                .map_err(|e| invalid_arg("namespace", ns, e)),
+            None => Ok(None),
+        }
+    }
+
+    /// A pipeline by name: in `-n` when given, else wherever it uniquely exists.
+    async fn resolve_pipeline(&self, cli: &Cli, name: &str) -> Result<PipelineKey> {
+        let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
+        if let Some(ns) = Self::scope(cli)? {
+            return Ok(PipelineKey::new(ns, name));
+        }
+        let found: Vec<PipelineKey> = self
+            .service
+            .list(None)
+            .await?
+            .into_iter()
+            .filter(|p| p.key.name == name)
+            .map(|p| p.key)
+            .collect();
+        unique("pipeline", &name, found)
+    }
+
+    async fn resolve_monovertex(&self, cli: &Cli, name: &str) -> Result<MonoVertexKey> {
+        let name = PipelineName::new(name).map_err(|e| invalid_arg("monovertex", name, e))?;
+        if let Some(namespace) = Self::scope(cli)? {
+            return Ok(MonoVertexKey { namespace, name });
+        }
+        let found: Vec<MonoVertexKey> = self
+            .cluster
+            .list_monovertices(None)
+            .await?
+            .into_iter()
+            .filter(|m| m.key.name == name)
+            .map(|m| m.key)
+            .collect();
+        unique("monovertex", &name, found)
+    }
+}
+
+/// Exactly one match, or a usage error naming the namespaces to choose from.
+fn unique<K: std::fmt::Display>(
+    kind: &'static str,
+    name: &PipelineName,
+    mut found: Vec<K>,
+) -> Result<K> {
+    match found.len() {
+        0 => Err(Error::NotFound {
+            kind,
+            name: name.to_string(),
+        }),
+        1 => Ok(found.remove(0)),
+        _ => Err(Error::Usage(format!(
+            "{kind} `{name}` exists in more than one namespace ({}); pass -n",
+            found
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
     }
 }
 
@@ -154,9 +222,7 @@ pub async fn run(cli: &Cli, ctx: &Context) -> Result<Output> {
         once: false,
     } = &cli.command
     {
-        let ns = ctx.namespace(cli)?;
-        let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
-        let key = PipelineKey::new(ns, name);
+        let key = ctx.resolve_pipeline(cli, name).await?;
         let fmt = cli.globals.output;
         let service = ctx.service.clone();
         let every = Duration::from_secs((*interval).max(1));
@@ -182,18 +248,15 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
     let fmt = cli.globals.output;
     match &cli.command {
         Command::Ls => {
-            let ns = if cli.globals.all_namespaces {
-                None
-            } else {
-                Some(ctx.namespace(cli)?)
-            };
+            let ns = Context::scope(cli)?;
             let pipelines = ctx.service.list(ns.as_ref()).await?;
-            output::pipelines(&pipelines, fmt, cli.globals.all_namespaces, ctx.now)
+            output::pipelines(&pipelines, fmt, ns.is_none(), ctx.now)
         }
         Command::Get { name } => {
-            let ns = ctx.namespace(cli)?;
-            let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
-            let p = ctx.service.get(&PipelineKey::new(ns, name)).await?;
+            let p = ctx
+                .service
+                .get(&ctx.resolve_pipeline(cli, name).await?)
+                .await?;
             match fmt {
                 OutputFormat::Json | OutputFormat::Yaml => output::serialised(&p, fmt),
                 OutputFormat::Table | OutputFormat::Wide => {
@@ -206,9 +269,10 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
             format,
             width,
         } => {
-            let ns = ctx.namespace(cli)?;
-            let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
-            let p = ctx.service.get(&PipelineKey::new(ns, name)).await?;
+            let p = ctx
+                .service
+                .get(&ctx.resolve_pipeline(cli, name).await?)
+                .await?;
             match fmt {
                 OutputFormat::Json | OutputFormat::Yaml => {
                     output::serialised(&p.spec.topology, fmt)
@@ -229,12 +293,8 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
         | Command::Top {
             name, once: true, ..
         } => {
-            let ns = ctx.namespace(cli)?;
-            let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
-            let v = ctx
-                .service
-                .view(&PipelineKey::new(ns, name), ctx.now)
-                .await?;
+            let key = ctx.resolve_pipeline(cli, name).await?;
+            let v = ctx.service.view(&key, ctx.now).await?;
             output::view(&v, fmt)
         }
         Command::Isb { command } => run_isb(cli, ctx, command).await,
@@ -256,14 +316,14 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
 
 async fn run_isb(cli: &Cli, ctx: &Context, command: &IsbCommand) -> Result<String> {
     let fmt = cli.globals.output;
-    let ns = ctx.namespace(cli)?;
+    let ns = Context::scope(cli)?;
     match command {
-        IsbCommand::Ls => output::isbs(&ctx.service.list_isb(&ns).await?, fmt),
+        IsbCommand::Ls => output::isbs(&ctx.service.list_isb(ns.as_ref()).await?, fmt),
         IsbCommand::Inspect { name } => {
             let name = IsbName::new(name).map_err(|e| invalid_arg("isbsvc", name, e))?;
             let isb = ctx
                 .service
-                .list_isb(&ns)
+                .list_isb(ns.as_ref())
                 .await?
                 .into_iter()
                 .find(|i| i.name == name)
@@ -273,7 +333,7 @@ async fn run_isb(cli: &Cli, ctx: &Context, command: &IsbCommand) -> Result<Strin
                 })?;
             let users: Vec<_> = ctx
                 .service
-                .list(Some(&ns))
+                .list(ns.as_ref())
                 .await?
                 .into_iter()
                 .filter(|p| p.spec.isb == name)
@@ -281,12 +341,6 @@ async fn run_isb(cli: &Cli, ctx: &Context, command: &IsbCommand) -> Result<Strin
             output::isb_detail(&isb, &users, fmt)
         }
     }
-}
-
-fn pipeline_key(cli: &Cli, ctx: &Context, name: &str) -> Result<PipelineKey> {
-    let ns = ctx.namespace(cli)?;
-    let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
-    Ok(PipelineKey::new(ns, name))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -301,7 +355,7 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             timeout,
             dry_run,
         } => {
-            let key = pipeline_key(cli, ctx, name)?;
+            let key = ctx.resolve_pipeline(cli, name).await?;
             let wait = wait.then(|| Duration::from_secs(*timeout));
             let r = lifecycle::pause(cluster, daemons, &key, wait, *dry_run).await?;
             if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
@@ -326,7 +380,7 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             strategy,
             dry_run,
         } => {
-            let key = pipeline_key(cli, ctx, name)?;
+            let key = ctx.resolve_pipeline(cli, name).await?;
             let strategy = match strategy {
                 Strategy::Fast => ResumeStrategy::Fast,
                 Strategy::Slow => ResumeStrategy::Slow,
@@ -344,7 +398,7 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             timeout,
             dry_run,
         } => {
-            let key = pipeline_key(cli, ctx, name)?;
+            let key = ctx.resolve_pipeline(cli, name).await?;
             let vertex = vertex
                 .as_deref()
                 .map(|v| VertexName::new(v).map_err(|e| invalid_arg("vertex", v, e)))
@@ -386,7 +440,7 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             phase,
             timeout,
         } => {
-            let key = pipeline_key(cli, ctx, name)?;
+            let key = ctx.resolve_pipeline(cli, name).await?;
             let phase = match phase {
                 Phase::Running => PipelinePhase::Running,
                 Phase::Paused => PipelinePhase::Paused,
@@ -403,7 +457,7 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             replicas,
             dry_run,
         } => {
-            let key = pipeline_key(cli, ctx, name)?;
+            let key = ctx.resolve_pipeline(cli, name).await?;
             let vertex = VertexName::new(vertex).map_err(|e| invalid_arg("vertex", vertex, e))?;
             cluster
                 .scale_vertex(&key, &vertex, *replicas, *dry_run)
@@ -508,8 +562,10 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
         timestamps,
     } = &cli.command
     {
-        let ns = ctx.namespace(cli)?;
-        let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
+        let PipelineKey {
+            namespace: ns,
+            name,
+        } = ctx.resolve_pipeline(cli, name).await?;
         let vertex = vertex
             .as_deref()
             .map(|v| VertexName::new(v).map_err(|e| invalid_arg("vertex", v, e)))
@@ -560,11 +616,7 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
         )));
     }
     if let Command::Tui { interval } = &cli.command {
-        let ns = if cli.globals.all_namespaces {
-            None
-        } else {
-            Some(ctx.namespace(cli)?)
-        };
+        let ns = Context::scope(cli)?;
         nfctl_tui::run(
             Arc::clone(&ctx.cluster),
             ctx.service.clone(),
@@ -578,30 +630,20 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
     Ok(None)
 }
 
-fn monovertex_key(cli: &Cli, ctx: &Context, name: &str) -> Result<MonoVertexKey> {
-    let namespace = ctx.namespace(cli)?;
-    let name = PipelineName::new(name).map_err(|e| invalid_arg("monovertex", name, e))?;
-    Ok(MonoVertexKey { namespace, name })
-}
-
 async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Output> {
     let fmt = cli.globals.output;
     let cluster = ctx.cluster.as_ref();
     match command {
         MvtxCommand::Ls => {
-            let ns = if cli.globals.all_namespaces {
-                None
-            } else {
-                Some(ctx.namespace(cli)?)
-            };
+            let ns = Context::scope(cli)?;
             let mut items = cluster.list_monovertices(ns.as_ref()).await?;
             items.sort_by(|a, b| {
                 (&a.key.namespace, &a.key.name).cmp(&(&b.key.namespace, &b.key.name))
             });
-            output::monovertices(&items, fmt, cli.globals.all_namespaces, ctx.now).map(Output::Text)
+            output::monovertices(&items, fmt, ns.is_none(), ctx.now).map(Output::Text)
         }
         MvtxCommand::Get { name } => {
-            let key = monovertex_key(cli, ctx, name)?;
+            let key = ctx.resolve_monovertex(cli, name).await?;
             let m = cluster.get_monovertex(&key).await?;
             match fmt {
                 OutputFormat::Json | OutputFormat::Yaml => output::serialised(&m, fmt),
@@ -615,7 +657,7 @@ async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Out
             .map(Output::Text)
         }
         MvtxCommand::Status { name } => {
-            let key = monovertex_key(cli, ctx, name)?;
+            let key = ctx.resolve_monovertex(cli, name).await?;
             let m = cluster.get_monovertex(&key).await?;
             let mut warnings = Vec::new();
             let (health, metrics) = match ctx.service.daemons().connect_monovertex(&key).await {
@@ -644,7 +686,7 @@ async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Out
             tail: tail_lines,
         } => run_mvtx_logs(cli, ctx, name, *follow, *all_containers, *tail_lines).await,
         MvtxCommand::Pause { name, dry_run } => {
-            let key = monovertex_key(cli, ctx, name)?;
+            let key = ctx.resolve_monovertex(cli, name).await?;
             cluster
                 .set_monovertex_lifecycle(&key, nfctl_core::model::DesiredPhase::Paused, *dry_run)
                 .await?;
@@ -654,7 +696,7 @@ async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Out
             )))
         }
         MvtxCommand::Resume { name, dry_run } => {
-            let key = monovertex_key(cli, ctx, name)?;
+            let key = ctx.resolve_monovertex(cli, name).await?;
             cluster
                 .set_monovertex_lifecycle(&key, nfctl_core::model::DesiredPhase::Running, *dry_run)
                 .await?;
@@ -674,7 +716,7 @@ async fn run_mvtx_logs(
     all_containers: bool,
     tail_lines: Option<u32>,
 ) -> Result<Output> {
-    let key = monovertex_key(cli, ctx, name)?;
+    let key = ctx.resolve_monovertex(cli, name).await?;
     let cluster = ctx.cluster.as_ref();
     let selector = Selector::monovertex_pods(&key.name);
     let containers = if all_containers {

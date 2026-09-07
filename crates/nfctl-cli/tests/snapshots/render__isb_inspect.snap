@@ -8,3 +8,4 @@ default  Running  yes      3         2.10.3   yes
 PIPELINE         PHASE    VERTICES
 paused-pipeline  Paused   3
 simple-pipeline  Running  3
+elsewhere        Failed   3

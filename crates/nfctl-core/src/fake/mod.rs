@@ -247,7 +247,7 @@ impl ClusterPort for FakeCluster {
         Ok(())
     }
 
-    async fn list_isb(&self, _ns: &Namespace) -> Result<Vec<IsbService>> {
+    async fn list_isb(&self, _ns: Option<&Namespace>) -> Result<Vec<IsbService>> {
         Ok(self.lock().isbs.clone())
     }
 

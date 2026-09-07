@@ -14,11 +14,11 @@ pub struct Cli {
 
 #[derive(Debug, Clone, Args)]
 pub struct Globals {
-    /// Namespace (defaults to the kubeconfig context's namespace)
+    /// Namespace. Without it, lists span every namespace and a bare name resolves across them
     #[arg(short, long, global = true, env = "NFCTL_NAMESPACE")]
     pub namespace: Option<String>,
 
-    /// All namespaces
+    /// All namespaces (already the default without -n; kept for muscle memory)
     #[arg(short = 'A', long, global = true, conflicts_with = "namespace")]
     pub all_namespaces: bool,
 

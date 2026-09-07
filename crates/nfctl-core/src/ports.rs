@@ -53,7 +53,8 @@ pub trait ClusterPort: Send + Sync {
         dry_run: bool,
     ) -> Result<()>;
 
-    async fn list_isb(&self, ns: &Namespace) -> Result<Vec<IsbService>>;
+    /// All namespaces when `ns` is `None`.
+    async fn list_isb(&self, ns: Option<&Namespace>) -> Result<Vec<IsbService>>;
 
     async fn list_monovertices(&self, ns: Option<&Namespace>) -> Result<Vec<MonoVertex>>;
     async fn get_monovertex(&self, key: &MonoVertexKey) -> Result<MonoVertex>;

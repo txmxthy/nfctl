@@ -33,8 +33,11 @@ nfctl completions <shell>
 nfctl map                                 every command and option as one tree
 ```
 
-Global flags: `-n/--namespace`, `-A`, `--context`, `--request-timeout`, `-o`,
-`--daemon-url` (skip the port-forward when running in-cluster).
+Global flags: `-n/--namespace`, `--context`, `--request-timeout`, `-o`, `--daemon-url`
+(skip the port-forward when running in-cluster), `--fixture` (no cluster at all).
+
+Without `-n`, lists span every namespace and a bare pipeline name resolves to the
+namespace it lives in; the tool refuses only when the same name exists in several.
 
 ### `dag`
 
