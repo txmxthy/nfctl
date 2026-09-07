@@ -1,6 +1,6 @@
 # nfctl
 
-A CLI for operating [Numaflow](https://numaflow.numaproj.io/) pipelines.
+A CLI and TUI for operating [Numaflow](https://numaflow.numaproj.io/) pipelines.
 
 `kubectl` can create and patch Numaflow resources, but it cannot follow a vertex's
 logs through pod churn, show buffer fill and processing rates next to the pipeline
@@ -27,6 +27,7 @@ nfctl recycle <pipeline> [vertex]         restart a vertex's pods, or pause-drai
 nfctl wait <pipeline> --phase paused
 nfctl scale <pipeline> <vertex> <n>
 nfctl apply -f spec.yaml [--check]        refuses changes that need delete-and-recreate
+nfctl tui                                 the same, interactive
 nfctl completions <shell>
 ```
 
@@ -87,6 +88,7 @@ the tapes behind these recordings.
 | ![ls](docs/demo/ls.gif) | ![dag](docs/demo/dag.gif) |
 | ![top](docs/demo/top.gif) | ![pause](docs/demo/pause.gif) |
 | ![logs](docs/demo/logs.gif) | ![apply](docs/demo/apply.gif) |
+| ![tui](docs/demo/tui.gif) | |
 
 ## Design
 

@@ -18,6 +18,7 @@ Script, one tape per step:
 5. `pause --wait` → `status` → `resume --strategy slow`: a drained pause and a slow ramp-up.
 6. `apply --check` on two edits of the fanout pipeline: one warns, one is refused (exit 3).
 7. `recycle` a vertex and watch the replacement pod pick up in `logs -f`.
+8. `tui`: list → detail → vertex logs and back.
 
 The gifs next to the tapes are what `just record` produced last. The tapes assume a shell with `nfctl` on PATH and the local context selected
 (`NFCTL_CONTEXT=<local-context>` works too).

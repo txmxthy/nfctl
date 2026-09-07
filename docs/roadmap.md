@@ -12,7 +12,7 @@
 | `recycle` | done | M5 |
 | `apply --check` | done | M5 |
 | `scale` | done | M5 |
-| `tui` | stub | M7 |
+| `tui` | done | M7 |
 | `mvtx …` | stub | M8 |
 
 Statuses: `done` · `wip` · `stub` (command exists, exits 4 with this pointer) · `planned`.

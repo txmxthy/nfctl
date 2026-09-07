@@ -133,67 +133,8 @@ pub async fn run(cli: &Cli, ctx: &Context) -> Result<Output> {
     if let Some(offline) = run_offline(cli) {
         return offline.map(Output::Text);
     }
-    if let Command::Logs {
-        name,
-        vertex,
-        containers,
-        all_containers,
-        follow,
-        since,
-        tail: tail_lines,
-        timestamps,
-    } = &cli.command
-    {
-        let ns = ctx.namespace(cli)?;
-        let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
-        let vertex = vertex
-            .as_deref()
-            .map(|v| VertexName::new(v).map_err(|e| invalid_arg("vertex", v, e)))
-            .transpose()?;
-        let selector = Selector::vertex_pods(&name, vertex.as_ref());
-        let containers = if *all_containers {
-            ContainerSelect::All
-        } else if containers.is_empty() {
-            ContainerSelect::Default
-        } else {
-            ContainerSelect::Named(
-                containers
-                    .iter()
-                    .map(|c| ContainerName::new(c).map_err(|e| invalid_arg("container", c, e)))
-                    .collect::<Result<Vec<_>>>()?,
-            )
-        };
-        let since = since
-            .as_deref()
-            .map(parse_duration)
-            .transpose()?
-            .map(|d| Timestamp::new(ctx.now.get() - d));
-        let opts = TailOptions {
-            containers,
-            since,
-            tail_lines: *tail_lines,
-            ..TailOptions::default()
-        };
-        let timestamps = *timestamps;
-        if *follow {
-            let (lines, handle) = tail(Arc::clone(&ctx.cluster), ns, selector, opts).await?;
-            // The handle rides along with the stream so the tails live exactly as long as it.
-            let stream = lines.map(move |l| {
-                let _keep = &handle;
-                format_line(&l, timestamps)
-            });
-            return Ok(Output::Lines(Box::pin(stream)));
-        }
-        let lines = snapshot(ctx.cluster.as_ref(), &ns, &selector, &opts).await?;
-        if lines.is_empty() {
-            return Ok(Output::Text("No pods found.\n".to_owned()));
-        }
-        return Ok(Output::Text(
-            lines
-                .iter()
-                .map(|l| format_line(l, timestamps) + "\n")
-                .collect(),
-        ));
+    if let Some(out) = run_logs(cli, ctx).await? {
+        return Ok(out);
     }
     if let Command::Top {
         name,
@@ -295,8 +236,8 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
         Command::Completions { .. }
         | Command::Logs { .. }
         | Command::Top { .. }
-        | Command::Mvtx
-        | Command::Tui => unreachable!("handled before run_text"),
+        | Command::Tui { .. }
+        | Command::Mvtx => unreachable!("handled before run_text"),
     }
 }
 
@@ -539,4 +480,87 @@ async fn run_apply(
         ),
     );
     Ok(s)
+}
+
+/// `logs`: snapshot or follow. `None` when the command is something else.
+async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
+    if let Command::Logs {
+        name,
+        vertex,
+        containers,
+        all_containers,
+        follow,
+        since,
+        tail: tail_lines,
+        timestamps,
+    } = &cli.command
+    {
+        let ns = ctx.namespace(cli)?;
+        let name = PipelineName::new(name).map_err(|e| invalid_arg("pipeline", name, e))?;
+        let vertex = vertex
+            .as_deref()
+            .map(|v| VertexName::new(v).map_err(|e| invalid_arg("vertex", v, e)))
+            .transpose()?;
+        let selector = Selector::vertex_pods(&name, vertex.as_ref());
+        let containers = if *all_containers {
+            ContainerSelect::All
+        } else if containers.is_empty() {
+            ContainerSelect::Default
+        } else {
+            ContainerSelect::Named(
+                containers
+                    .iter()
+                    .map(|c| ContainerName::new(c).map_err(|e| invalid_arg("container", c, e)))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        };
+        let since = since
+            .as_deref()
+            .map(parse_duration)
+            .transpose()?
+            .map(|d| Timestamp::new(ctx.now.get() - d));
+        let opts = TailOptions {
+            containers,
+            since,
+            tail_lines: *tail_lines,
+            ..TailOptions::default()
+        };
+        let timestamps = *timestamps;
+        if *follow {
+            let (lines, handle) = tail(Arc::clone(&ctx.cluster), ns, selector, opts).await?;
+            // The handle rides along with the stream so the tails live exactly as long as it.
+            let stream = lines.map(move |l| {
+                let _keep = &handle;
+                format_line(&l, timestamps)
+            });
+            return Ok(Some(Output::Lines(Box::pin(stream))));
+        }
+        let lines = snapshot(ctx.cluster.as_ref(), &ns, &selector, &opts).await?;
+        if lines.is_empty() {
+            return Ok(Some(Output::Text("No pods found.\n".to_owned())));
+        }
+        return Ok(Some(Output::Text(
+            lines
+                .iter()
+                .map(|l| format_line(l, timestamps) + "\n")
+                .collect(),
+        )));
+    }
+    if let Command::Tui { interval } = &cli.command {
+        let ns = if cli.globals.all_namespaces {
+            None
+        } else {
+            Some(ctx.namespace(cli)?)
+        };
+        nfctl_tui::run(
+            Arc::clone(&ctx.cluster),
+            ctx.service.clone(),
+            ns,
+            Duration::from_secs((*interval).max(1)),
+        )
+        .await
+        .map_err(|e| Error::Cluster(Box::new(e)))?;
+        return Ok(Some(Output::Text(String::new())));
+    }
+    Ok(None)
 }

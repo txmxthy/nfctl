@@ -210,8 +210,12 @@ pub enum Command {
     #[command(about = "MonoVertex operations (preview: not implemented yet, see docs/roadmap.md)")]
     Mvtx,
 
-    /// Interactive terminal UI (preview: not implemented yet, see docs/roadmap.md)
-    Tui,
+    /// Interactive terminal UI
+    Tui {
+        /// Refresh interval in seconds
+        #[arg(short, long, default_value_t = 2, value_name = "SECS")]
+        interval: u64,
+    },
 
     /// Generate shell completions
     Completions {
@@ -255,7 +259,6 @@ impl Command {
     pub fn stub_name(&self) -> Option<&'static str> {
         Some(match self {
             Command::Mvtx => "mvtx",
-            Command::Tui => "tui",
             Command::Ls
             | Command::Get { .. }
             | Command::Dag { .. }
@@ -269,6 +272,7 @@ impl Command {
             | Command::Wait { .. }
             | Command::Apply { .. }
             | Command::Scale { .. }
+            | Command::Tui { .. }
             | Command::Completions { .. } => {
                 return None;
             }

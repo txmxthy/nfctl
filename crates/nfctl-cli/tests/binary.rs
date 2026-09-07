@@ -7,7 +7,7 @@ use assert_cmd::Command;
 fn stub_exits_4_and_points_at_roadmap() {
     Command::cargo_bin("nfctl")
         .unwrap()
-        .args(["tui"])
+        .args(["mvtx"])
         .assert()
         .code(4)
         .stderr(predicates::str::contains("roadmap"));

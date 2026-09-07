@@ -129,6 +129,23 @@ impl From<Topology> for TopologyRaw {
     }
 }
 
+/// DFS longest path to a sink with an on-stack set so cycles do not recurse forever.
+fn depth(v: usize, out: &[Vec<usize>], memo: &mut [Option<usize>], stack: &mut [bool]) -> usize {
+    if let Some(d) = memo[v] {
+        return d;
+    }
+    stack[v] = true;
+    let mut best = 0;
+    for &w in &out[v] {
+        if !stack[w] {
+            best = best.max(depth(w, out, memo, stack) + 1);
+        }
+    }
+    stack[v] = false;
+    memo[v] = Some(best);
+    best
+}
+
 impl Topology {
     /// Validate and build. Vertex order is preserved (it is the spec order).
     pub fn new(vertices: Vec<Vertex>, edges: Vec<Edge>) -> Result<Self, TopologyError> {
@@ -184,6 +201,54 @@ impl Topology {
     #[must_use]
     pub fn count(&self, kind: VertexKind) -> usize {
         self.vertices.iter().filter(|v| v.kind == kind).count()
+    }
+
+    /// Layered layout: each vertex's rank is the longest path from a source,
+    /// ignoring back-edges (cycles between UDFs). Sources are rank 0.
+    #[must_use]
+    pub fn ranks(&self) -> Vec<Vec<&Vertex>> {
+        use std::collections::HashMap;
+        let idx: HashMap<&VertexName, usize> = self
+            .vertices
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (&v.name, i))
+            .collect();
+        let n = self.vertices.len();
+        let mut out_edges: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for e in &self.edges {
+            if let (Some(&a), Some(&b)) = (idx.get(&e.from), idx.get(&e.to)) {
+                out_edges[a].push(b);
+            }
+        }
+        // Rank from the sink side (longest path to a sink), then flip so sources are 0.
+        let mut memo = vec![None; n];
+        let mut stack = vec![false; n];
+        let to_sink: Vec<usize> = (0..n)
+            .map(|v| depth(v, &out_edges, &mut memo, &mut stack))
+            .collect();
+        let max = to_sink.iter().copied().max().unwrap_or(0);
+        // Sources sit at 0; everything else as far left as its longest incoming chain allows.
+        let mut rank = vec![0usize; n];
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for e in &self.edges {
+                if let (Some(&a), Some(&b)) = (idx.get(&e.from), idx.get(&e.to))
+                    && to_sink[a] > to_sink[b]
+                    && rank[b] < rank[a] + 1
+                {
+                    rank[b] = rank[a] + 1;
+                    changed = true;
+                }
+            }
+        }
+        let mut layers: Vec<Vec<&Vertex>> = vec![Vec::new(); max + 1];
+        for (i, v) in self.vertices.iter().enumerate() {
+            layers[rank[i].min(max)].push(v);
+        }
+        layers.retain(|l| !l.is_empty());
+        layers
     }
 
     /// What changes when `self` is replaced by `new`.
@@ -298,6 +363,35 @@ pub(crate) mod tests {
             vec![e("in", "a"), e("a", "a"), e("a", "out")],
         );
         assert!(t.is_ok());
+    }
+
+    #[test]
+    fn ranks_are_longest_paths_and_survive_cycles() {
+        let t = Topology::new(
+            vec![
+                v("a", VertexKind::Source),
+                v("b", VertexKind::Source),
+                v("m", VertexKind::Map),
+                v("n", VertexKind::Map),
+                v("s", VertexKind::Sink),
+            ],
+            vec![
+                e("a", "m"),
+                e("b", "n"),
+                e("m", "n"),
+                e("n", "m"),
+                e("n", "s"),
+            ],
+        )
+        .unwrap();
+        let names: Vec<Vec<&str>> = t
+            .ranks()
+            .iter()
+            .map(|l| l.iter().map(|v| v.name.as_str()).collect())
+            .collect();
+        assert_eq!(names[0], vec!["a", "b"]);
+        assert!(names.last().unwrap().contains(&"s"));
+        assert_eq!(names.iter().flatten().count(), 5);
     }
 
     #[test]

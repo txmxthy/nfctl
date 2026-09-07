@@ -16,6 +16,7 @@ nfctl-core = { path = "crates/nfctl-core", version = "0.1.0" }
 nfctl-k8s = { path = "crates/nfctl-k8s", version = "0.1.0" }
 nfctl-daemon = { path = "crates/nfctl-daemon", version = "0.1.0" }
 nfctl-graph = { path = "crates/nfctl-graph", version = "0.1.0" }
+nfctl-tui = { path = "crates/nfctl-tui", version = "0.1.0" }
 
 # async
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time"] }
