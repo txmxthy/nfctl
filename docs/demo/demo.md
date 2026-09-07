@@ -1,11 +1,17 @@
 # Demo
 
-Everything here runs against a local cluster only. `just demo-up` installs
+Two kinds of tape live here. Tapes that set `NFCTL_FIXTURE` run against
+`examples/fixtures/demo.yaml` and need no cluster: they are deterministic, render
+in CI, and their `Screenshot` lines produce the PNG stills the README embeds.
+The rest run against the local demo cluster.
+
+Everything cluster-bound runs against a local cluster only. `just demo-up` installs
 Numaflow into the current local context and applies `examples/`.
 
 ```
 just demo-up      # Numaflow + ISB + four example pipelines, waits for Running
-just record       # renders docs/demo/*.tape to gifs with vhs (needs `nfctl` on PATH)
+just record          # every tape (cluster ones need `just demo-up` first)
+just record-fixture  # only the fixture-driven tapes: no cluster needed
 just demo-down    # removes everything again
 ```
 

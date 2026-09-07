@@ -212,9 +212,14 @@ mod tests {
                 code: "D1".into(),
             }),
         };
-        let view = pipeline_view(&cluster, &FakeDaemons(daemon), &key(), Timestamp::now())
-            .await
-            .unwrap();
+        let view = pipeline_view(
+            &cluster,
+            &FakeDaemons::one(daemon),
+            &key(),
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
         assert!(view.warnings.is_empty());
         assert_eq!(view.health.as_ref().unwrap().status, Health::Healthy);
         assert_eq!(view.vertices[1].rate.m1, Some(3.0));

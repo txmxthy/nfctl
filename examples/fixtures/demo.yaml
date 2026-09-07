@@ -1,0 +1,777 @@
+# Synthetic fixture: what the fakes answer from with `nfctl --fixture`.
+# Shapes match the domain JSON (`nfctl get -o json`, `nfctl status -o json`).
+pipelines:
+- key:
+    namespace: default
+    name: fanout
+  meta:
+    generation: 1
+    created: '2026-01-01T00:00:00Z'
+    instance: null
+    resume_strategy: null
+  spec:
+    isb: default
+    lifecycle:
+      desired: Running
+      pause_grace: 30
+      deletion_grace: 30
+    limits:
+      read_batch_size: 500
+      buffer_max_length: 30000
+      buffer_usage_limit: 0.8
+    topology:
+      vertices:
+      - name: in
+        kind: source
+        partitions: 1
+        scale:
+          min: null
+          max: null
+          disabled: false
+        image: null
+      - name: even-or-odd
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-even-odd:stable
+      - name: even-sink
+        kind: sink
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: null
+      - name: odd-sink
+        kind: sink
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: null
+      - name: all-sink
+        kind: sink
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: null
+      edges:
+      - from: in
+        to: even-or-odd
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: even-or-odd
+        to: even-sink
+        conditions:
+          operator: or
+          values:
+          - even-tag
+        on_full: retryUntilSuccess
+      - from: even-or-odd
+        to: odd-sink
+        conditions:
+          operator: or
+          values:
+          - odd-tag
+        on_full: retryUntilSuccess
+      - from: even-or-odd
+        to: all-sink
+        conditions:
+          operator: or
+          values:
+          - even-tag
+          - odd-tag
+        on_full: retryUntilSuccess
+  status:
+    phase: Running
+    message: null
+    conditions:
+    - kind: Configured
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: DaemonServiceHealthy
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: Deployed
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: SideInputsManagersHealthy
+      ok: true
+      reason: NoSideInputs
+      message: No Side Inputs attached to the pipeline
+    - kind: VerticesHealthy
+      ok: true
+      reason: Successful
+      message: All vertices are healthy
+    observed_generation: 1
+    drained_on_pause: false
+    counts:
+      total: 5
+      sources: 1
+      sinks: 3
+      udfs: 1
+      map_udfs: 1
+      reduce_udfs: 0
+    pause_started: null
+    last_updated: null
+- key:
+    namespace: default
+    name: linear
+  meta:
+    generation: 3
+    created: '2026-01-01T00:00:00Z'
+    instance: null
+    resume_strategy: slow
+  spec:
+    isb: default
+    lifecycle:
+      desired: Running
+      pause_grace: 30
+      deletion_grace: 30
+    limits:
+      read_batch_size: 500
+      buffer_max_length: 30000
+      buffer_usage_limit: 0.8
+    topology:
+      vertices:
+      - name: in
+        kind: source
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: null
+      - name: cat
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-cat:stable
+      - name: out
+        kind: sink
+        partitions: 1
+        scale:
+          min: 1
+          max: null
+          disabled: false
+        image: null
+      edges:
+      - from: in
+        to: cat
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: cat
+        to: out
+        conditions: null
+        on_full: retryUntilSuccess
+  status:
+    phase: Running
+    message: null
+    conditions:
+    - kind: Configured
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: DaemonServiceHealthy
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: Deployed
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: SideInputsManagersHealthy
+      ok: true
+      reason: NoSideInputs
+      message: No Side Inputs attached to the pipeline
+    - kind: VerticesHealthy
+      ok: true
+      reason: Successful
+      message: All vertices are healthy
+    observed_generation: 3
+    drained_on_pause: false
+    counts:
+      total: 3
+      sources: 1
+      sinks: 1
+      udfs: 1
+      map_udfs: 1
+      reduce_udfs: 0
+    pause_started: null
+    last_updated: null
+- key:
+    namespace: default
+    name: partitions
+  meta:
+    generation: 1
+    created: '2026-01-01T00:00:00Z'
+    instance: null
+    resume_strategy: null
+  spec:
+    isb: default
+    lifecycle:
+      desired: Running
+      pause_grace: 30
+      deletion_grace: 30
+    limits:
+      read_batch_size: 500
+      buffer_max_length: 30000
+      buffer_usage_limit: 0.8
+    topology:
+      vertices:
+      - name: in
+        kind: source
+        partitions: 1
+        scale:
+          min: null
+          max: null
+          disabled: false
+        image: null
+      - name: cat
+        kind: map
+        partitions: 3
+        scale:
+          min: null
+          max: null
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-cat:stable
+      - name: out
+        kind: sink
+        partitions: 3
+        scale:
+          min: null
+          max: null
+          disabled: false
+        image: null
+      edges:
+      - from: in
+        to: cat
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: cat
+        to: out
+        conditions: null
+        on_full: retryUntilSuccess
+  status:
+    phase: Running
+    message: null
+    conditions:
+    - kind: Configured
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: DaemonServiceHealthy
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: Deployed
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: SideInputsManagersHealthy
+      ok: true
+      reason: NoSideInputs
+      message: No Side Inputs attached to the pipeline
+    - kind: VerticesHealthy
+      ok: true
+      reason: Successful
+      message: All vertices are healthy
+    observed_generation: 1
+    drained_on_pause: false
+    counts:
+      total: 3
+      sources: 1
+      sinks: 1
+      udfs: 1
+      map_udfs: 1
+      reduce_udfs: 0
+    pause_started: null
+    last_updated: null
+- key:
+    namespace: default
+    name: scaling
+  meta:
+    generation: 1
+    created: '2026-01-01T00:00:00Z'
+    instance: null
+    resume_strategy: null
+  spec:
+    isb: default
+    lifecycle:
+      desired: Running
+      pause_grace: 30
+      deletion_grace: 30
+    limits:
+      read_batch_size: 500
+      buffer_max_length: 30000
+      buffer_usage_limit: 0.8
+    topology:
+      vertices:
+      - name: in
+        kind: source
+        partitions: 1
+        scale:
+          min: null
+          max: null
+          disabled: false
+        image: null
+      - name: cat
+        kind: map
+        partitions: 1
+        scale:
+          min: 1
+          max: 4
+          disabled: false
+        image: quay.io/numaio/numaflow-go/map-cat:stable
+      - name: out
+        kind: sink
+        partitions: 1
+        scale:
+          min: 1
+          max: 3
+          disabled: false
+        image: null
+      edges:
+      - from: in
+        to: cat
+        conditions: null
+        on_full: retryUntilSuccess
+      - from: cat
+        to: out
+        conditions: null
+        on_full: retryUntilSuccess
+  status:
+    phase: Running
+    message: null
+    conditions:
+    - kind: Configured
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: DaemonServiceHealthy
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: Deployed
+      ok: true
+      reason: Successful
+      message: Successful
+    - kind: SideInputsManagersHealthy
+      ok: true
+      reason: NoSideInputs
+      message: No Side Inputs attached to the pipeline
+    - kind: VerticesHealthy
+      ok: true
+      reason: Successful
+      message: All vertices are healthy
+    observed_generation: 1
+    drained_on_pause: false
+    counts:
+      total: 3
+      sources: 1
+      sinks: 1
+      udfs: 1
+      map_udfs: 1
+      reduce_udfs: 0
+    pause_started: null
+    last_updated: null
+monovertices:
+- key:
+    namespace: default
+    name: mono
+  desired: Running
+  phase: Running
+  replicas: 1
+  desired_replicas: 1
+  ready_replicas: 1
+  has_transformer: true
+  has_map: true
+  message: null
+  conditions:
+  - kind: DaemonHealthy
+    ok: true
+    reason: Successful
+    message: Successful
+  - kind: Deployed
+    ok: true
+    reason: Successful
+    message: Successful
+  - kind: PodsHealthy
+    ok: true
+    reason: Running
+    message: All pods are healthy
+  created: '2026-01-01T00:00:00Z'
+isbs:
+- name: default
+  version: latest
+  replicas: 3
+  persistent: true
+  phase: Running
+  healthy: true
+daemons:
+  linear:
+    health:
+      status: healthy
+      message: Pipeline data flow is healthy
+      code: D1
+    buffers:
+    - name: default-linear-cat-0
+      from: in
+      to: cat
+      pending: 0
+      ack_pending: 6
+      total: 6
+      length: 30000
+      usage: 0.0002
+      usage_limit: 0.8
+      is_full: false
+    - name: default-linear-out-0
+      from: cat
+      to: out
+      pending: 0
+      ack_pending: 10
+      total: 10
+      length: 30000
+      usage: 0.0003333333333333333
+      usage_limit: 0.8
+      is_full: false
+    metrics:
+    - vertex: in
+      rate:
+        m1: 5.0
+        m5: 5.0
+        m15: 5.0
+        default: 5.0
+      pending:
+        m1: null
+        m5: null
+        m15: null
+        default: null
+    - vertex: cat
+      rate:
+        m1: 5.0
+        m5: 5.0
+        m15: 5.0
+        default: 5.0
+      pending:
+        m1: 0
+        m5: 0
+        m15: 0
+        default: 0
+    - vertex: out
+      rate:
+        m1: 5.0
+        m5: 5.0
+        m15: 5.0
+        default: 5.0
+      pending:
+        m1: 12
+        m5: 11
+        m15: 10
+        default: 12
+    watermarks:
+    - from: in
+      to: cat
+      enabled: true
+      per_partition:
+      - null
+    - from: cat
+      to: out
+      enabled: true
+      per_partition:
+      - null
+  fanout:
+    health:
+      status: warning
+      message: Buffer usage above the warning threshold on 1 edge
+      code: D3
+    buffers:
+    - name: default-fanout-even-or-odd-0
+      from: in
+      to: even-or-odd
+      pending: 3
+      ack_pending: 1
+      total: 4
+      length: 30000
+      usage: 0.0001
+      usage_limit: 0.8
+      is_full: false
+    - name: default-fanout-even-sink-0
+      from: even-or-odd
+      to: even-sink
+      pending: 3
+      ack_pending: 1
+      total: 4
+      length: 30000
+      usage: 0.0001
+      usage_limit: 0.8
+      is_full: false
+    - name: default-fanout-odd-sink-0
+      from: even-or-odd
+      to: odd-sink
+      pending: 3
+      ack_pending: 1
+      total: 4
+      length: 30000
+      usage: 0.0001
+      usage_limit: 0.8
+      is_full: false
+    - name: default-fanout-all-sink-0
+      from: even-or-odd
+      to: all-sink
+      pending: 3
+      ack_pending: 1
+      total: 4
+      length: 30000
+      usage: 0.0001
+      usage_limit: 0.8
+      is_full: false
+    metrics:
+    - vertex: in
+      rate:
+        m1: 120.0
+        m5: 118.5
+        m15: 117.0
+        default: 119.0
+      pending:
+        m1: 3
+        m5: 4
+        m15: 4
+        default: 3
+    - vertex: even-or-odd
+      rate:
+        m1: 120.0
+        m5: 118.5
+        m15: 117.0
+        default: 119.0
+      pending:
+        m1: 3
+        m5: 4
+        m15: 4
+        default: 3
+    - vertex: even-sink
+      rate:
+        m1: 120.0
+        m5: 118.5
+        m15: 117.0
+        default: 119.0
+      pending:
+        m1: 3
+        m5: 4
+        m15: 4
+        default: 3
+    - vertex: odd-sink
+      rate:
+        m1: 120.0
+        m5: 118.5
+        m15: 117.0
+        default: 119.0
+      pending:
+        m1: 3
+        m5: 4
+        m15: 4
+        default: 3
+    - vertex: all-sink
+      rate:
+        m1: 120.0
+        m5: 118.5
+        m15: 117.0
+        default: 119.0
+      pending:
+        m1: 3
+        m5: 4
+        m15: 4
+        default: 3
+    watermarks:
+    - from: in
+      to: even-or-odd
+      enabled: true
+      per_partition:
+      - null
+    - from: even-or-odd
+      to: even-sink
+      enabled: true
+      per_partition:
+      - null
+    - from: even-or-odd
+      to: odd-sink
+      enabled: true
+      per_partition:
+      - null
+    - from: even-or-odd
+      to: all-sink
+      enabled: true
+      per_partition:
+      - null
+  mono:
+    health:
+      status: healthy
+      message: MonoVertex data flow is healthy
+      code: D1
+    metrics:
+    - vertex: mono
+      rate:
+        m1: 53840.0
+        m5: 58195.3
+        m15: 57000.0
+        default: 54000.0
+      pending:
+        m1: 479
+        m5: 480
+        m15: 470
+        default: 479
+pods:
+- name: linear-in-0-a1b2c
+  phase: Running
+  containers:
+  - name: numa
+    running: true
+    restart_count: 0
+    is_init: false
+  default_container: null
+  logs:
+    numa:
+    - at: '2026-01-01T00:00:00Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:01Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:02Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:03Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:04Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:05Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+- name: linear-cat-0-d3e4f
+  phase: Running
+  containers:
+  - name: numa
+    running: true
+    restart_count: 0
+    is_init: false
+  - name: udf
+    running: true
+    restart_count: 0
+    is_init: false
+  default_container: udf
+  logs:
+    numa:
+    - at: '2026-01-01T00:00:00Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:01Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:02Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:03Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:04Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:05Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:06Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:07Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    udf:
+    - at: '2026-01-01T00:00:00Z'
+      text: map server started on /var/run/numaflow/map.sock
+- name: linear-out-0-g5h6i
+  phase: Running
+  containers:
+  - name: numa
+    running: true
+    restart_count: 0
+    is_init: false
+  default_container: null
+  logs:
+    numa:
+    - at: '2026-01-01T00:00:00Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:01Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:02Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:03Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+    - at: '2026-01-01T00:00:04Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"5"}'
+- name: fanout-even-or-odd-0-j7k8l
+  phase: Running
+  containers:
+  - name: numa
+    running: true
+    restart_count: 0
+    is_init: false
+  - name: udf
+    running: true
+    restart_count: 0
+    is_init: false
+  default_container: udf
+  logs:
+    numa:
+    - at: '2026-01-01T00:00:00Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    - at: '2026-01-01T00:00:01Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    - at: '2026-01-01T00:00:02Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    - at: '2026-01-01T00:00:03Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    - at: '2026-01-01T00:00:04Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    - at: '2026-01-01T00:00:05Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    - at: '2026-01-01T00:00:06Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    - at: '2026-01-01T00:00:07Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"120"}'
+    udf:
+    - at: '2026-01-01T00:00:00Z'
+      text: map server started
+- name: mono-mv-0-m9n0o
+  phase: Running
+  containers:
+  - name: numa
+    running: true
+    restart_count: 0
+    is_init: false
+  - name: udsource
+    running: true
+    restart_count: 0
+    is_init: false
+  - name: transformer
+    running: true
+    restart_count: 0
+    is_init: false
+  - name: udf
+    running: true
+    restart_count: 0
+    is_init: false
+  - name: udsink
+    running: true
+    restart_count: 0
+    is_init: false
+  default_container: udf
+  logs:
+    numa:
+    - at: '2026-01-01T00:00:00Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"54000"}'
+    - at: '2026-01-01T00:00:01Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"54000"}'
+    - at: '2026-01-01T00:00:02Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"54000"}'
+    - at: '2026-01-01T00:00:03Z'
+      text: '{"level":"INFO","message":"Processed messages per second","processed":"54000"}'

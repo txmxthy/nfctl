@@ -14,6 +14,7 @@ use crate::{Model, style};
 
 const CAPACITY: usize = 5000;
 
+#[derive(Debug)]
 pub struct LogsPanel {
     key: PipelineKey,
     vertex: Option<VertexName>,

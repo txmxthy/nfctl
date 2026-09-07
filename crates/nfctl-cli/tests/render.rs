@@ -46,7 +46,7 @@ fn ctx_with_daemon(cluster: FakeCluster, daemon: FakeDaemon) -> Context {
     let cluster: Arc<dyn nfctl_core::ports::ClusterPort> = Arc::new(cluster);
     Context {
         cluster: Arc::clone(&cluster),
-        service: PipelineService::new(cluster, Arc::new(FakeDaemons(daemon))),
+        service: PipelineService::new(cluster, Arc::new(FakeDaemons::one(daemon))),
         default_namespace: Namespace::new("demo").unwrap(),
         // 3 days, 4 hours after the epoch the fixtures were created at.
         now: Timestamp::new(OffsetDateTime::UNIX_EPOCH + time::Duration::hours(76)),

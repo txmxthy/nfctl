@@ -1,0 +1,12 @@
+---
+source: crates/nfctl-tui/tests/frames.rs
+expression: "frame(&panel, 100, 8)"
+---
+"┌ logs default/linear/cat ────────────────────────────────────────────────────────────── following ┐"
+"│linear-cat-0-d3e4f/numa {"level":"INFO","message":"Processed messages per second","processed":"5"}│"
+"│linear-cat-0-d3e4f/numa {"level":"INFO","message":"Processed messages per second","processed":"5"}│"
+"│linear-cat-0-d3e4f/numa {"level":"INFO","message":"Processed messages per second","processed":"5"}│"
+"│linear-cat-0-d3e4f/numa {"level":"INFO","message":"Processed messages per second","processed":"5"}│"
+"│linear-cat-0-d3e4f/numa {"level":"INFO","message":"Processed messages per second","processed":"5"}│"
+"│linear-cat-0-d3e4f/udf map server started on /var/run/numaflow/map.sock                           │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

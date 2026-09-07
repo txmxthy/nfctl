@@ -9,6 +9,7 @@ nfctl
 ├── --request-timeout  SECS  = 20  — Per-request timeout in seconds  (global)
 ├── -o/--output  OUTPUT [table|wide|json|yaml]  = table  — Output format  (global)
 ├── --daemon-url  URL  — Talk to the pipeline daemon at this URL instead of port-forwarding  (global)
+├── --fixture  FILE  — Answer from this fixture file instead of a cluster (demos, tests, screenshots)  (global)
 ├── ls  List pipelines
 ├── get  Show one pipeline
 │   └── name  NAME  — Pipeline name

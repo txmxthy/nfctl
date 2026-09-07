@@ -37,6 +37,10 @@ pub struct Globals {
     /// Talk to the pipeline daemon at this URL instead of port-forwarding
     #[arg(long, global = true, env = "NFCTL_DAEMON_URL", value_name = "URL")]
     pub daemon_url: Option<String>,
+
+    /// Answer from this fixture file instead of a cluster (demos, tests, screenshots)
+    #[arg(long, global = true, env = "NFCTL_FIXTURE", value_name = "FILE", conflicts_with_all = ["context", "daemon_url"])]
+    pub fixture: Option<String>,
 }
 
 impl Globals {

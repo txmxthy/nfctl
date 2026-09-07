@@ -11,6 +11,7 @@ use crate::panels::pressed;
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, cards, style};
 
+#[derive(Debug)]
 pub struct DetailPanel {
     key: PipelineKey,
     view: Option<PipelineView>,

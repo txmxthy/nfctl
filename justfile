@@ -40,10 +40,16 @@ demo-down: (_require_ctx)
     -kubectl --context {{demo_ctx}} delete -f examples/isbsvc.yaml --ignore-not-found
     -kubectl --context {{demo_ctx}} delete namespace numaflow-system --ignore-not-found
 
-# render docs/demo/*.tape to gifs (needs `vhs` and a release build on PATH)
-record: (_require_ctx)
+# render docs/demo/*.tape to gifs and pngs (needs `vhs`). Tapes that set
+# NFCTL_FIXTURE need no cluster; the rest run against the demo cluster.
+record:
     cargo build --release -q
     for t in docs/demo/*.tape; do PATH="$PWD/target/release:$PATH" NFCTL_CONTEXT={{demo_ctx}} vhs "$t"; done
+
+# only the cluster-free tapes: the ones CI and screenshots-for-review use
+record-fixture:
+    cargo build --release -q
+    for t in $(grep -l NFCTL_FIXTURE docs/demo/*.tape); do PATH="$PWD/target/release:$PATH" vhs "$t"; done
 
 # refuse to touch anything but the local demo cluster
 _require_ctx:

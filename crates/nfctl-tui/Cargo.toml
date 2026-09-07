@@ -19,6 +19,8 @@ tracing.workspace = true
 [dev-dependencies]
 nfctl-core = { workspace = true, features = ["fake"] }
 insta.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+crossterm = "0.29"
 
 [lints]
 workspace = true

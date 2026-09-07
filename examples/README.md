@@ -14,3 +14,6 @@ come from a real deployment.
 | `pipelines/partitions.yaml` | multi-partition edges; buffers per partition in `status` |
 | `changes/fanout-add-vertex.yaml` | `apply --check` warns: topology change |
 | `changes/fanout-isb-rename.yaml` | `apply --check` blocks: immutable field |
+
+`fixtures/demo.yaml` is the world `nfctl --fixture` answers from: the shapes are the
+domain JSON (`nfctl get -o json`, `nfctl status -o json`) plus pods with log lines.

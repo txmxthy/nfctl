@@ -8,7 +8,7 @@
 mod app;
 mod cards;
 mod event;
-mod panels;
+pub mod panels;
 mod style;
 mod worker;
 

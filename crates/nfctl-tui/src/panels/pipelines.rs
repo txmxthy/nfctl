@@ -10,6 +10,7 @@ use crate::panels::pressed;
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, style};
 
+#[derive(Debug)]
 pub struct PipelinesPanel {
     ns: Option<Namespace>,
     items: Vec<Pipeline>,

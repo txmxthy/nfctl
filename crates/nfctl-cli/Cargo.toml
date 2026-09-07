@@ -13,7 +13,7 @@ name = "nfctl"
 path = "src/main.rs"
 
 [dependencies]
-nfctl-core.workspace = true
+nfctl-core = { workspace = true, features = ["fake"] }
 nfctl-k8s.workspace = true
 nfctl-graph.workspace = true
 nfctl-daemon.workspace = true

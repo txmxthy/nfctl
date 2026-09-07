@@ -1,4 +1,8 @@
-//! In-memory adapters for tests. Enabled with the `fake` feature.
+//! In-memory adapters for tests, demos and recordings. Enabled with the `fake` feature.
+
+mod fixture;
+
+pub use fixture::{DaemonFixture, Fixture, PodFixture};
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -11,9 +15,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::model::{
     BufferInfo, BufferName, ContainerName, DesiredPhase, EdgeWatermark, IsbName, IsbService,
     Lifecycle, Limits, LogLine, LogOptions, MonoVertex, MonoVertexKey, MonoVertexPhase, Namespace,
-    ObjectMeta, Pipeline, PipelineHealth, PipelineKey, PipelinePhase, PipelineSpec, PipelineStatus,
-    PodEvent, PodName, PodRef, ReplicaErrors, ResumeStrategy, ScaleSpec, Selector, Timestamp,
-    Topology, Vertex, VertexCounts, VertexKind, VertexMetrics, VertexName,
+    ObjectMeta, Pipeline, PipelineHealth, PipelineKey, PipelineName, PipelinePhase, PipelineSpec,
+    PipelineStatus, PodEvent, PodName, PodRef, ReplicaErrors, ResumeStrategy, ScaleSpec, Selector,
+    Timestamp, Topology, Vertex, VertexCounts, VertexKind, VertexMetrics, VertexName,
 };
 use crate::ports::{ClusterPort, DaemonConnector, DaemonPort};
 use crate::{Error, Result};
@@ -47,6 +51,8 @@ struct State {
     tail_calls: Vec<TailCall>,
     /// Senders kept so a hanging script's stream stays open until dropped here.
     hung: Vec<mpsc::Sender<Result<LogLine>>>,
+    /// Replayed on every open when no script is queued for the key.
+    fixture: Option<Fixture>,
 }
 
 /// A cluster whose state lives behind a mutex and can be driven from a test.
@@ -61,6 +67,22 @@ impl FakeCluster {
         let f = Self::default();
         f.lock().pipelines = pipelines;
         f
+    }
+
+    /// Build a cluster whose state is the fixture: pipelines, `MonoVertices`, ISBs
+    /// and pods with replayable logs. Daemon data comes from [`FakeDaemons::from_fixture`].
+    #[must_use]
+    pub fn from_fixture(f: &Fixture) -> Self {
+        let c = Self::default();
+        {
+            let mut g = c.lock();
+            g.pipelines.clone_from(&f.pipelines);
+            g.monovertices.clone_from(&f.monovertices);
+            g.isbs.clone_from(&f.isbs);
+            g.pods = f.pods.iter().map(|p| p.pod.clone()).collect();
+            g.fixture = Some(f.clone());
+        }
+        c
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -332,6 +354,12 @@ impl ClusterPort for FakeCluster {
             .scripts
             .get_mut(&(pod.clone(), container.clone()))
             .and_then(VecDeque::pop_front)
+            .or_else(|| {
+                g.fixture
+                    .as_ref()
+                    .and_then(|f| f.pod_logs(pod, container))
+                    .map(|lines| LogScript { lines, hang: true })
+            })
             .unwrap_or(LogScript {
                 lines: vec![],
                 hang: !opts.follow,
@@ -392,18 +420,59 @@ impl DaemonPort for FakeDaemon {
     }
 }
 
-/// Hands out clones of one [`FakeDaemon`] for every pipeline.
+/// Hands out one [`FakeDaemon`] per pipeline name, falling back to a default.
 #[derive(Debug, Default, Clone)]
-pub struct FakeDaemons(pub FakeDaemon);
+pub struct FakeDaemons {
+    pub default: FakeDaemon,
+    pub by_name: HashMap<PipelineName, FakeDaemon>,
+}
+
+impl FakeDaemons {
+    #[must_use]
+    pub fn one(daemon: FakeDaemon) -> Self {
+        Self {
+            default: daemon,
+            by_name: HashMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn from_fixture(f: &Fixture) -> Self {
+        let by_name = f
+            .daemons
+            .iter()
+            .map(|(name, d)| {
+                let daemon = FakeDaemon {
+                    buffers: d.buffers.clone(),
+                    metrics: d.metrics.clone(),
+                    watermarks: d.watermarks.clone(),
+                    health: d.health.clone(),
+                };
+                (name.clone(), daemon)
+            })
+            .collect();
+        Self {
+            default: FakeDaemon::default(),
+            by_name,
+        }
+    }
+
+    fn for_name(&self, name: &PipelineName) -> FakeDaemon {
+        self.by_name
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| self.default.clone())
+    }
+}
 
 #[async_trait]
 impl DaemonConnector for FakeDaemons {
-    async fn connect(&self, _key: &PipelineKey) -> Result<Box<dyn DaemonPort>> {
-        Ok(Box::new(self.0.clone()))
+    async fn connect(&self, key: &PipelineKey) -> Result<Box<dyn DaemonPort>> {
+        Ok(Box::new(self.for_name(&key.name)))
     }
 
-    async fn connect_monovertex(&self, _key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>> {
-        Ok(Box::new(self.0.clone()))
+    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>> {
+        Ok(Box::new(self.for_name(&key.name)))
     }
 }
 

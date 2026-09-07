@@ -10,7 +10,7 @@ authors.workspace = true
 
 [features]
 # In-memory adapters for tests and the CLI's own test-suite.
-fake = []
+fake = ["dep:serde_yaml_ng"]
 
 [dependencies]
 thiserror.workspace = true
@@ -20,6 +20,7 @@ async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+serde_yaml_ng = { version = "0.10", optional = true }
 
 [dev-dependencies]
 tokio.workspace = true

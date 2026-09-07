@@ -45,6 +45,30 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<Output> {
     if let Some(offline) = run_offline(cli) {
         return offline.map(Output::Text);
     }
+    if let Some(path) = &cli.globals.fixture {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| nfctl_core::Error::Usage(format!("reading fixture `{path}`: {e}")))?;
+        let fixture = nfctl_core::fake::Fixture::parse(&text)
+            .map_err(|e| nfctl_core::Error::Usage(format!("fixture `{path}`: {e}")))?;
+        let cluster: Arc<dyn nfctl_core::ports::ClusterPort> =
+            Arc::new(nfctl_core::fake::FakeCluster::from_fixture(&fixture));
+        let daemons: Arc<dyn DaemonConnector> =
+            Arc::new(nfctl_core::fake::FakeDaemons::from_fixture(&fixture));
+        let default_namespace = fixture
+            .pipelines
+            .first()
+            .map_or_else(nfctl_core::model::Namespace::default_ns, |p| {
+                p.key.namespace.clone()
+            });
+        let ctx = Context {
+            cluster: Arc::clone(&cluster),
+            service: PipelineService::new(cluster, daemons),
+            default_namespace,
+            now: nfctl_core::model::Timestamp::now(),
+            terminal_width: terminal_size::terminal_size().map(|(w, _)| usize::from(w.0)),
+        };
+        return run(cli, &ctx).await;
+    }
     let conn = nfctl_k8s::connect(&nfctl_k8s::ClientOptions {
         context: cli.globals.context.clone(),
         request_timeout: Some(cli.globals.timeout()),

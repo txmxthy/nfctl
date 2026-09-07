@@ -81,16 +81,27 @@ Prebuilt binaries and a Homebrew tap are on the roadmap.
 
 ## Demo
 
-`just demo-up` installs Numaflow into your current local kube context and applies
-the pipelines in [`examples/`](examples); [`docs/demo`](docs/demo) has the script and
-the tapes behind these recordings.
+Every command also runs against a fixture file instead of a cluster:
+
+```
+nfctl --fixture examples/fixtures/demo.yaml tui
+```
+
+The same fixture drives the golden-frame tests, the recordings below and the
+stills used to review layout, so what is tested is what is shown.
 
 | | |
 |---|---|
-| ![ls](docs/demo/ls.gif) | ![dag](docs/demo/dag.gif) |
-| ![top](docs/demo/top.gif) | ![pause](docs/demo/pause.gif) |
-| ![logs](docs/demo/logs.gif) | ![apply](docs/demo/apply.gif) |
-| ![tui](docs/demo/tui.gif) | |
+| ![pipelines](docs/demo/tui-pipelines.png) | ![detail](docs/demo/tui-detail.png) |
+| ![status](docs/demo/status.png) | ![dag](docs/demo/dag.png) |
+
+Animated: [tui](docs/demo/tui.gif) · [ls](docs/demo/ls.gif) · [logs through a pod
+restart](docs/demo/logs.gif) · [top](docs/demo/top.gif) · [pause and resume](docs/demo/pause.gif)
+· [apply --check](docs/demo/apply.gif) · [recycle](docs/demo/recycle.gif)
+
+`just demo-up` installs Numaflow into your current local kube context and applies
+the pipelines in [`examples/`](examples); [`docs/demo`](docs/demo) has the tapes
+(`just record-fixture` renders the cluster-free ones).
 
 ## Design
 

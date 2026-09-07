@@ -39,3 +39,13 @@ scale-to-zero. Both are tested against in-memory fake adapters.
 2. `DaemonConnector::connect` → `DaemonPort` bound to that pipeline.
 3. `DaemonPort::health/vertex_metrics/buffers` → joined per vertex and edge.
 4. Renderer prints a table or JSON. Daemon failure degrades to the CRD-only view with a warning.
+
+## One fixture, three consumers
+
+`examples/fixtures/demo.yaml` is a serialised slice of the domain: pipelines,
+MonoVertices, ISB services, per-pipeline daemon data and pods with log lines.
+`nfctl --fixture FILE` runs any command against in-memory fakes built from it.
+The TUI's golden-frame tests (`crates/nfctl-tui/tests/frames.rs`, ratatui
+`TestBackend` + `insta`) render the panels from the same file, and the vhs tapes
+under `docs/demo/` that set `NFCTL_FIXTURE` record the same screens as GIFs and
+PNGs. Changing the fixture changes all three together.
