@@ -38,14 +38,26 @@ struct Geometry {
 }
 
 fn geometry(l: &Layered, badges: &HashMap<NodeId, Vec<Badge>>, opts: LayoutOptions) -> Geometry {
+    let slot_h = |n: &LNode| match n {
+        LNode::Real(id) => i32::from(opts.card_h + u16::from(badges.contains_key(id))),
+        LNode::Pass(_) => 1,
+    };
+    let heights: Vec<i32> = l
+        .columns
+        .iter()
+        .map(|col| col.iter().map(slot_h).sum())
+        .collect();
+    let tallest = heights.iter().copied().max().unwrap_or(0);
     let mut geo = Geometry {
         attach: HashMap::new(),
         cards: Vec::new(),
         columns: Vec::new(),
-        cards_h: 0,
+        cards_h: tallest,
     };
     for (c, col) in l.columns.iter().enumerate() {
-        let mut y = 0i32;
+        // Shorter columns sit centred on the tallest one, so a chain that fans
+        // out and back in reads as one horizontal line through the middle.
+        let mut y = (tallest - heights[c]) / 2;
         let mut slots = Vec::new();
         for &n in col {
             match n {
@@ -70,7 +82,6 @@ fn geometry(l: &Layered, badges: &HashMap<NodeId, Vec<Badge>>, opts: LayoutOptio
             }
         }
         geo.columns.push(slots);
-        geo.cards_h = geo.cards_h.max(y);
     }
     geo
 }
