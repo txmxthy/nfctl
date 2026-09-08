@@ -37,7 +37,12 @@ corpus-fixture:
 # every fixture (and corpus) pipeline through both renderers, as one HTML page
 gallery out="target/gallery/index.html" *flags="":
     cargo run -q -p nfctl-tui --example gallery -- {{out}} {{flags}}
+    @pgrep -qf scripts/gallery-notes.py || (nohup python3 scripts/gallery-notes.py "$(dirname {{out}})" >/dev/null 2>&1 &)
     open {{out}} 2>/dev/null || xdg-open {{out}} 2>/dev/null || echo "open {{out}}"
+
+# stop the gallery notes server
+gallery-stop:
+    -pkill -f scripts/gallery-notes.py
 
 # ASCII renders of every corpus pipeline, for eyeballing (testdata/private/out/)
 corpus-render:

@@ -20,7 +20,9 @@ a layout change across the whole suite before trusting the goldens;
 `just gallery target/gallery/public.html --public` makes a shareable page
 without the corpus.
 
-Each frame has a drawing layer: pick a colour, draw over the frame, add a note,
-and `export PNG` (or `export all annotated`) to hand the marked-up frames to
-whoever is fixing the layout. Drawings and notes persist in the browser's local
-storage per pipeline and tab, so a regenerated page keeps them.
+Each frame has a drawing layer: pick a colour, draw over the frame, add a note.
+`just gallery` also starts a small notes server (`scripts/gallery-notes.py`),
+so every stroke and note is written to `target/gallery/notes.json` and
+`export PNG` drops the marked-up frame into `target/gallery/png/`, where the
+person fixing the layout can read them straight from the checkout. Without the
+server the page keeps them in the browser instead. `just gallery-stop` ends it.

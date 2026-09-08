@@ -254,13 +254,32 @@ pre{margin:0;white-space:pre;line-height:1.2;font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion:no-preference){nav a,.tabs button{transition:background .12s}}
 ";
 
-const SCRIPT: &str = r#"
+const SCRIPT: &str = r"
 const items=[...document.querySelectorAll('nav a')];
 let tab=localStorage.getItem('tab')||'cards 160 collapsed';
 let colour='#f38ba8';
-const key=f=>'ink:'+f.closest('section').id+':'+f.dataset.tab;
-const load=f=>{try{return JSON.parse(localStorage.getItem(key(f))||'{"strokes":[],"note":""}')}catch(e){return {strokes:[],note:''}}};
-const save=(f,d)=>{try{localStorage.setItem(key(f),JSON.stringify(d))}catch(e){}};
+// Annotations: one store, keyed by pipeline name and tab. Saved to the notes
+// server started by `just gallery` (target/gallery/notes.json) so they reach
+// the repo, with localStorage as the offline fallback.
+const API='http://127.0.0.1:8767';
+const key=f=>f.closest('section').querySelector('h2').firstChild.textContent+' | '+f.dataset.tab;
+let store={};let online=false;
+try{store=JSON.parse(localStorage.getItem('ink')||'{}')}catch(e){}
+// Notes made before the store existed were keyed by section id; carry them over.
+for(const k of Object.keys(localStorage)){const m=k.match(/^ink:(i\d+):(.*)$/);if(!m)continue;
+ const sec=document.getElementById(m[1]);if(sec){const name=sec.querySelector('h2').firstChild.textContent+' | '+m[2];if(!store[name])try{store[name]=JSON.parse(localStorage.getItem(k))}catch(e){}}
+ localStorage.removeItem(k);}
+const load=f=>store[key(f)]||{strokes:[],note:''};
+let pending=null;
+function flush(){pending=null;try{localStorage.setItem('ink',JSON.stringify(store))}catch(e){}
+ if(online)fetch(API+'/notes.json',{method:'PUT',body:JSON.stringify(store)}).then(r=>setStatus(r.ok?'saved to target/gallery/notes.json':'save failed')).catch(()=>{online=false;setStatus('notes server gone; saving in browser only')});}
+const save=(f,d)=>{store[key(f)]=d;clearTimeout(pending);pending=setTimeout(flush,400);};
+const setStatus=t=>document.querySelectorAll('.hint').forEach(h=>h.textContent=t);
+fetch(API+'/notes.json').then(r=>r.json()).then(remote=>{online=true;
+ // Union: anything drawn here before the server existed is kept and pushed.
+ for(const k in remote)if(!store[k])store[k]=remote[k];
+ flush();document.querySelectorAll('.frame.on').forEach(f=>{paint(f);f.querySelector('textarea').value=load(f).note;});
+}).catch(()=>setStatus('notes server not running (just gallery starts it); saving in browser only'));
 function fit(f){const pre=f.querySelector('pre'),c=f.querySelector('canvas');if(!pre||!c)return;
  const w=pre.scrollWidth,h=pre.scrollHeight,r=devicePixelRatio||1;
  c.style.width=w+'px';c.style.height=h+'px';c.width=w*r;c.height=h*r;paint(f);}
@@ -300,14 +319,16 @@ function render(f){const pre=f.querySelector('pre'),ink=f.querySelector('canvas'
  return o;}
 const palette={};function colourFor(cls){const k=cls.split(' ')[0];if(!palette[k]){const s=document.createElement('span');s.className=k;document.body.appendChild(s);palette[k]=colourOf(s);s.remove();}return palette[k];}
 const dl=(name,url)=>{const a=document.createElement('a');a.href=url;a.download=name;a.click();};
+window.onbeforeunload=()=>{if(pending)flush();};
 const nameOf=f=>(f.closest('section').querySelector('h2').firstChild.textContent+' '+f.dataset.tab).replace(/[^a-z0-9]+/gi,'-');
-function exportPng(f){dl(nameOf(f)+'.png',render(f).toDataURL('image/png'));}
+function exportPng(f){const o=render(f),url=o.toDataURL('image/png');
+ if(online)o.toBlob(b=>fetch(API+'/png/'+nameOf(f)+'.png',{method:'POST',body:b}).then(()=>setStatus('PNG saved to target/gallery/png/')).catch(()=>dl(nameOf(f)+'.png',url)));else dl(nameOf(f)+'.png',url);}
 function exportAll(){let n=0;document.querySelectorAll('.frame').forEach(f=>{const d=load(f);if(!d.strokes.length&&!d.note)return;const shown=f.classList.contains('on');if(!shown){f.classList.add('on');fit(f);}
  setTimeout(()=>{exportPng(f);if(!shown)f.classList.remove('on');},150*n++);});if(!n)alert('nothing annotated yet');}
 show(location.hash.slice(1)||items[0].dataset.id);
 window.onhashchange=()=>show(location.hash.slice(1));
 window.onresize=()=>document.querySelectorAll('.frame.on').forEach(fit);
-"#;
+";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
