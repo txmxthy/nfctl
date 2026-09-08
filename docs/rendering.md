@@ -48,11 +48,12 @@ second route with a different colour sets it to `Mixed`, which paints dim.
 An untagged edge has no colour and paints dim too, so `Mixed` and
 "untagged" look the same.
 
-One exception. The cell also remembers the colour of the first route that
-ran *vertically* through it (`turn`). When a cell ends up `Mixed`, it paints
-in that colour instead. The effect at a fork: the horizontal trunk arriving
-from the card is shared by every branch and goes grey, but the junction cell
-where the first branch turns takes that branch's colour rather than grey.
+One exception. The cell also remembers the colour of the *longest* vertical
+run through it (`turn`). When a cell ends up `Mixed`, it paints in that
+colour instead. The effect on a fan-out bus: the short horizontal stub from
+the card is shared by every branch and stays grey, but the bus itself takes
+the colour of the branch that reaches furthest, so it reads as one line from
+the source to its far end with the nearer branches peeling off it.
 
 Arrowheads carry their own ink, set by the same rule (`Mixed` if two edges
 of different colour end on one head, which is what a fan-in does).
@@ -70,14 +71,14 @@ vertical run. `tracks::pack` assigns those runs to tracks, one column of
 cells each, in `(lo, hi, edge)` order. A run may join an existing track when,
 against every run already there, one of these holds:
 
-1. they share a source or share a target, **and** have the same colour;
-2. their rows are disjoint (with one row of clearance);
-3. they share a source or a target and touch only on the shared row.
+1. they share a source or share a target, whatever their colours;
+2. their rows are disjoint (with one row of clearance).
 
-Rule 1 is the bundle: shards fanning out from one card with no tags leave as
-one vertical. Rule 2 is plain packing. Rule 3 exists so that a source sitting
-between two targets forks symmetrically through one cell instead of drawing
-two offset corners.
+Rule 1 is the bus: every branch out of one card leaves the same column
+through its own junction (`├`, or `┼` when a straight edge passes), and every
+edge into one card joins the same column before its single head. Rule 2 is
+plain packing. A straight edge (source and target on the same row) takes no
+track at all.
 
 Gap width is `tracks + 2`, minimum 5, and the tracks sit centred in the gap.
 Tracks are then ordered left to right by an adjacent-swap descent over the
@@ -101,12 +102,12 @@ share one track by rule 3:
    └─▶ all-sink       yellow vertical and head
 ```
 
-The two cells of trunk before the `┼` are `Mixed`; the `┼` itself takes the
-colour of the first edge to run vertically through it.
+The two cells of trunk before the `┼` are `Mixed`; the `┼` and the vertical
+take the colour of the longest run through them.
 
 `router` in the sharded pipeline fans out to the collapsed `worker` group
 (untagged) and to `audit` (tagged). Two runs, no straight edge, one shared
-track by rule 3, and the junction is `L U D`:
+track by rule 1, and the junction is `L U D`:
 
 ```
    ┌─▶ worker x3      dim
@@ -116,10 +117,8 @@ track by rule 3, and the junction is `L U D`:
 
 ## What this cannot draw
 
-A cell has one colour. Wherever two edges with different tags share cells,
-those cells go grey, so a trunk leaving a card that carries several tag
-combinations is grey until the branches part. The turn rule rescues one
-cell of that, not the trunk. Rule 1 avoids the problem when the colours
-agree; when they do not, the choice is between a grey trunk and a wider gap
-with one vertical per colour. That trade is written up in the trunk options
-note on TIM-21.
+A cell has one colour. A bus carrying several tag combinations shows the
+colour of its furthest branch, not all of them; only from each junction
+outward is a branch in its own colour. The alternatives (a wider gap with one
+vertical per colour, or one exit row per edge) are written up in the trunk
+options note on TIM-21; the single bus was chosen for symmetry.

@@ -112,9 +112,10 @@ struct Canvas {
     dx: i32,
     cells: Vec<u8>,
     ink: Vec<Ink>,
-    /// Colour of the first edge to run vertically through a cell: where a
-    /// fork or crossing mixes colours, the edge that turns there wins.
-    turn: Vec<Ink>,
+    /// Colour of the longest vertical run through a cell, with its length:
+    /// where a bus mixes colours, the branch that reaches furthest wins, so a
+    /// trunk reads as one colour from the source to its far end.
+    turn: Vec<(Ink, i32)>,
     heads: Vec<Option<Ink>>,
 }
 
@@ -127,7 +128,7 @@ impl Canvas {
             dx,
             cells: vec![0; w * h],
             ink: vec![Ink::None; w * h],
-            turn: vec![Ink::None; w * h],
+            turn: vec![(Ink::None, 0); w * h],
             heads: vec![None; w * h],
         }
     }
@@ -137,7 +138,7 @@ impl Canvas {
         (x < self.w && y < self.h).then_some(y * self.w + x)
     }
 
-    fn set(&mut self, x: i32, y: i32, bits: u8, colour: Option<EdgeColour>) {
+    fn set(&mut self, x: i32, y: i32, bits: u8, colour: Option<EdgeColour>, reach: i32) {
         if let Some(i) = self.idx(x, y) {
             self.cells[i] |= bits;
             self.ink[i] = match self.ink[i] {
@@ -145,8 +146,8 @@ impl Canvas {
                 Ink::One(c) if c == colour => Ink::One(c),
                 _ => Ink::Mixed,
             };
-            if bits & (U | D) != 0 && self.turn[i] == Ink::None {
-                self.turn[i] = Ink::One(colour);
+            if bits & (U | D) != 0 && reach > self.turn[i].1 {
+                self.turn[i] = (Ink::One(colour), reach);
             }
         }
     }
@@ -165,7 +166,7 @@ impl Canvas {
         let (a, b) = (x0.min(x1), x0.max(x1));
         for x in a..=b {
             let bits = if x > a { L } else { 0 } | if x < b { R } else { 0 };
-            self.set(x, y, bits, colour);
+            self.set(x, y, bits, colour, 0);
         }
     }
 
@@ -173,7 +174,7 @@ impl Canvas {
         let (a, b) = (y0.min(y1), y0.max(y1));
         for y in a..=b {
             let bits = if y > a { U } else { 0 } | if y < b { D } else { 0 };
-            self.set(x, y, bits, colour);
+            self.set(x, y, bits, colour, b - a + 1);
         }
     }
 
@@ -221,7 +222,7 @@ impl Canvas {
                     let (ch, st) = if let Some(ink) = self.heads[i] {
                         ('▶', paint(ink))
                     } else {
-                        let ink = match (self.ink[i], self.turn[i]) {
+                        let ink = match (self.ink[i], self.turn[i].0) {
                             (Ink::Mixed, Ink::One(c)) => Ink::One(c),
                             (ink, _) => ink,
                         };

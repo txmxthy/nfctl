@@ -1,10 +1,9 @@
 //! Pack the vertical runs in one gap onto tracks: two runs share a track when
-//! they do not overlap, or when they share a source or a target *and* a
-//! colour, so a tagged fan-out leaves as parallel coloured lines rather than
-//! one grey trunk. Then order the
+//! they do not overlap, or when they share a source or a target, so a fan-out
+//! is one bus with a junction per branch. Then order the
 //! tracks left to right so horizontals cross as few verticals as possible.
 
-use super::{EdgeColour, EdgeId};
+use super::EdgeId;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Span {
@@ -15,7 +14,6 @@ pub(crate) struct Span {
     /// Row of the horizontal arriving from the left, and leaving to the right.
     pub y_in: i32,
     pub y_out: i32,
-    pub colour: Option<EdgeColour>,
     pub src: u32,
     pub dst: u32,
 }
@@ -33,13 +31,11 @@ pub(crate) fn pack(spans: &[Span]) -> (Vec<usize>, usize) {
         let s = spans[i];
         let compatible = |t: &Vec<Span>| {
             t.iter().all(|o| {
+                // One bus per source (and per target): every branch leaves the
+                // same column through its own junction, whatever its colour.
                 let related = o.src == s.src || o.dst == s.dst;
                 let disjoint = s.hi + 1 < o.lo || o.hi + 1 < s.lo;
-                // Two runs from one source (or into one target) that meet only
-                // on that shared row make a symmetric `┼` fork rather than two
-                // offset corners.
-                let touching = related && (s.hi == o.lo || o.hi == s.lo);
-                (related && o.colour == s.colour) || disjoint || touching
+                related || disjoint
             })
         };
         let slot = tracks.iter().position(compatible).unwrap_or_else(|| {
