@@ -63,7 +63,7 @@ layout, by tag combination; the TUI painter and the CLI's ANSI writer only map
 a palette index to a hue.
 
 The box-drawing `dag` output is drawn by orthodag (ADR 0004), whose styled spans
-say which flow painted each cell, so the CLI can colour it.
+say which flow painted each cell, so the CLI can colour it. The layout itself is ADR 0006; completions are ADR 0007.
 
 ## Completions
 

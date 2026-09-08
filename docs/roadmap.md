@@ -19,6 +19,8 @@
 | `tui`: shard collapse (`x`), edge bundling, tag colours, badges, scroll | done | M10 |
 | `dag --expand-shards`, coloured `dag -f ascii` | done | M10 |
 | `completions` from live resources (dynamic) | done | M11 |
+| docs + ADRs 0006–0008 | done | M12 |
 | ServingPipeline | planned | later |
+| prebuilt binaries, Homebrew tap | planned | later |
 
 Statuses: `done` · `wip` · `stub` (command exists, exits 4 with this pointer) · `planned`.
