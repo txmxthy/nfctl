@@ -37,7 +37,7 @@ corpus-fixture:
 # every fixture (and corpus) pipeline through both renderers, as one HTML page
 gallery out="target/gallery/index.html" *flags="":
     cargo run -q -p nfctl-tui --example gallery -- {{out}} {{flags}}
-    @echo "open {{out}}"
+    open {{out}} 2>/dev/null || xdg-open {{out}} 2>/dev/null || echo "open {{out}}"
 
 # ASCII renders of every corpus pipeline, for eyeballing (testdata/private/out/)
 corpus-render:
