@@ -239,25 +239,75 @@ h2 small{color:var(--muted);font-weight:400;margin-left:8px}
 .tabs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
 .tabs button{font:inherit;background:var(--line);color:var(--fg);border:0;padding:4px 10px;border-radius:3px;cursor:pointer}
 .tabs button.on{background:var(--accent);color:var(--bg)}
-.frame{display:none;overflow-x:auto}.frame.on{display:block}
+.frame{display:none}.frame.on{display:block}
+.stage{position:relative;display:inline-block;max-width:100%;overflow:auto;background:var(--bg)}
+.ink{position:absolute;left:0;top:0;cursor:crosshair;touch-action:none}
+.tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px;color:var(--muted);font-size:12px}
+.tools button{font:inherit;background:var(--line);color:var(--fg);border:0;padding:3px 8px;border-radius:3px;cursor:pointer}
+.tools button.sw{width:22px;height:22px;padding:0;border:2px solid transparent}.tools button.sw.on{border-color:var(--fg)}
+.tools textarea{font:inherit;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:4px 6px;min-height:38px;resize:vertical;margin-top:6px}
+.tools .hint{margin-left:auto}
+.frame textarea{display:block;width:min(900px,100%);box-sizing:border-box}
 pre{margin:0;white-space:pre;line-height:1.2;font-variant-numeric:tabular-nums}
 .c-cyan{color:var(--cyan)}.c-magenta{color:var(--magenta)}.c-yellow{color:var(--yellow)}.c-green{color:var(--green)}.c-blue{color:var(--blue)}.c-red{color:var(--red)}.c-dim{color:var(--dim)}.c-fg{color:var(--fg)}
 .bold{font-weight:700}.rev{background:var(--fg);color:var(--bg)}
 @media (prefers-reduced-motion:no-preference){nav a,.tabs button{transition:background .12s}}
 ";
 
-const SCRIPT: &str = r"
-const items=[...document.querySelectorAll('nav a')];const frames=[...document.querySelectorAll('.frame')];
+const SCRIPT: &str = r#"
+const items=[...document.querySelectorAll('nav a')];
 let tab=localStorage.getItem('tab')||'cards 160 collapsed';
+let colour='#f38ba8';
+const key=f=>'ink:'+f.closest('section').id+':'+f.dataset.tab;
+const load=f=>{try{return JSON.parse(localStorage.getItem(key(f))||'{"strokes":[],"note":""}')}catch(e){return {strokes:[],note:''}}};
+const save=(f,d)=>{try{localStorage.setItem(key(f),JSON.stringify(d))}catch(e){}};
+function fit(f){const pre=f.querySelector('pre'),c=f.querySelector('canvas');if(!pre||!c)return;
+ const w=pre.scrollWidth,h=pre.scrollHeight,r=devicePixelRatio||1;
+ c.style.width=w+'px';c.style.height=h+'px';c.width=w*r;c.height=h*r;paint(f);}
+function paint(f){const c=f.querySelector('canvas'),g=c.getContext('2d'),r=devicePixelRatio||1,d=load(f);
+ g.setTransform(r,0,0,r,0,0);g.clearRect(0,0,c.width,c.height);g.lineCap='round';g.lineJoin='round';g.lineWidth=2.5;
+ for(const s of d.strokes){g.strokeStyle=s.c;g.beginPath();s.p.forEach((q,i)=>i?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1]));g.stroke();}}
 function show(id){items.forEach(a=>a.classList.toggle('on',a.dataset.id===id));
  document.querySelectorAll('section').forEach(s=>s.style.display=s.id===id?'block':'none');
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
- frames.forEach(f=>f.classList.toggle('on',f.dataset.tab===tab));location.hash=id;}
+ document.querySelectorAll('.frame').forEach(f=>{const on=f.dataset.tab===tab&&f.closest('section').id===id;f.classList.toggle('on',on);if(on){fit(f);f.querySelector('textarea').value=load(f).note;}});
+ location.hash=id;}
 items.forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.id)});
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;localStorage.setItem('tab',tab);show(location.hash.slice(1))});
+document.querySelectorAll('.tools').forEach(t=>t.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+ const f=t.closest('section').querySelector('.frame.on');
+ if(b.dataset.c){colour=b.dataset.c;document.querySelectorAll('.sw').forEach(x=>x.classList.toggle('on',x.dataset.c===colour));}
+ else if(b.dataset.act==='undo'){const d=load(f);d.strokes.pop();save(f,d);paint(f);}
+ else if(b.dataset.act==='clear'){const d=load(f);d.strokes=[];save(f,d);paint(f);}
+ else if(b.dataset.act==='png'){exportPng(f);}
+ else if(b.dataset.act==='all'){exportAll();}}));
+document.querySelectorAll('.frame textarea').forEach(ta=>ta.oninput=()=>{const f=ta.closest('.frame'),d=load(f);d.note=ta.value;save(f,d);});
+document.querySelectorAll('canvas.ink').forEach(c=>{let cur=null;const at=e=>{const r=c.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
+ c.onpointerdown=e=>{c.setPointerCapture(e.pointerId);cur={c:colour,p:[at(e)]};};
+ c.onpointermove=e=>{if(!cur)return;cur.p.push(at(e));const f=c.closest('.frame'),g=c.getContext('2d'),r=devicePixelRatio||1;g.setTransform(r,0,0,r,0,0);g.strokeStyle=cur.c;g.lineWidth=2.5;g.lineCap='round';g.beginPath();const n=cur.p.length;g.moveTo(...cur.p[n-2]);g.lineTo(...cur.p[n-1]);g.stroke();};
+ c.onpointerup=c.onpointercancel=e=>{if(!cur)return;const f=c.closest('.frame'),d=load(f);if(cur.p.length>1)d.strokes.push(cur);save(f,d);cur=null;paint(f);};});
+const colourOf=el=>getComputedStyle(el).color;
+function render(f){const pre=f.querySelector('pre'),ink=f.querySelector('canvas'),r=2;
+ const cs=getComputedStyle(pre),lh=parseFloat(cs.lineHeight),font=cs.fontSize+' '+cs.fontFamily;
+ const o=document.createElement('canvas');o.width=pre.scrollWidth*r;o.height=(pre.scrollHeight+lh)*r;const g=o.getContext('2d');g.scale(r,r);
+ g.fillStyle=getComputedStyle(document.body).backgroundColor;g.fillRect(0,0,o.width,o.height);g.font=font;g.textBaseline='top';
+ const pad=parseFloat(cs.paddingLeft)||0;let y=parseFloat(cs.paddingTop)||0;
+ for(const line of pre.innerHTML.split('\n')){const tmp=document.createElement('pre');tmp.innerHTML=line;let x=pad;
+  for(const n of tmp.childNodes){const t=n.textContent;const span=n.nodeType===1?n:null;g.fillStyle=span?colourFor(span.className):colourOf(pre);g.font=(span&&span.className.includes('bold')?'bold ':'')+font;g.fillText(t,x,y);x+=g.measureText(t).width;}
+  y+=lh;}
+ g.drawImage(ink,0,0,ink.width,ink.height,0,0,ink.width/(devicePixelRatio||1),ink.height/(devicePixelRatio||1));
+ const note=load(f).note;if(note){g.font='bold 14px sans-serif';g.fillStyle='#f38ba8';g.fillText(note,pad,y+4);}
+ return o;}
+const palette={};function colourFor(cls){const k=cls.split(' ')[0];if(!palette[k]){const s=document.createElement('span');s.className=k;document.body.appendChild(s);palette[k]=colourOf(s);s.remove();}return palette[k];}
+const dl=(name,url)=>{const a=document.createElement('a');a.href=url;a.download=name;a.click();};
+const nameOf=f=>(f.closest('section').querySelector('h2').firstChild.textContent+' '+f.dataset.tab).replace(/[^a-z0-9]+/gi,'-');
+function exportPng(f){dl(nameOf(f)+'.png',render(f).toDataURL('image/png'));}
+function exportAll(){let n=0;document.querySelectorAll('.frame').forEach(f=>{const d=load(f);if(!d.strokes.length&&!d.note)return;const shown=f.classList.contains('on');if(!shown){f.classList.add('on');fit(f);}
+ setTimeout(()=>{exportPng(f);if(!shown)f.classList.remove('on');},150*n++);});if(!n)alert('nothing annotated yet');}
 show(location.hash.slice(1)||items[0].dataset.id);
 window.onhashchange=()=>show(location.hash.slice(1));
-";
+window.onresize=()=>document.querySelectorAll('.frame.on').forEach(fit);
+"#;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -296,11 +346,11 @@ async fn main() {
         for (label, _) in &frames {
             let _ = write!(html, "<button data-tab=\"{label}\">{label}</button>");
         }
-        html.push_str("</div>");
+        html.push_str("</div><div class=\"tools\"><span>draw:</span><button class=\"sw on\" data-c=\"#f38ba8\" style=\"background:#f38ba8\"></button><button class=\"sw\" data-c=\"#f9e2af\" style=\"background:#f9e2af\"></button><button class=\"sw\" data-c=\"#a6e3a1\" style=\"background:#a6e3a1\"></button><button class=\"sw\" data-c=\"#cdd6f4\" style=\"background:#cdd6f4\"></button><button data-act=\"undo\">undo</button><button data-act=\"clear\">clear</button><button data-act=\"png\">export PNG</button><button data-act=\"all\">export all annotated</button><span class=\"hint\">drawings and notes persist in this browser</span></div>");
         for (label, body) in &frames {
             let _ = write!(
                 html,
-                "<div class=\"frame\" data-tab=\"{label}\">{body}</div>"
+                "<div class=\"frame\" data-tab=\"{label}\"><div class=\"stage\">{body}<canvas class=\"ink\"></canvas></div><textarea placeholder=\"Notes for this frame (saved with the drawing)\"></textarea></div>"
             );
         }
         html.push_str("</section>");

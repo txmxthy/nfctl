@@ -139,6 +139,9 @@ Animated: [tui](docs/demo/tui.gif) · [ls](docs/demo/ls.gif) · [logs through a 
 restart](docs/demo/logs.gif) · [top](docs/demo/top.gif) · [pause and resume](docs/demo/pause.gif)
 · [apply --check](docs/demo/apply.gif) · [recycle](docs/demo/recycle.gif)
 
+`just gallery` renders every fixture pipeline through the card view and `dag`
+into one HTML page you can draw on; see [CONTRIBUTING](CONTRIBUTING.md#looking-at-layouts).
+
 `just demo-up` installs Numaflow into your current local kube context and applies
 the pipelines in [`examples/`](examples); [`docs/demo`](docs/demo) has the tapes
 (`just record-fixture` renders the cluster-free ones).

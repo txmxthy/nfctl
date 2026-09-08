@@ -19,3 +19,8 @@ through `dag`, into one HTML page with the terminal's colours. Use it to review
 a layout change across the whole suite before trusting the goldens;
 `just gallery target/gallery/public.html --public` makes a shareable page
 without the corpus.
+
+Each frame has a drawing layer: pick a colour, draw over the frame, add a note,
+and `export PNG` (or `export all annotated`) to hand the marked-up frames to
+whoever is fixing the layout. Drawings and notes persist in the browser's local
+storage per pipeline and tab, so a regenerated page keeps them.
