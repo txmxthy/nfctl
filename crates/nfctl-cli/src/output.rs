@@ -291,6 +291,7 @@ pub fn isbs(items: &[nfctl_core::model::IsbService], fmt: OutputFormat) -> Resul
         return Ok("No inter-step buffer services found.\n".to_owned());
     }
     let mut t = Table::new(vec![
+        "NAMESPACE",
         "NAME",
         "PHASE",
         "HEALTHY",
@@ -300,6 +301,7 @@ pub fn isbs(items: &[nfctl_core::model::IsbService], fmt: OutputFormat) -> Resul
     ]);
     for i in items {
         t.row(vec![
+            i.namespace.to_string(),
             i.name.to_string(),
             format!("{:?}", i.phase),
             if i.healthy {

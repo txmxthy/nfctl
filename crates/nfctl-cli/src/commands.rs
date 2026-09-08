@@ -327,19 +327,34 @@ async fn run_isb(cli: &Cli, ctx: &Context, command: &IsbCommand) -> Result<Strin
         IsbCommand::Ls => output::isbs(&ctx.service.list_isb(ns.as_ref()).await?, fmt),
         IsbCommand::Inspect { name } => {
             let name = IsbName::new(name).map_err(|e| invalid_arg("isbsvc", name, e))?;
-            let isb = ctx
+            let mut found: Vec<_> = ctx
                 .service
                 .list_isb(ns.as_ref())
                 .await?
                 .into_iter()
-                .find(|i| i.name == name)
-                .ok_or_else(|| Error::NotFound {
-                    kind: "isbsvc",
-                    name: name.to_string(),
-                })?;
+                .filter(|i| i.name == name)
+                .collect();
+            let isb = match found.len() {
+                0 => {
+                    return Err(Error::NotFound {
+                        kind: "isbsvc",
+                        name: name.to_string(),
+                    });
+                }
+                1 => found.remove(0),
+                _ => {
+                    let nss: Vec<String> = found.iter().map(|i| i.namespace.to_string()).collect();
+                    return Err(Error::Usage(format!(
+                        "isbsvc `{name}` exists in {} namespaces ({}); pass -n",
+                        nss.len(),
+                        nss.join(", ")
+                    )));
+                }
+            };
+            // A pipeline references its ISB by name within its own namespace.
             let users: Vec<_> = ctx
                 .service
-                .list(ns.as_ref())
+                .list(Some(&isb.namespace))
                 .await?
                 .into_iter()
                 .filter(|p| p.spec.isb == name)
@@ -402,6 +417,7 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             name,
             vertex,
             timeout,
+            all_at_once,
             dry_run,
         } => {
             let key = ctx.resolve_pipeline(cli, name).await?;
@@ -415,6 +431,7 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
                 &key,
                 vertex.as_ref(),
                 Duration::from_secs(*timeout),
+                *all_at_once,
                 *dry_run,
             )
             .await?;
@@ -424,8 +441,11 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             let suffix = if *dry_run { " (dry run)" } else { "" };
             Ok(match r {
                 lifecycle::RecycleReport::Pods { vertex, deleted } => {
-                    let mut s =
-                        format!("{key}/{vertex}: deleted {} pod(s){suffix}\n", deleted.len());
+                    let how = if *all_at_once { "" } else { ", one at a time" };
+                    let mut s = format!(
+                        "{key}/{vertex}: restarted {} pod(s){how}{suffix}\n",
+                        deleted.len()
+                    );
                     for p in deleted {
                         let _ = std::fmt::Write::write_fmt(&mut s, format_args!("  {p}\n"));
                     }

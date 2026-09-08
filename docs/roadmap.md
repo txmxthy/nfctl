@@ -20,6 +20,8 @@
 | `dag --expand-shards`, coloured `dag -f ascii` | done | M10 |
 | `completions` from live resources (dynamic) | done | M11 |
 | docs + ADRs 0006–0008 | done | M12 |
+| `isb ls` namespace column, rolling `recycle` | done | M13 |
+| TUI load timings and faster detail panel | planned | M14 |
 | ServingPipeline | planned | later |
 | prebuilt binaries, Homebrew tap | planned | later |
 

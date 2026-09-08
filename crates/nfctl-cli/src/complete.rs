@@ -145,7 +145,7 @@ impl Catalog {
             isbs: isbs
                 .iter()
                 .map(|i| Entry {
-                    namespace: String::new(),
+                    namespace: i.namespace.to_string(),
                     name: i.name.to_string(),
                     phase: format!("{:?}", i.phase),
                     vertices: Vec::new(),
@@ -292,7 +292,11 @@ pub fn monovertices(current: &OsStr) -> Vec<CompletionCandidate> {
 
 pub fn isbs(current: &OsStr) -> Vec<CompletionCandidate> {
     let line = current_line();
-    candidates(catalog(&line).isbs.iter(), current, None)
+    candidates(
+        catalog(&line).isbs.iter(),
+        current,
+        line.namespace.as_deref(),
+    )
 }
 
 /// Vertices of the pipeline named earlier on the line (`nfctl logs <pipeline> <Tab>`).

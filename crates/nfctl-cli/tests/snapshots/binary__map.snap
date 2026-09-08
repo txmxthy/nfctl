@@ -1,6 +1,6 @@
 ---
 source: crates/nfctl-cli/tests/binary.rs
-assertion_line: 35
+assertion_line: 66
 expression: text
 ---
 nfctl
@@ -48,10 +48,11 @@ nfctl
 │   ├── name  NAME  — Pipeline name
 │   ├── -s/--strategy  STRATEGY [fast|slow]  = fast  — `fast` restores the replica counts from before the pause; `slow` starts at the minimum
 │   └── --dry-run  — Validate on the server without changing anything
-├── recycle  Restart one vertex (delete its pods) or a whole pipeline (pause, drain, resume)
+├── recycle  Restart one vertex (its pods, one at a time) or a whole pipeline (pause, drain, resume)
 │   ├── name  NAME  — Pipeline name
 │   ├── vertex  VERTEX  — Restrict to one vertex
-│   ├── --timeout  SECS  = 120  — Give up waiting for the pause after this many seconds
+│   ├── --timeout  SECS  = 120  — Give up waiting (for the pause, or for each replaced pod) after this many seconds
+│   ├── --all-at-once  — Delete every pod of the vertex at once instead of one at a time
 │   └── --dry-run  — Show what would happen without changing anything
 ├── wait  Block until a pipeline reaches a phase
 │   ├── name  NAME  — Pipeline name

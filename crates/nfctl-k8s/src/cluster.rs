@@ -405,6 +405,18 @@ impl ClusterPort for KubeCluster {
         Ok(deleted)
     }
 
+    async fn delete_pod(&self, ns: &Namespace, pod: &PodName, dry_run: bool) -> Result<()> {
+        let dp = DeleteParams {
+            dry_run,
+            ..DeleteParams::default()
+        };
+        self.pods(ns)
+            .delete(pod.as_str(), &dp)
+            .await
+            .map(|_| ())
+            .map_err(|e| map_kube(e, "pod", pod.as_str()))
+    }
+
     async fn tail_logs(
         &self,
         ns: &Namespace,

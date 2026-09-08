@@ -79,6 +79,8 @@ pub trait ClusterPort: Send + Sync {
         selector: &Selector,
         dry_run: bool,
     ) -> Result<Vec<PodName>>;
+    /// Delete one pod by name (the controller replaces it).
+    async fn delete_pod(&self, ns: &Namespace, pod: &PodName, dry_run: bool) -> Result<()>;
 
     /// One container's log. With `follow`, the stream stays open until the
     /// container terminates; without, it ends after the current backlog.

@@ -177,7 +177,7 @@ pub enum Command {
         dry_run: bool,
     },
 
-    /// Restart one vertex (delete its pods) or a whole pipeline (pause, drain, resume)
+    /// Restart one vertex (its pods, one at a time) or a whole pipeline (pause, drain, resume)
     Recycle {
         /// Pipeline name
         #[arg(add = ArgValueCompleter::new(complete::pipelines))]
@@ -185,9 +185,12 @@ pub enum Command {
         /// Restrict to one vertex
         #[arg(add = ArgValueCompleter::new(complete::vertices))]
         vertex: Option<String>,
-        /// Give up waiting for the pause after this many seconds
+        /// Give up waiting (for the pause, or for each replaced pod) after this many seconds
         #[arg(long, default_value_t = 120, value_name = "SECS")]
         timeout: u64,
+        /// Delete every pod of the vertex at once instead of one at a time
+        #[arg(long)]
+        all_at_once: bool,
         /// Show what would happen without changing anything
         #[arg(long)]
         dry_run: bool,

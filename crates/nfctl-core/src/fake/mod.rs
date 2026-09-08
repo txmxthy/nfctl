@@ -247,8 +247,14 @@ impl ClusterPort for FakeCluster {
         Ok(())
     }
 
-    async fn list_isb(&self, _ns: Option<&Namespace>) -> Result<Vec<IsbService>> {
-        Ok(self.lock().isbs.clone())
+    async fn list_isb(&self, ns: Option<&Namespace>) -> Result<Vec<IsbService>> {
+        Ok(self
+            .lock()
+            .isbs
+            .iter()
+            .filter(|i| ns.is_none_or(|n| &i.namespace == n))
+            .cloned()
+            .collect())
     }
 
     async fn list_monovertices(&self, ns: Option<&Namespace>) -> Result<Vec<MonoVertex>> {
@@ -335,6 +341,27 @@ impl ClusterPort for FakeCluster {
             }
         }
         Ok(names)
+    }
+
+    /// Deletes the pod and, standing in for the controller, applies a
+    /// replacement named `<pod>-r` so rolling restarts can observe recovery.
+    async fn delete_pod(&self, _ns: &Namespace, pod: &PodName, dry_run: bool) -> Result<()> {
+        let found = self.lock().pods.iter().find(|p| &p.name == pod).cloned();
+        let Some(old) = found else {
+            return Err(Error::NotFound {
+                kind: "pod",
+                name: pod.to_string(),
+            });
+        };
+        if dry_run {
+            return Ok(());
+        }
+        self.emit(&PodEvent::Deleted(old.clone()));
+        let mut replacement = old;
+        replacement.name = PodName::new(format!("{pod}-r"))
+            .unwrap_or_else(|_| unreachable!("a pod name plus `-r` is still a pod name"));
+        self.emit(&PodEvent::Applied(replacement));
+        Ok(())
     }
 
     async fn tail_logs(

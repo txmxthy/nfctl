@@ -23,7 +23,7 @@ nfctl top <pipeline> [-i 2]               the same, refreshing
 nfctl isb ls | isb inspect <name>
 nfctl pause <pipeline> [--wait]           reports whether buffers drained
 nfctl resume <pipeline> [--strategy fast|slow]
-nfctl recycle <pipeline> [vertex]         restart a vertex's pods, or pause-drain-resume
+nfctl recycle <pipeline> [vertex]         restart a vertex's pods one at a time, or pause-drain-resume
 nfctl wait <pipeline> --phase paused
 nfctl scale <pipeline> <vertex> <n>
 nfctl apply -f spec.yaml [--check]        refuses changes that need delete-and-recreate

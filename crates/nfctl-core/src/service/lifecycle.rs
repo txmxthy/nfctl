@@ -6,8 +6,8 @@ use futures::StreamExt;
 use serde::Serialize;
 
 use crate::model::{
-    DesiredPhase, Pipeline, PipelineKey, PipelinePhase, PodName, ResumeStrategy, Selector,
-    Timestamp, VertexName,
+    DesiredPhase, Namespace, Pipeline, PipelineKey, PipelinePhase, PodName, ResumeStrategy,
+    Selector, Timestamp, VertexName,
 };
 use crate::ports::{ClusterPort, DaemonConnector};
 use crate::{Error, Result};
@@ -121,6 +121,7 @@ pub async fn recycle(
     key: &PipelineKey,
     vertex: Option<&VertexName>,
     wait: Duration,
+    all_at_once: bool,
     dry_run: bool,
 ) -> Result<RecycleReport> {
     if let Some(v) = vertex {
@@ -131,13 +132,14 @@ pub async fn recycle(
                 name: format!("{key}/{v}"),
             });
         }
-        let deleted = cluster
-            .delete_pods(
-                &key.namespace,
-                &Selector::vertex_pods(&key.name, Some(v)),
-                dry_run,
-            )
-            .await?;
+        let selector = Selector::vertex_pods(&key.name, Some(v));
+        let deleted = if all_at_once {
+            cluster
+                .delete_pods(&key.namespace, &selector, dry_run)
+                .await?
+        } else {
+            rolling_restart(cluster, &key.namespace, &selector, wait, dry_run).await?
+        };
         return Ok(RecycleReport::Pods {
             vertex: v.clone(),
             deleted,
@@ -150,6 +152,54 @@ pub async fn recycle(
         paused_at,
         drained: report.drained,
     })
+}
+
+const ROLL_POLL: Duration = Duration::from_millis(500);
+
+/// Pods that are up: phase Running with every non-init container running.
+fn running(pods: &[crate::model::PodRef]) -> usize {
+    pods.iter()
+        .filter(|p| p.phase == crate::model::PodPhase::Running)
+        .filter(|p| p.containers.iter().all(|c| c.is_init || c.running))
+        .count()
+}
+
+/// Delete the selected pods one at a time, waiting after each until the
+/// selector again matches as many running pods as before the deletion.
+/// `wait` bounds each step; a step that times out stops the roll with the pods
+/// deleted so far in the error.
+async fn rolling_restart(
+    cluster: &dyn ClusterPort,
+    ns: &Namespace,
+    selector: &Selector,
+    wait: Duration,
+    dry_run: bool,
+) -> Result<Vec<PodName>> {
+    let mut pods = cluster.list_pods(ns, selector).await?;
+    pods.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+    let target = running(&pods);
+    let mut deleted = Vec::with_capacity(pods.len());
+    for pod in &pods {
+        cluster.delete_pod(ns, &pod.name, dry_run).await?;
+        deleted.push(pod.name.clone());
+        if dry_run {
+            continue;
+        }
+        let recovered = async {
+            loop {
+                let now = cluster.list_pods(ns, selector).await?;
+                let gone = now.iter().all(|p| p.name != pod.name);
+                if gone && running(&now) >= target {
+                    return Ok::<(), Error>(());
+                }
+                tokio::time::sleep(ROLL_POLL).await;
+            }
+        };
+        tokio::time::timeout(wait, recovered)
+            .await
+            .unwrap_or(Err(Error::Timeout(wait)))?;
+    }
+    Ok(deleted)
 }
 
 #[cfg(all(test, feature = "fake"))]
@@ -210,9 +260,17 @@ mod tests {
         let (c, key) = setup();
         c.emit(&PodEvent::Applied(sample_pod("p-cat-0-abc", false)));
         let v = VertexName::new("cat").unwrap();
-        let r = recycle(&c, &NoDaemon, &key, Some(&v), Duration::from_secs(1), false)
-            .await
-            .unwrap();
+        let r = recycle(
+            &c,
+            &NoDaemon,
+            &key,
+            Some(&v),
+            Duration::from_secs(1),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(matches!(r, RecycleReport::Pods { ref deleted, .. } if deleted.len() == 1));
         let ghost = VertexName::new("ghost").unwrap();
         assert!(matches!(
@@ -222,6 +280,7 @@ mod tests {
                 &key,
                 Some(&ghost),
                 Duration::from_secs(1),
+                true,
                 false
             )
             .await
@@ -240,6 +299,7 @@ mod tests {
             None,
             Duration::from_secs(1),
             false,
+            false,
         )
         .await
         .unwrap();
@@ -247,5 +307,40 @@ mod tests {
         let p = c.get_pipeline(&key).await.unwrap();
         assert_eq!(p.status.phase, PipelinePhase::Running);
         assert_eq!(p.meta.resume_strategy, Some(ResumeStrategy::Fast));
+    }
+
+    #[tokio::test]
+    async fn recycle_vertex_rolls_one_pod_at_a_time() {
+        let (c, key) = setup();
+        c.emit(&PodEvent::Applied(sample_pod("p-cat-0-abc", false)));
+        c.emit(&PodEvent::Applied(sample_pod("p-cat-1-def", false)));
+        let v = VertexName::new("cat").unwrap();
+        let r = recycle(
+            &c,
+            &NoDaemon,
+            &key,
+            Some(&v),
+            Duration::from_secs(2),
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let RecycleReport::Pods { deleted, .. } = r else {
+            panic!("expected pods");
+        };
+        assert_eq!(
+            deleted.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            ["p-cat-0-abc", "p-cat-1-def"]
+        );
+        // Every pod was replaced, none of the originals remain.
+        let names: Vec<String> = c
+            .list_pods(&key.namespace, &Selector::vertex_pods(&key.name, Some(&v)))
+            .await
+            .unwrap()
+            .iter()
+            .map(|p| p.name.to_string())
+            .collect();
+        assert_eq!(names, ["p-cat-0-abc-r", "p-cat-1-def-r"]);
     }
 }

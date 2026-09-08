@@ -582,7 +582,8 @@ monovertices:
     message: All pods are healthy
   created: '2026-01-01T00:00:00Z'
 isbs:
-- name: default
+- namespace: default
+  name: default
   version: latest
   replicas: 3
   persistent: true

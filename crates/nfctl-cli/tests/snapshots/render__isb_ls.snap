@@ -1,6 +1,7 @@
 ---
 source: crates/nfctl-cli/tests/render.rs
+assertion_line: 208
 expression: "out(&[\"isb\", \"ls\"]).await"
 ---
-NAME     PHASE    HEALTHY  REPLICAS  VERSION  PERSISTENT
-default  Running  yes      3         2.10.3   yes
+NAMESPACE  NAME     PHASE    HEALTHY  REPLICAS  VERSION  PERSISTENT
+demo       default  Running  yes      3         2.10.3   yes

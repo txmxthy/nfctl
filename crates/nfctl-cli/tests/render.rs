@@ -29,6 +29,7 @@ fn ctx_with(cluster: FakeCluster) -> Context {
 fn ctx_with_daemon(cluster: FakeCluster, daemon: FakeDaemon) -> Context {
     cluster.add_monovertices([sample_monovertex("demo", "mono", MonoVertexPhase::Running)]);
     cluster.add_isbs([IsbService {
+        namespace: Namespace::new("demo").unwrap(),
         name: IsbName::new("default").unwrap(),
         version: "2.10.3".into(),
         replicas: 3,

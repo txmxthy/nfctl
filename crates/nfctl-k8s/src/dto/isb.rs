@@ -1,6 +1,6 @@
 use kube::core::Object;
 use nfctl_core::Error;
-use nfctl_core::model::{IsbName, IsbPhase, IsbService};
+use nfctl_core::model::{IsbName, IsbPhase, IsbService, Namespace};
 use serde::{Deserialize, Serialize};
 
 pub type IsbObject = Object<IsbSpecDto, IsbStatusDto>;
@@ -32,6 +32,12 @@ pub fn into_isb(o: IsbObject) -> Result<IsbService, Error> {
         name: raw.clone(),
         reason: e.to_string(),
     })?;
+    let ns_raw = o.metadata.namespace.clone().unwrap_or_default();
+    let namespace = Namespace::new(&ns_raw).map_err(|e| Error::Invalid {
+        kind: "namespace",
+        name: ns_raw,
+        reason: e.to_string(),
+    })?;
     let js = o.spec.jetstream.unwrap_or_default();
     let st = o.status.unwrap_or_default();
     let phase = st
@@ -42,6 +48,7 @@ pub fn into_isb(o: IsbObject) -> Result<IsbService, Error> {
     // The ISB controller reports Configured/Deployed/ChildrenResourcesHealthy; no `Ready`.
     let ready = !st.conditions.is_empty() && st.conditions.iter().all(|c| c.status == "True");
     Ok(IsbService {
+        namespace,
         name,
         version: js.version.unwrap_or_default(),
         // The operator coerces 2 to 3; mirror that so the table matches reality.
@@ -77,6 +84,7 @@ mod tests {
         }))
         .unwrap();
         let isb = into_isb(obj).unwrap();
+        assert_eq!(isb.namespace.as_str(), "demo");
         assert_eq!(isb.phase, IsbPhase::Running);
         assert!(isb.persistent);
         assert!(isb.healthy);
