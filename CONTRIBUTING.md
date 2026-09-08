@@ -10,3 +10,12 @@
   Build your own with `just corpus OUT IN_DIR...` from any Mermaid `graph LR` diagrams; the
   script renames everything and refuses to write output that still contains an input name.
   Corpus tests and benches skip when the directory is absent, so CI never needs it.
+
+## Looking at layouts
+
+`just gallery` renders every fixture pipeline (and the private corpus when
+present) through the card view at three widths, collapsed and expanded, and
+through `dag`, into one HTML page with the terminal's colours. Use it to review
+a layout change across the whole suite before trusting the goldens;
+`just gallery target/gallery/public.html --public` makes a shareable page
+without the corpus.

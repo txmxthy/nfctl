@@ -34,6 +34,11 @@ corpus out +dirs:
 corpus-fixture:
     cargo run -q -p nfctl-graph --example corpus_fixture -- testdata/private testdata/private/fixture.yaml
 
+# every fixture (and corpus) pipeline through both renderers, as one HTML page
+gallery out="target/gallery/index.html" *flags="":
+    cargo run -q -p nfctl-tui --example gallery -- {{out}} {{flags}}
+    @echo "open {{out}}"
+
 # ASCII renders of every corpus pipeline, for eyeballing (testdata/private/out/)
 corpus-render:
     cargo run -q -p nfctl-graph --example corpus_render -- testdata/private testdata/private/out
