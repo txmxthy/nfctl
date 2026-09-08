@@ -169,10 +169,16 @@ impl Model for DetailPanel {
         let cards = CardView::new(&p.spec.topology, inner.width, self.expand_shards);
         let scroll = self.scroll_for(&cards, inner.width);
         let cards_h = cards.height();
+        // The edge table sits at the bottom, at most half the panel; the cards
+        // take whatever is left above it.
+        let rows = u16::try_from(v.edges.len())
+            .unwrap_or(u16::MAX)
+            .saturating_add(1);
+        let table_h = rows.min(inner.height / 2).max(4);
         let [head, dag, edges, warn] = Layout::vertical([
             Constraint::Length(2),
-            Constraint::Length(cards_h),
-            Constraint::Min(4),
+            Constraint::Min(cards_h.min(inner.height.saturating_sub(table_h + 2))),
+            Constraint::Length(table_h),
             Constraint::Length(u16::try_from(v.warnings.len()).unwrap_or(0)),
         ])
         .areas(inner);
@@ -211,7 +217,7 @@ impl Model for DetailPanel {
             self.palette,
         );
 
-        frame.render_widget(edge_table(v), edges);
+        frame.render_widget(edge_table(v, edges.width), edges);
 
         let warnings: Vec<Line> = v
             .warnings
@@ -227,7 +233,7 @@ impl Model for DetailPanel {
     }
 }
 
-fn edge_table(v: &PipelineView) -> Table<'_> {
+fn edge_table(v: &PipelineView, width: u16) -> Table<'_> {
     const HEADER: [&str; 6] = ["EDGE", "TAGS", "PENDING", "USAGE", "", "WATERMARK"];
     let tags = |from: &VertexName, to: &VertexName| -> String {
         v.pipeline
@@ -273,7 +279,7 @@ fn edge_table(v: &PipelineView) -> Table<'_> {
             ]
         })
         .collect();
-    let widths = crate::table::fit(&HEADER, &cells);
+    let widths = crate::table::fill(&HEADER, &cells, width, 2, &[0, 1]);
     Table::new(cells.into_iter().map(Row::new), widths)
         .column_spacing(2)
         .header(Row::new(HEADER).style(style::title()))
