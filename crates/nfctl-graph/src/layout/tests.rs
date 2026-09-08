@@ -53,6 +53,10 @@ fn check_endpoints(g: &ViewGraph, l: &Layout) {
 fn linear_chain_is_one_row() {
     let (g, l) = lay("a([a]) --> b[b]\n b --> c[[c]]");
     assert_eq!(l.columns.len(), 3);
+    assert!(
+        l.gaps.iter().all(|g| g.tracks.is_empty()),
+        "straight edges take no track"
+    );
     assert!(l.cards.iter().all(|c| c.y == 0));
     assert_eq!(l.height, 5);
     assert_eq!(l.lanes, 0);

@@ -239,7 +239,7 @@ fn columns(sp: &Spans, cols: usize, card_w: i32, margin: i32) -> Columns {
                     edges: sp.per_gap[c]
                         .iter()
                         .zip(&assign)
-                        .filter(|(_, a)| **a == t)
+                        .filter(|(s, a)| **a == t && s.lo != s.hi)
                         .map(|(s, _)| s.edge)
                         .collect(),
                 })
@@ -275,11 +275,16 @@ fn forward_route(
         let s = &l.segments[si];
         let (c, y0) = geo.attach[&s.from];
         let (_, y1) = geo.attach[&s.to];
-        let tx = cx.track_x(sp.forward[si]);
         if k == 0 {
             pts.push((cx.col_x[c] + card_w, y0));
         }
-        pts.extend([(tx, y0), (tx, y1), (cx.col_x[c + 1] - 1, y1)]);
+        if y0 == y1 {
+            // Straight across: no track needed.
+            pts.push((cx.col_x[c + 1] - 1, y1));
+        } else {
+            let tx = cx.track_x(sp.forward[si]);
+            pts.extend([(tx, y0), (tx, y1), (cx.col_x[c + 1] - 1, y1)]);
+        }
         if k + 1 < segs.len() {
             pts.push((cx.col_x[c + 1] + card_w, y1));
         }

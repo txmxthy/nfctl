@@ -20,9 +20,12 @@ pub(crate) struct Span {
     pub dst: u32,
 }
 
-/// Returns, per span (same order as input), the track index; and the track count.
+/// Returns, per span (same order as input), the track index; and the track
+/// count. A straight span (no vertical run) takes no track and reports 0.
 pub(crate) fn pack(spans: &[Span]) -> (Vec<usize>, usize) {
-    let mut order: Vec<usize> = (0..spans.len()).collect();
+    let mut order: Vec<usize> = (0..spans.len())
+        .filter(|&i| spans[i].lo != spans[i].hi)
+        .collect();
     order.sort_by_key(|&i| (spans[i].lo, spans[i].hi, spans[i].edge));
     let mut tracks: Vec<Vec<Span>> = Vec::new();
     let mut assign = vec![0usize; spans.len()];
@@ -30,9 +33,13 @@ pub(crate) fn pack(spans: &[Span]) -> (Vec<usize>, usize) {
         let s = spans[i];
         let compatible = |t: &Vec<Span>| {
             t.iter().all(|o| {
-                ((o.src == s.src || o.dst == s.dst) && o.colour == s.colour)
-                    || s.hi + 1 < o.lo
-                    || o.hi + 1 < s.lo
+                let related = o.src == s.src || o.dst == s.dst;
+                let disjoint = s.hi + 1 < o.lo || o.hi + 1 < s.lo;
+                // Two runs from one source (or into one target) that meet only
+                // on that shared row make a symmetric `┼` fork rather than two
+                // offset corners.
+                let touching = related && (s.hi == o.lo || o.hi == s.lo);
+                (related && o.colour == s.colour) || disjoint || touching
             })
         };
         let slot = tracks.iter().position(compatible).unwrap_or_else(|| {
@@ -50,7 +57,13 @@ pub(crate) fn pack(spans: &[Span]) -> (Vec<usize>, usize) {
         }
         r
     };
-    (assign.into_iter().map(|t| rank[t]).collect(), tracks.len())
+    (
+        assign
+            .into_iter()
+            .map(|t| rank.get(t).copied().unwrap_or(0))
+            .collect(),
+        tracks.len(),
+    )
 }
 
 /// Cost of drawing track `a` left of track `b`: one per horizontal crossing a

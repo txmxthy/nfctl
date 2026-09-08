@@ -354,8 +354,7 @@ async fn main() {
     let mut html = String::new();
     let build = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let _ = write!(
         html,
         "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>nfctl Layout Gallery</title><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap\"><style>{STYLE}</style><nav><h1>nfctl layout gallery</h1><p>{} pipelines from the test suite, drawn as the terminal would: the card view at 110, 160 and 220 columns with shard groups collapsed or expanded, and the box-drawing <code>dag</code> output. Tabs stick across pipelines.</p>",
