@@ -26,3 +26,7 @@ so every stroke and note is written to `target/gallery/notes.json` and
 `export PNG` drops the marked-up frame into `target/gallery/png/`, where the
 person fixing the layout can read them straight from the checkout. Without the
 server the page keeps them in the browser instead. `just gallery-stop` ends it.
+Annotations belong to the build they were drawn on: when the page is
+regenerated (it reloads itself), older ones move under `~stale` in the JSON
+and stop being painted, so a frame never shows marks made on a previous
+layout.

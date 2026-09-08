@@ -269,16 +269,25 @@ try{store=JSON.parse(localStorage.getItem('ink')||'{}')}catch(e){}
 for(const k of Object.keys(localStorage)){const m=k.match(/^ink:(i\d+):(.*)$/);if(!m)continue;
  const sec=document.getElementById(m[1]);if(sec){const name=sec.querySelector('h2').firstChild.textContent+' | '+m[2];if(!store[name])try{store[name]=JSON.parse(localStorage.getItem(k))}catch(e){}}
  localStorage.removeItem(k);}
-const load=f=>store[key(f)]||{strokes:[],note:''};
+// An annotation belongs to the build it was drawn on. Entries from an older
+// build are moved under `~stale` (kept for whoever reads notes.json, never
+// painted again), so a regenerated frame starts clean.
+function retire(){const st=store['~stale']||(store['~stale']={});
+ for(const k of Object.keys(store)){if(k==='~stale')continue;const e=store[k];
+  if(!e.strokes.length&&!e.note){delete store[k];continue;}
+  if(e.build!==BUILD){st[k+' @ '+(e.build||'unknown')]=e;delete store[k];}}}
+retire();
+const load=f=>store[key(f)]||{strokes:[],note:'',build:BUILD};
 let pending=null;
 function flush(){pending=null;try{localStorage.setItem('ink',JSON.stringify(store))}catch(e){}
  if(online)fetch(API+'/notes.json',{method:'PUT',body:JSON.stringify(store)}).then(r=>setStatus(r.ok?'saved to target/gallery/notes.json':'save failed')).catch(()=>{online=false;setStatus('notes server gone; saving in browser only')});}
-const save=(f,d)=>{store[key(f)]=d;clearTimeout(pending);pending=setTimeout(flush,400);};
+const save=(f,d)=>{d.build=BUILD;if(d.strokes.length||d.note)store[key(f)]=d;else delete store[key(f)];clearTimeout(pending);pending=setTimeout(flush,400);};
 const setStatus=t=>document.querySelectorAll('.hint').forEach(h=>h.textContent=t);
 fetch(API+'/notes.json').then(r=>r.json()).then(remote=>{online=true;
  // Union: anything drawn here before the server existed is kept and pushed.
- for(const k in remote)if(!store[k])store[k]=remote[k];
- flush();document.querySelectorAll('.frame.on').forEach(f=>{paint(f);f.querySelector('textarea').value=load(f).note;});
+ for(const k in remote){if(k==='~stale'){store['~stale']=Object.assign({},remote[k],store['~stale']||{});continue;}if(!store[k])store[k]=remote[k];}
+ retire();const n=Object.keys(store['~stale']||{}).length;
+ flush();if(n)setStatus('saved to target/gallery/notes.json · '+n+' annotation(s) from earlier builds archived under ~stale');document.querySelectorAll('.frame.on').forEach(f=>{paint(f);f.querySelector('textarea').value=load(f).note;});
 }).catch(()=>setStatus('notes server not running (just gallery starts it); saving in browser only'));
 function fit(f){const pre=f.querySelector('pre'),c=f.querySelector('canvas');if(!pre||!c)return;
  const w=pre.scrollWidth,h=pre.scrollHeight,r=devicePixelRatio||1;
@@ -343,6 +352,10 @@ async fn main() {
         .unwrap_or_else(|| "target/gallery/index.html".to_owned());
     let items = items(public);
     let mut html = String::new();
+    let build = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let _ = write!(
         html,
         "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>nfctl Layout Gallery</title><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap\"><style>{STYLE}</style><nav><h1>nfctl layout gallery</h1><p>{} pipelines from the test suite, drawn as the terminal would: the card view at 110, 160 and 220 columns with shard groups collapsed or expanded, and the box-drawing <code>dag</code> output. Tabs stick across pipelines.</p>",
@@ -378,7 +391,10 @@ async fn main() {
         }
         html.push_str("</section>");
     }
-    let _ = write!(html, "</main><script>{SCRIPT}</script>");
+    let _ = write!(
+        html,
+        "</main><script>const BUILD='{build}';{SCRIPT}</script>"
+    );
     if let Some(dir) = std::path::Path::new(&out).parent() {
         std::fs::create_dir_all(dir).unwrap();
     }
