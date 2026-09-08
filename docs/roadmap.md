@@ -22,6 +22,8 @@
 | docs + ADRs 0006–0008 | done | M12 |
 | `isb ls` namespace column, rolling `recycle` | done | M13 |
 | TUI load timings and faster detail panel | planned | M14 |
+| layout gallery (`just gallery`) | done | — |
+| straight chains, no framed cards, short back edges | planned | M15 |
 | ServingPipeline | planned | later |
 | prebuilt binaries, Homebrew tap | planned | later |
 
