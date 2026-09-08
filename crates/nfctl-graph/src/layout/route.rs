@@ -11,6 +11,8 @@ use super::{
     Slot, Track, ViewGraph, i,
 };
 
+/// Blank rows between stacked slots in a column.
+const SLOT_GAP: i32 = 1;
 /// Left margin when a back edge targets column 0.
 const BACK_MARGIN: i32 = 3;
 /// Pseudo node keys so back-edge verticals never share a track with forward
@@ -42,10 +44,13 @@ fn geometry(l: &Layered, opts: LayoutOptions) -> Geometry {
         LNode::Real(_) => i32::from(opts.card_h),
         LNode::Pass(_) => 1,
     };
+    // One blank row between stacked slots. With odd card heights this keeps
+    // every column an odd height, so centring lands on a row and a source
+    // sits exactly between the two targets it fans out to.
     let heights: Vec<i32> = l
         .columns
         .iter()
-        .map(|col| col.iter().map(slot_h).sum())
+        .map(|col| col.iter().map(slot_h).sum::<i32>() + i(col.len().saturating_sub(1)))
         .collect();
     let tallest = heights.iter().copied().max().unwrap_or(0);
     let mut geo = Geometry {
@@ -59,7 +64,10 @@ fn geometry(l: &Layered, opts: LayoutOptions) -> Geometry {
         // out and back in reads as one horizontal line through the middle.
         let mut y = (tallest - heights[c]) / 2;
         let mut slots = Vec::new();
-        for &n in col {
+        for (k, &n) in col.iter().enumerate() {
+            if k > 0 {
+                y += SLOT_GAP;
+            }
             match n {
                 LNode::Real(id) => {
                     // Every card is the same (odd) height so edges meet a true

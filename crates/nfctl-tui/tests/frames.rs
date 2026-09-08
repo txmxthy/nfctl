@@ -61,7 +61,7 @@ async fn detail_panel_with_cards() {
     panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(view)))));
     // Move the selection to the second vertex so the highlight is exercised.
     panel.update(&AppEvent::Key(crossterm_key('j')));
-    insta::assert_snapshot!(frame(&panel, 110, 24));
+    insta::assert_snapshot!(frame(&panel, 110, 34));
 }
 
 #[tokio::test]
@@ -165,7 +165,7 @@ async fn detail_routes_every_edge() {
     .unwrap();
     let mut panel = DetailPanel::new(p.key.clone());
     panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(view)))));
-    insta::assert_snapshot!(frame(&panel, 120, 30));
+    insta::assert_snapshot!(frame(&panel, 120, 34));
 }
 
 async fn sharded_panel(expand: bool) -> DetailPanel {
@@ -198,24 +198,24 @@ async fn sharded_panel(expand: bool) -> DetailPanel {
 #[tokio::test]
 async fn detail_collapses_shards_by_default() {
     let panel = sharded_panel(false).await;
-    insta::assert_snapshot!(frame(&panel, 110, 26));
+    insta::assert_snapshot!(frame(&panel, 110, 32));
 }
 
 #[tokio::test]
 async fn detail_expands_shards_on_x() {
     let panel = sharded_panel(true).await;
-    insta::assert_snapshot!(frame(&panel, 110, 30));
+    insta::assert_snapshot!(frame(&panel, 110, 46));
 }
 
 #[tokio::test]
 async fn detail_scrolls_columns_to_the_selection() {
     let mut panel = sharded_panel(false).await;
     // Too narrow for five columns: the last card is off-screen until selected.
-    insta::assert_snapshot!("scroll_start", frame(&panel, 70, 24));
+    insta::assert_snapshot!("scroll_start", frame(&panel, 70, 32));
     for _ in 0..7 {
         panel.update(&AppEvent::Key(crossterm_key('j')));
     }
-    insta::assert_snapshot!("scroll_to_selection", frame(&panel, 70, 24));
+    insta::assert_snapshot!("scroll_to_selection", frame(&panel, 70, 32));
 }
 
 /// Same text either way; colour on paints tagged edges in more than one hue.
@@ -224,7 +224,7 @@ async fn edge_colours_follow_tag_combinations() {
     use std::collections::BTreeSet;
     let colours = |panel: &DetailPanel| -> BTreeSet<String> {
         // Wide enough that no `N more ▶` marker adds its own arrowhead.
-        let mut term = Terminal::new(TestBackend::new(140, 26)).unwrap();
+        let mut term = Terminal::new(TestBackend::new(140, 32)).unwrap();
         term.draw(|f| panel.view(f, f.area())).unwrap();
         let buf = term.backend().buffer().clone();
         buf.content()
@@ -238,7 +238,7 @@ async fn edge_colours_follow_tag_combinations() {
     let off = sharded_panel(false)
         .await
         .with_palette(nfctl_tui::Palette::monochrome());
-    assert_eq!(frame(&on, 140, 26), frame(&off, 140, 26));
+    assert_eq!(frame(&on, 140, 32), frame(&off, 140, 32));
     // Untagged edges stay dim in both; tagged ones get a hue only with colour on.
     assert!(colours(&on).len() >= 3, "on: {:?}", colours(&on));
     assert!(colours(&off).len() <= 2, "off: {:?}", colours(&off));

@@ -69,7 +69,7 @@ fn fan_out_shares_one_track() {
     let (g, l) = lay("s([s]) --> a[a]\n s --> b[b]\n s --> c[c]\n s --> d[d]");
     assert_eq!(l.gaps[0].tracks.len(), 1);
     assert_eq!(l.gaps[0].width, MIN_GAP);
-    assert_eq!(l.height, 20);
+    assert_eq!(l.height, 23);
     check_endpoints(&g, &l);
 }
 

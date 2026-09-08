@@ -3,7 +3,7 @@ Output docs/demo/tui.gif
 Set Shell fish
 Set FontSize 14
 Set Width 1200
-Set Height 640
+Set Height 760
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
 Env NFCTL_FIXTURE examples/fixtures/demo.yaml

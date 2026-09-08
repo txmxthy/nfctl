@@ -184,7 +184,7 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
             } else {
                 ViewGraph::collapsed(&item.topology).nodes.len()
             };
-            let h = u16::try_from(nodes * 5 + 12).unwrap_or(u16::MAX).min(200);
+            let h = u16::try_from(nodes * 6 + 14).unwrap_or(u16::MAX).min(240);
             let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
             term.draw(|f| panel.view(f, f.area())).unwrap();
             let label = format!(
