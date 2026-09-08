@@ -63,7 +63,8 @@ fn geometry(l: &Layered, badges: &HashMap<NodeId, Vec<Badge>>, opts: LayoutOptio
             match n {
                 LNode::Real(id) => {
                     let h = opts.card_h + u16::from(badges.contains_key(&id));
-                    geo.attach.insert(n, (c, y + 1));
+                    // Edges meet the card on its middle row.
+                    geo.attach.insert(n, (c, y + i32::from(h) / 2));
                     geo.cards.push(CardPos {
                         node: id,
                         col: c,
@@ -127,6 +128,7 @@ fn spans(
     l: &Layered,
     geo: &Geometry,
     lane: &HashMap<NodeId, i32>,
+    colour: &[Option<EdgeColour>],
 ) -> Spans {
     let cols = l.columns.len();
     let mut per_gap: Vec<Vec<Span>> = vec![Vec::new(); cols.saturating_sub(1)];
@@ -148,6 +150,7 @@ fn spans(
                     hi: y0.max(y1),
                     y_in: y0,
                     y_out: y1,
+                    colour: colour[s.edge.0 as usize],
                     src: key(s.from),
                     dst: key(s.to),
                 },
@@ -171,6 +174,7 @@ fn spans(
                     hi: ly,
                     y_in: yu,
                     y_out: ly,
+                    colour: colour[ei],
                     src: LANE_OUT,
                     dst: e.from.0,
                 },
@@ -185,6 +189,7 @@ fn spans(
                     hi: ly,
                     y_in: ly,
                     y_out: yv,
+                    colour: colour[ei],
                     src: e.to.0,
                     dst: LANE_IN,
                 },
@@ -336,7 +341,7 @@ pub(crate) fn build(
     let card_w = i32::from(opts.card_w);
     let geo = geometry(layered, badges, opts);
     let lane = lanes(g, ranked, geo.cards_h);
-    let sp = spans(g, ranked, layered, &geo, &lane);
+    let sp = spans(g, ranked, layered, &geo, &lane, edge_colour);
     let margin = if g
         .edges
         .iter()

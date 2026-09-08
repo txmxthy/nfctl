@@ -50,10 +50,14 @@ fn corpus_imports_and_renders() {
                     let (from, to) = (l.card(e.from).unwrap(), l.card(e.to).unwrap());
                     assert_eq!(
                         r.polyline[0],
-                        (from.x + 18, from.y + 1),
+                        (from.x + 18, from.y + i32::from(from.h) / 2),
                         "{name}/{pl}: route start"
                     );
-                    assert_eq!(r.head, (to.x - 1, to.y + 1), "{name}/{pl}: route head");
+                    assert_eq!(
+                        r.head,
+                        (to.x - 1, to.y + i32::from(to.h) / 2),
+                        "{name}/{pl}: route head"
+                    );
                     assert_eq!(
                         r.colour.is_some(),
                         !e.tags.is_empty(),

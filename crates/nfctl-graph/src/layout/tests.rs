@@ -34,13 +34,14 @@ fn check_endpoints(g: &ViewGraph, l: &Layout) {
         let to = l.card(e.to).unwrap();
         let first = r.polyline[0];
         let last = *r.polyline.last().unwrap();
+        let mid = |c: &CardPos| c.y + i32::from(c.h) / 2;
         assert_eq!(
             first,
-            (from.x + i32::from(OPTS.card_w), from.y + 1),
+            (from.x + i32::from(OPTS.card_w), mid(from)),
             "start of {:?}",
             r.edge
         );
-        assert_eq!(last, (to.x - 1, to.y + 1), "end of {:?}", r.edge);
+        assert_eq!(last, (to.x - 1, mid(to)), "end of {:?}", r.edge);
         assert_eq!(r.head, last);
         for w in r.polyline.windows(2) {
             assert!(w[0].0 == w[1].0 || w[0].1 == w[1].1, "orthogonal");
@@ -56,7 +57,7 @@ fn linear_chain_is_one_row() {
     assert_eq!(l.height, 4);
     assert_eq!(l.lanes, 0);
     check_endpoints(&g, &l);
-    assert_eq!(l.routes[0].polyline, vec![(12, 1), (16, 1)]);
+    assert_eq!(l.routes[0].polyline, vec![(12, 2), (16, 2)]);
 }
 
 #[test]

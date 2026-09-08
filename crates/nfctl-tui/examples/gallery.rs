@@ -323,8 +323,8 @@ window.onbeforeunload=()=>{if(pending)flush();};
 const nameOf=f=>(f.closest('section').querySelector('h2').firstChild.textContent+' '+f.dataset.tab).replace(/[^a-z0-9]+/gi,'-');
 function exportPng(f){const o=render(f),url=o.toDataURL('image/png');
  if(online)o.toBlob(b=>fetch(API+'/png/'+nameOf(f)+'.png',{method:'POST',body:b}).then(()=>setStatus('PNG saved to target/gallery/png/')).catch(()=>dl(nameOf(f)+'.png',url)));else dl(nameOf(f)+'.png',url);}
-function exportAll(){let n=0;document.querySelectorAll('.frame').forEach(f=>{const d=load(f);if(!d.strokes.length&&!d.note)return;const shown=f.classList.contains('on');if(!shown){f.classList.add('on');fit(f);}
- setTimeout(()=>{exportPng(f);if(!shown)f.classList.remove('on');},150*n++);});if(!n)alert('nothing annotated yet');}
+function exportAll(){let n=0;document.querySelectorAll('.frame').forEach(f=>{const d=load(f);if(!d.strokes.length&&!d.note)return;const sec=f.closest('section'),secShown=sec.style.display!=='none',shown=f.classList.contains('on');
+ setTimeout(()=>{sec.style.display='block';f.classList.add('on');fit(f);exportPng(f);if(!shown)f.classList.remove('on');if(!secShown)sec.style.display='none';},200*n++);});if(!n)alert('nothing annotated yet');}
 show(location.hash.slice(1)||items[0].dataset.id);
 window.onhashchange=()=>show(location.hash.slice(1));
 window.onresize=()=>document.querySelectorAll('.frame.on').forEach(fit);
