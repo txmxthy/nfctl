@@ -13,7 +13,7 @@ fn topo(body: &str) -> Topology {
 
 const OPTS: LayoutOptions = LayoutOptions {
     card_w: 12,
-    card_h: 4,
+    card_h: 5,
 };
 
 fn lay(body: &str) -> (ViewGraph, Layout) {
@@ -54,7 +54,7 @@ fn linear_chain_is_one_row() {
     let (g, l) = lay("a([a]) --> b[b]\n b --> c[[c]]");
     assert_eq!(l.columns.len(), 3);
     assert!(l.cards.iter().all(|c| c.y == 0));
-    assert_eq!(l.height, 4);
+    assert_eq!(l.height, 5);
     assert_eq!(l.lanes, 0);
     check_endpoints(&g, &l);
     assert_eq!(l.routes[0].polyline, vec![(12, 2), (16, 2)]);
@@ -65,7 +65,7 @@ fn fan_out_shares_one_track() {
     let (g, l) = lay("s([s]) --> a[a]\n s --> b[b]\n s --> c[c]\n s --> d[d]");
     assert_eq!(l.gaps[0].tracks.len(), 1);
     assert_eq!(l.gaps[0].width, MIN_GAP);
-    assert_eq!(l.height, 16);
+    assert_eq!(l.height, 20);
     check_endpoints(&g, &l);
 }
 
@@ -108,7 +108,7 @@ fn cycle_gets_a_lane_under_the_cards() {
     assert_eq!(l.columns.len(), 4);
     let back = &l.routes[2];
     let lane_y = back.polyline.iter().map(|p| p.1).max().unwrap();
-    assert_eq!(lane_y, 4);
+    assert_eq!(lane_y, 5);
     check_endpoints(&g, &l);
 }
 

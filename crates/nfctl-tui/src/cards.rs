@@ -15,7 +15,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::style::{self, Palette};
 
-pub const CARD_HEIGHT: u16 = 4;
+/// Borders, name row, numbers row, badge row: odd, so edges meet a middle row.
+pub const CARD_HEIGHT: u16 = 5;
 /// Fits `999.9/s pend 999` inside the borders.
 const MIN_CARD: u16 = 17;
 /// Fits `999.9/s  pending 9999`.
@@ -111,6 +112,9 @@ struct Canvas {
     dx: i32,
     cells: Vec<u8>,
     ink: Vec<Ink>,
+    /// Colour of the first edge to run vertically through a cell: where a
+    /// fork or crossing mixes colours, the edge that turns there wins.
+    turn: Vec<Ink>,
     heads: Vec<Option<Ink>>,
 }
 
@@ -123,6 +127,7 @@ impl Canvas {
             dx,
             cells: vec![0; w * h],
             ink: vec![Ink::None; w * h],
+            turn: vec![Ink::None; w * h],
             heads: vec![None; w * h],
         }
     }
@@ -140,6 +145,9 @@ impl Canvas {
                 Ink::One(c) if c == colour => Ink::One(c),
                 _ => Ink::Mixed,
             };
+            if bits & (U | D) != 0 && self.turn[i] == Ink::None {
+                self.turn[i] = Ink::One(colour);
+            }
         }
     }
 
@@ -210,9 +218,14 @@ impl Canvas {
                 let mut run_style = style::dim();
                 for x in 0..self.w {
                     let i = y * self.w + x;
-                    let (ch, st) = match self.heads[i] {
-                        Some(ink) => ('▶', paint(ink)),
-                        None => (Self::glyph(self.cells[i]), paint(self.ink[i])),
+                    let (ch, st) = if let Some(ink) = self.heads[i] {
+                        ('▶', paint(ink))
+                    } else {
+                        let ink = match (self.ink[i], self.turn[i]) {
+                            (Ink::Mixed, Ink::One(c)) => Ink::One(c),
+                            (ink, _) => ink,
+                        };
+                        (Self::glyph(self.cells[i]), paint(ink))
                     };
                     if st != run_style && !run.is_empty() {
                         spans.push(Span::styled(std::mem::take(&mut run), run_style));

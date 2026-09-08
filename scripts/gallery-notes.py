@@ -37,6 +37,10 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/notes.json":
             self._reply(200, NOTES.read_bytes() if NOTES.exists() else b"{}")
+        elif self.path == "/build":
+            page = DIR / "index.html"
+            stamp = str(page.stat().st_mtime_ns) if page.exists() else "0"
+            self._reply(200, stamp.encode())
         else:
             self._reply(404, b"{}")
 

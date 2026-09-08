@@ -320,6 +320,8 @@ function render(f){const pre=f.querySelector('pre'),ink=f.querySelector('canvas'
 const palette={};function colourFor(cls){const k=cls.split(' ')[0];if(!palette[k]){const s=document.createElement('span');s.className=k;document.body.appendChild(s);palette[k]=colourOf(s);s.remove();}return palette[k];}
 const dl=(name,url)=>{const a=document.createElement('a');a.href=url;a.download=name;a.click();};
 window.onbeforeunload=()=>{if(pending)flush();};
+// Reload when `just gallery` regenerates the page, so notes are never made on a stale frame.
+let build=null;setInterval(()=>fetch(API+'/build').then(r=>r.text()).then(b=>{if(build===null)build=b;else if(b!==build){if(pending)flush();location.reload();}}).catch(()=>{}),3000);
 const nameOf=f=>(f.closest('section').querySelector('h2').firstChild.textContent+' '+f.dataset.tab).replace(/[^a-z0-9]+/gi,'-');
 function exportPng(f){const o=render(f),url=o.toDataURL('image/png');
  if(online)o.toBlob(b=>fetch(API+'/png/'+nameOf(f)+'.png',{method:'POST',body:b}).then(()=>setStatus('PNG saved to target/gallery/png/')).catch(()=>dl(nameOf(f)+'.png',url)));else dl(nameOf(f)+'.png',url);}

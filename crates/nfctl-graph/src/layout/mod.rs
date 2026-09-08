@@ -96,6 +96,8 @@ impl Layout {
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutOptions {
     pub card_w: u16,
+    /// Rows per card, borders included. Odd, so there is a middle row; the
+    /// last content row holds tag badges.
     pub card_h: u16,
 }
 

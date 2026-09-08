@@ -37,9 +37,9 @@ struct Geometry {
     cards_h: i32,
 }
 
-fn geometry(l: &Layered, badges: &HashMap<NodeId, Vec<Badge>>, opts: LayoutOptions) -> Geometry {
+fn geometry(l: &Layered, opts: LayoutOptions) -> Geometry {
     let slot_h = |n: &LNode| match n {
-        LNode::Real(id) => i32::from(opts.card_h + u16::from(badges.contains_key(id))),
+        LNode::Real(_) => i32::from(opts.card_h),
         LNode::Pass(_) => 1,
     };
     let heights: Vec<i32> = l
@@ -62,7 +62,10 @@ fn geometry(l: &Layered, badges: &HashMap<NodeId, Vec<Badge>>, opts: LayoutOptio
         for &n in col {
             match n {
                 LNode::Real(id) => {
-                    let h = opts.card_h + u16::from(badges.contains_key(&id));
+                    // Every card is the same (odd) height so edges meet a true
+                    // middle row and siblings line up; the badge row is blank
+                    // when nothing tagged arrives.
+                    let h = opts.card_h;
                     // Edges meet the card on its middle row.
                     geo.attach.insert(n, (c, y + i32::from(h) / 2));
                     geo.cards.push(CardPos {
@@ -339,7 +342,7 @@ pub(crate) fn build(
 ) -> Layout {
     let cols = layered.columns.len();
     let card_w = i32::from(opts.card_w);
-    let geo = geometry(layered, badges, opts);
+    let geo = geometry(layered, opts);
     let lane = lanes(g, ranked, geo.cards_h);
     let sp = spans(g, ranked, layered, &geo, &lane, edge_colour);
     let margin = if g
