@@ -94,11 +94,11 @@ straight and needs no track. The other two touch only on the source row and
 share one track by rule 3:
 
 ```
-      ┌─▶  even-sink        cyan vertical and head
-      │
- ──┼─▶  odd-sink         trunk grey, ┼ cyan (turn rule), then magenta
-      │
-      └─▶  all-sink         yellow vertical and head
+   ┌─▶ even-sink      cyan vertical and head
+   │
+ ──┼─▶ odd-sink       trunk grey, ┼ cyan (turn rule), then magenta
+   │
+   └─▶ all-sink       yellow vertical and head
 ```
 
 The two cells of trunk before the `┼` are `Mixed`; the `┼` itself takes the
@@ -109,9 +109,9 @@ colour of the first edge to run vertically through it.
 track by rule 3, and the junction is `L U D`:
 
 ```
-      ┌─▶  worker x3        dim
+   ┌─▶ worker x3      dim
  ──┤
-      └─▶  audit            coloured
+   └─▶ audit          coloured
 ```
 
 ## What this cannot draw
