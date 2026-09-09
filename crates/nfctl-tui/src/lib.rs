@@ -15,7 +15,7 @@ mod worker;
 
 pub use app::run;
 pub use event::{Action, AppEvent};
-pub use style::Palette;
+pub use style::{CrossingStyle, Palette};
 pub use worker::{WorkerMessage, WorkerReply};
 
 use ratatui::Frame;

@@ -21,7 +21,7 @@ use nfctl_core::service::pipeline_view;
 use nfctl_graph::layout::{LayoutOptions, ViewGraph, layout, score};
 use nfctl_graph::{Format, RenderOptions, from_mermaid, render_with, to_mermaid};
 use nfctl_tui::panels::detail::DetailPanel;
-use nfctl_tui::{AppEvent, Model, WorkerReply};
+use nfctl_tui::{AppEvent, CrossingStyle, Model, Palette, WorkerReply};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -181,9 +181,8 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
     let view = pipeline_view(&cluster, &FakeDaemons::default(), &p.key, Timestamp::now())
         .await
         .unwrap();
-    let mut frames = Vec::new();
-    for expand in [false, true] {
-        let mut panel = DetailPanel::new(p.key.clone());
+    let panel = |expand: bool, palette: Palette| {
+        let mut panel = DetailPanel::new(p.key.clone()).with_palette(palette);
         panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(
             view.clone()
         )))));
@@ -193,22 +192,39 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
                 crossterm::event::KeyModifiers::NONE,
             )));
         }
+        panel
+    };
+    let draw = |panel: &DetailPanel, expand: bool, w: u16| {
+        let nodes = if expand {
+            ViewGraph::expanded(&item.topology).nodes.len()
+        } else {
+            ViewGraph::collapsed(&item.topology).nodes.len()
+        };
+        let h = u16::try_from(nodes * 6 + 14).unwrap_or(u16::MAX).min(240);
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| panel.view(f, f.area())).unwrap();
+        buffer_html(term.backend().buffer())
+    };
+    let mut frames = Vec::new();
+    for expand in [false, true] {
+        let panel = panel(expand, Palette::default());
         for w in WIDTHS {
-            let nodes = if expand {
-                ViewGraph::expanded(&item.topology).nodes.len()
-            } else {
-                ViewGraph::collapsed(&item.topology).nodes.len()
-            };
-            let h = u16::try_from(nodes * 6 + 14).unwrap_or(u16::MAX).min(240);
-            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-            term.draw(|f| panel.view(f, f.area())).unwrap();
             let label = format!(
                 "cards {w} {}",
                 if expand { "expanded" } else { "collapsed" }
             );
-            frames.push((label, buffer_html(term.backend().buffer())));
+            frames.push((label, draw(&panel, expand, w)));
         }
     }
+    // The bridge crossing style, on the widest expanded frame only.
+    let bridged = panel(
+        true,
+        Palette::default().with_crossing(CrossingStyle::Bridge),
+    );
+    frames.push((
+        "cards 220 expanded · bridge".to_owned(),
+        draw(&bridged, true, 220),
+    ));
     frames
 }
 

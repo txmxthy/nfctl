@@ -109,8 +109,30 @@ fn crossterm_key(c: char) -> crossterm::event::KeyEvent {
     )
 }
 
-#[tokio::test]
-async fn detail_routes_every_edge() {
+/// A pipeline named `routing` with `topology`, loaded into a detail panel.
+async fn topology_panel(topology: nfctl_core::model::Topology) -> DetailPanel {
+    let mut fx = fixture();
+    let mut p = fx.pipelines[0].clone();
+    p.key.name = nfctl_core::model::PipelineName::new("routing").unwrap();
+    p.spec.topology = topology;
+    fx.pipelines = vec![p.clone()];
+    let cluster = FakeCluster::from_fixture(&fx);
+    let daemons = FakeDaemons::from_fixture(&fx);
+    let view = pipeline_view(
+        &cluster,
+        &daemons,
+        &p.key,
+        Timestamp::parse_rfc3339("2026-01-01T00:00:10Z").unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut panel = DetailPanel::new(p.key.clone());
+    panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(view)))));
+    panel
+}
+
+/// A fork, a join, a two-column skip and a back edge: every route kind.
+fn routing_topology() -> nfctl_core::model::Topology {
     use nfctl_core::model::{Edge, OnFull, ScaleSpec, Topology, Vertex, VertexKind};
     let v = |n: &str, k: VertexKind| Vertex {
         name: VertexName::new(n).unwrap(),
@@ -125,7 +147,7 @@ async fn detail_routes_every_edge() {
         conditions: None,
         on_full: OnFull::default(),
     };
-    let topology = Topology::new(
+    Topology::new(
         vec![
             v("src", VertexKind::Source),
             v("shard", VertexKind::Map),
@@ -147,25 +169,84 @@ async fn detail_routes_every_edge() {
             e("cold", "shard"),   // back edge (UDF cycle): also a lane
         ],
     )
-    .unwrap();
-    let mut fx = fixture();
-    let mut p = fx.pipelines[0].clone();
-    p.key.name = nfctl_core::model::PipelineName::new("routing").unwrap();
-    p.spec.topology = topology;
-    fx.pipelines = vec![p.clone()];
-    let cluster = FakeCluster::from_fixture(&fx);
-    let daemons = FakeDaemons::from_fixture(&fx);
-    let view = pipeline_view(
-        &cluster,
-        &daemons,
-        &p.key,
-        Timestamp::parse_rfc3339("2026-01-01T00:00:10Z").unwrap(),
-    )
-    .await
-    .unwrap();
-    let mut panel = DetailPanel::new(p.key.clone());
-    panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(view)))));
+    .unwrap()
+}
+
+#[tokio::test]
+async fn detail_routes_every_edge() {
+    let panel = topology_panel(routing_topology()).await;
     insta::assert_snapshot!(frame(&panel, 120, 34));
+}
+
+/// `Bridge` breaks the horizontal either side of a true crossing and leaves
+/// junctions alone; `Cross`, the default, draws the same frame as before.
+#[tokio::test]
+async fn detail_bridges_true_crossings() {
+    use nfctl_core::model::{Edge, OnFull, ScaleSpec, Topology, Vertex, VertexKind};
+    use nfctl_tui::{CrossingStyle, Palette};
+    let v = |n: &str, k: VertexKind| Vertex {
+        name: VertexName::new(n).unwrap(),
+        kind: k,
+        partitions: 1,
+        scale: ScaleSpec::default(),
+        image: None,
+    };
+    let e = |a: &str, b: &str| Edge {
+        from: VertexName::new(a).unwrap(),
+        to: VertexName::new(b).unwrap(),
+        conditions: None,
+        on_full: OnFull::default(),
+    };
+    // `a` fans out to three; `p -> sink` passes straight through the fan's bus.
+    let topology = Topology::new(
+        vec![
+            v("src", VertexKind::Source),
+            v("a", VertexKind::Map),
+            v("p", VertexKind::Map),
+            v("b1", VertexKind::Map),
+            v("b2", VertexKind::Map),
+            v("b3", VertexKind::Map),
+            v("sink", VertexKind::Sink),
+        ],
+        vec![
+            e("src", "a"),
+            e("src", "p"),
+            e("a", "b1"),
+            e("a", "b2"),
+            e("a", "b3"),
+            e("p", "sink"),
+            e("b1", "sink"),
+            e("b2", "sink"),
+            e("b3", "sink"),
+        ],
+    )
+    .unwrap();
+    let bridge = Palette::default().with_crossing(CrossingStyle::Bridge);
+    let cross = Palette::default().with_crossing(CrossingStyle::Cross);
+    let plain = frame(&topology_panel(topology.clone()).await, 120, 40);
+    let crossed = topology_panel(topology.clone()).await.with_palette(cross);
+    assert_eq!(frame(&crossed, 120, 40), plain);
+    let bridged = frame(
+        &topology_panel(topology).await.with_palette(bridge),
+        120,
+        40,
+    );
+    assert!(bridged.contains("─╴│╶─"), "{bridged}");
+    assert_eq!(plain.matches('┼').count(), 1);
+    assert_eq!(bridged.matches('┼').count(), 0);
+    insta::assert_snapshot!(bridged);
+
+    // The routing fixture's one crossing sits where the horizontal turns:
+    // only the plain side is cut, the corner stays.
+    let mut panel = topology_panel(routing_topology())
+        .await
+        .with_palette(bridge);
+    panel.update(&AppEvent::Key(crossterm_key('x')));
+    let expanded = frame(&panel, 120, 40);
+    assert!(expanded.contains("─╴│┘"), "{expanded}");
+    panel = topology_panel(routing_topology()).await;
+    panel.update(&AppEvent::Key(crossterm_key('x')));
+    assert_eq!(frame(&panel, 120, 40).matches('┼').count(), 1);
 }
 
 async fn sharded_panel(expand: bool) -> DetailPanel {

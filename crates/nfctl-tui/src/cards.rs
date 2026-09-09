@@ -5,7 +5,7 @@
 
 use nfctl_core::model::Topology;
 use nfctl_core::service::{PipelineView, VertexView};
-use nfctl_graph::layout::{self, EdgeColour, Layout, LayoutOptions, ViewGraph, ViewNode};
+use nfctl_graph::layout::{self, EdgeColour, EdgeId, Layout, LayoutOptions, ViewGraph, ViewNode};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use crate::style::{self, Palette};
+use crate::style::{self, CrossingStyle, Palette};
 
 /// Borders, name row, numbers row, badge row: odd, so edges meet a middle row.
 pub const CARD_HEIGHT: u16 = 5;
@@ -117,6 +117,12 @@ struct Canvas {
     /// trunk reads as one colour from the source to its far end.
     turn: Vec<(Ink, i32)>,
     heads: Vec<Option<Ink>>,
+    /// Which edge left which bits in a cell, for telling a crossing from a
+    /// junction after the fact.
+    runs: Vec<Vec<(EdgeId, u8)>>,
+    /// Glyph and ink painted instead of the cell's bits: the bridge style.
+    over: Vec<Option<(char, Ink)>>,
+    edge: EdgeId,
 }
 
 impl Canvas {
@@ -130,6 +136,9 @@ impl Canvas {
             ink: vec![Ink::None; w * h],
             turn: vec![(Ink::None, 0); w * h],
             heads: vec![None; w * h],
+            runs: vec![Vec::new(); w * h],
+            over: vec![None; w * h],
+            edge: EdgeId(0),
         }
     }
 
@@ -148,6 +157,10 @@ impl Canvas {
             };
             if bits & (U | D) != 0 && reach > self.turn[i].1 {
                 self.turn[i] = (Ink::One(colour), reach);
+            }
+            match self.runs[i].iter_mut().find(|(e, _)| *e == self.edge) {
+                Some(run) => run.1 |= bits,
+                None => self.runs[i].push((self.edge, bits)),
             }
         }
     }
@@ -179,13 +192,47 @@ impl Canvas {
     }
 
     /// Orthogonal path through the given corner points.
-    fn path(&mut self, pts: &[(i32, i32)], colour: Option<EdgeColour>) {
+    fn path(&mut self, edge: EdgeId, pts: &[(i32, i32)], colour: Option<EdgeColour>) {
+        self.edge = edge;
         for w in pts.windows(2) {
             let ((x0, y0), (x1, y1)) = (w[0], w[1]);
             if y0 == y1 {
                 self.hline(y0, x0, x1, colour);
             } else {
                 self.vline(x0, y0, y1, colour);
+            }
+        }
+    }
+
+    /// Bridge every true crossing: a cell where one edge runs straight
+    /// through horizontally and another, sharing neither end, straight
+    /// through vertically. The cell takes the vertical's glyph and colour and
+    /// the horizontal is cut one cell either side, where it is a plain run.
+    fn bridge(&mut self, graph: &ViewGraph) {
+        let ends = |e: EdgeId| {
+            let e = &graph.edges[e.0 as usize];
+            (e.from, e.to)
+        };
+        for i in 0..self.cells.len() {
+            let runs = &self.runs[i];
+            let Some(&(h, _)) = runs.iter().find(|(_, b)| *b == L | R) else {
+                continue;
+            };
+            let Some(&(v, _)) = runs.iter().find(|(_, b)| *b == U | D) else {
+                continue;
+            };
+            let (hs, ht) = ends(h);
+            let (vs, vt) = ends(v);
+            if hs == vs || ht == vt {
+                continue;
+            }
+            self.over[i] = Some(('│', self.turn[i].0));
+            let x = i % self.w;
+            if x > 0 && self.cells[i - 1] == L | R {
+                self.over[i - 1] = Some(('╴', self.ink[i - 1]));
+            }
+            if x + 1 < self.w && self.cells[i + 1] == L | R {
+                self.over[i + 1] = Some(('╶', self.ink[i + 1]));
             }
         }
     }
@@ -221,6 +268,8 @@ impl Canvas {
                     let i = y * self.w + x;
                     let (ch, st) = if let Some(ink) = self.heads[i] {
                         ('▶', paint(ink))
+                    } else if let Some((ch, ink)) = self.over[i] {
+                        (ch, paint(ink))
                     } else {
                         let ink = match (self.ink[i], self.turn[i].0) {
                             (Ink::Mixed, Ink::One(c)) => Ink::One(c),
@@ -259,8 +308,11 @@ pub fn render(
     let dx = lay.col_x.get(scroll).copied().unwrap_or(0);
     let mut canvas = Canvas::new(area.width, area.height, dx);
     for r in &lay.routes {
-        canvas.path(&r.polyline, r.colour);
+        canvas.path(r.edge, &r.polyline, r.colour);
         canvas.head(r.head.0, r.head.1, r.colour);
+    }
+    if palette.crossing() == CrossingStyle::Bridge {
+        canvas.bridge(&cards.graph);
     }
     frame.render_widget(Paragraph::new(canvas.lines(palette)), area);
 

@@ -39,15 +39,29 @@ pub fn key() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// How a cell where two unrelated edges cross is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CrossingStyle {
+    /// `───┼───`: the union of both edges' bits.
+    #[default]
+    Cross,
+    /// `──╴│╶──`: the vertical passes over, the horizontal breaks either side.
+    Bridge,
+}
+
 /// Edge colours by tag combination; monochrome when colour is off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     colour: bool,
+    crossing: CrossingStyle,
 }
 
 impl Default for Palette {
     fn default() -> Self {
-        Self { colour: true }
+        Self {
+            colour: true,
+            crossing: CrossingStyle::Cross,
+        }
     }
 }
 
@@ -67,12 +81,26 @@ impl Palette {
         let env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
         Self {
             colour: !(no_color || env),
+            ..Self::default()
         }
     }
 
     #[must_use]
     pub fn monochrome() -> Self {
-        Self { colour: false }
+        Self {
+            colour: false,
+            ..Self::default()
+        }
+    }
+
+    #[must_use]
+    pub fn with_crossing(self, crossing: CrossingStyle) -> Self {
+        Self { crossing, ..self }
+    }
+
+    #[must_use]
+    pub fn crossing(self) -> CrossingStyle {
+        self.crossing
     }
 
     /// Untagged edges are dim; tagged edges take their slot's hue.
