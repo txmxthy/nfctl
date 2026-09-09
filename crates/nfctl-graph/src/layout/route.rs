@@ -14,6 +14,9 @@ use super::{
 
 /// Blank rows between stacked slots in a column.
 const SLOT_GAP: i32 = 1;
+/// Rows a layout may grow past its tallest column for pass slots between
+/// stacked cards.
+pub(crate) const SLOT_RISE: i32 = 2;
 /// Placement sweeps tried after the centred layout: left-to-right, then
 /// right-to-left, alternating.
 const SWEEPS: usize = 4;
@@ -45,8 +48,9 @@ struct Geometry {
     taken: HashMap<(usize, i32), Vec<EdgeId>>,
     /// Rows held open between two stacked cards, per column.
     reserved: BTreeSet<(usize, i32)>,
-    /// The held row an edge's pass slot sits on, per column it passes.
-    slot: HashMap<(usize, EdgeId), i32>,
+    /// The held rows (`lo..=hi`) of the gap an edge's pass slot sits in, per
+    /// column it passes.
+    slot: HashMap<(usize, EdgeId), (i32, i32)>,
 }
 
 /// Card top rows per column, in column order.
@@ -55,30 +59,37 @@ type Placement = Vec<Vec<i32>>;
 /// Blank rows between each pair of stacked cards, per column.
 type Gaps = Vec<Vec<i32>>;
 
+/// Rows between a pair of stacked cards holding `n` pass slots: a margin, a
+/// row per pass, a margin, and one more when `n` is even so the column stays
+/// an odd height.
+fn slot_gap(n: usize) -> i32 {
+    if n == 0 {
+        SLOT_GAP
+    } else {
+        SLOT_GAP + 1 + i(n) + i32::from(n.is_multiple_of(2))
+    }
+}
+
 /// One blank row between stacked cards keeps every column an odd height, so
 /// a card placed on the median of its neighbours sits exactly between two of
-/// them. With `slots`, a pair the column order puts a pass slot between gets
-/// three (a margin, a pass row, a margin), which keeps the parity.
+/// them. With `slots`, a pair the column order puts pass slots between gets
+/// `slot_gap` of them, which keeps the parity.
 fn gaps(columns: &[Vec<LNode>], slots: bool) -> Gaps {
     columns
         .iter()
         .map(|col| {
             let mut out = Vec::new();
             let mut cards = 0;
-            let mut pass = false;
+            let mut pass = 0;
             for n in col {
                 match n {
-                    LNode::Pass(_) => pass = true,
+                    LNode::Pass(_) => pass += 1,
                     LNode::Real(_) => {
                         if cards > 0 {
-                            out.push(if slots && pass {
-                                SLOT_GAP + 2
-                            } else {
-                                SLOT_GAP
-                            });
+                            out.push(if slots { slot_gap(pass) } else { SLOT_GAP });
                         }
                         cards += 1;
-                        pass = false;
+                        pass = 0;
                     }
                 }
             }
@@ -142,11 +153,13 @@ fn geometry(
                     if let Some(py) = prev
                         && gaps[c][placed - 1] > SLOT_GAP
                     {
-                        // The middle of the gap, past both margins.
-                        let row = (py + card_h + y - 1) / 2;
-                        geo.reserved.insert((c, row));
+                        // The middle rows of the gap, past both margins.
+                        let n = i(pending.len());
+                        let lo = py + card_h + 1 + (gaps[c][placed - 1] - 2 - n) / 2;
+                        let hi = lo + n - 1;
+                        geo.reserved.extend((lo..=hi).map(|r| (c, r)));
                         for e in pending.drain(..) {
-                            geo.slot.insert((c, e), row);
+                            geo.slot.insert((c, e), (lo, hi));
                         }
                     }
                     pending.clear();
@@ -313,18 +326,61 @@ fn fit(col: &mut [i32], gaps: &[i32], card_h: i32, height: i32) {
     }
 }
 
+/// Pass columns per edge, in column order.
+fn pass_columns(l: &Layered) -> HashMap<EdgeId, Vec<usize>> {
+    let mut cols_of: HashMap<EdgeId, Vec<usize>> = HashMap::new();
+    for (c, col) in l.columns.iter().enumerate() {
+        for n in col {
+            if let LNode::Pass(e) = n {
+                cols_of.entry(*e).or_default().push(c);
+            }
+        }
+    }
+    cols_of
+}
+
+/// Forward degrees: every forward edge has one segment out of its real
+/// source and one into its real target.
+fn degrees(l: &Layered) -> (HashMap<NodeId, usize>, HashMap<NodeId, usize>) {
+    let mut out_deg: HashMap<NodeId, usize> = HashMap::new();
+    let mut in_deg: HashMap<NodeId, usize> = HashMap::new();
+    for s in &l.segments {
+        if let LNode::Real(id) = s.from {
+            *out_deg.entry(id).or_default() += 1;
+        }
+        if let LNode::Real(id) = s.to {
+            *in_deg.entry(id).or_default() += 1;
+        }
+    }
+    (out_deg, in_deg)
+}
+
+/// The row an edge's pass slots want: the target's when the edge leaves a
+/// fork for a target with one in-edge, else the source's (which is also the
+/// row of a card with one out-edge feeding a join).
+fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32) -> i32 {
+    if outs >= 2 && ins == 1 {
+        dst_row
+    } else {
+        src_row
+    }
+}
+
 /// Give every pass slot a row, one row per edge across all the columns it
-/// passes so a long edge runs straight. The row wanted: the target's row
-/// when the edge leaves a fork for a target with one in-edge, the source's
-/// row when it leaves a card with one out-edge for a join, else the source's
-/// row. The row must be free in every pass column, otherwise the free row
-/// nearest the wanted one, a row held open for this edge between two stacked
-/// cards before any other. A row is free in a column when no card there
-/// covers it or the row beside it, no pass of an unrelated edge (another
-/// source and another target) in that column has it, and it is not held open
-/// for other edges. Related edges may share a row: the shared run is their
-/// fork or join.
+/// passes so a long edge runs straight. The row wanted is `wanted`. It must
+/// be free in every pass column, otherwise the free row nearest the wanted
+/// one, a row held open for this edge's slot between two stacked cards
+/// before any other. A row is free in a column when no card there covers it
+/// or the row beside it, no pass of an unrelated edge (another source and
+/// another target) in that column has it, and it is not held open for other
+/// edges. Related edges may share a row: the shared run is their fork or
+/// join.
 fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
+    let held_for = |geo: &Geometry, c: usize, row: i32, e: EdgeId| {
+        geo.slot
+            .get(&(c, e))
+            .is_some_and(|&(lo, hi)| (lo..=hi).contains(&row))
+    };
     let blocked = |geo: &Geometry, c: usize, row: i32, e: EdgeId, share: bool| {
         let edge = &g.edges[e.0 as usize];
         geo.cards
@@ -337,30 +393,10 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
                     !share || (o.from != edge.from && o.to != edge.to)
                 })
             })
-            || (geo.reserved.contains(&(c, row)) && geo.slot.get(&(c, e)) != Some(&row))
+            || (geo.reserved.contains(&(c, row)) && !held_for(geo, c, row, e))
     };
-    // Forward degrees: every forward edge has one segment out of its real
-    // source and one into its real target.
-    let mut out_deg: HashMap<NodeId, usize> = HashMap::new();
-    let mut in_deg: HashMap<NodeId, usize> = HashMap::new();
-    for s in &l.segments {
-        if let LNode::Real(id) = s.from {
-            *out_deg.entry(id).or_default() += 1;
-        }
-        if let LNode::Real(id) = s.to {
-            *in_deg.entry(id).or_default() += 1;
-        }
-    }
-    // Pass columns per edge, in column order.
-    let mut cols_of: HashMap<EdgeId, Vec<usize>> = HashMap::new();
-    for (c, col) in l.columns.iter().enumerate() {
-        for n in col {
-            if let LNode::Pass(e) = n {
-                cols_of.entry(*e).or_default().push(c);
-            }
-        }
-    }
-    let mut edges: Vec<(EdgeId, Vec<usize>)> = cols_of.into_iter().collect();
+    let (out_deg, in_deg) = degrees(l);
+    let mut edges: Vec<(EdgeId, Vec<usize>)> = pass_columns(l).into_iter().collect();
     // Longer edges first: they have the least freedom.
     edges.sort_by_key(|(e, cols)| (std::cmp::Reverse(cols.len()), *e));
     for (e, cols) in edges {
@@ -369,11 +405,7 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
         let (_, dst_row) = geo.attach[&LNode::Real(edge.to)];
         let outs = out_deg.get(&edge.from).copied().unwrap_or(0);
         let ins = in_deg.get(&edge.to).copied().unwrap_or(0);
-        let want = if outs >= 2 && ins == 1 {
-            dst_row
-        } else {
-            src_row
-        };
+        let want = wanted(outs, ins, src_row, dst_row);
         let free = |geo: &Geometry, row: i32, share: bool| {
             cols.iter().all(|&c| !blocked(geo, c, row, e, share))
         };
@@ -387,7 +419,7 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
             // is free, so the range suffices.
             let (lo, hi) = (src_row.min(dst_row), src_row.max(dst_row));
             let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
-            let held = |r: i32| cols.iter().any(|&c| geo.slot.get(&(c, e)) == Some(&r));
+            let held = |r: i32| cols.iter().any(|&c| held_for(geo, c, r, e));
             (0..=geo.cards_h + 2)
                 .filter(|&r| free(geo, r, true))
                 .min_by_key(|&r| {
@@ -683,6 +715,129 @@ pub(crate) fn no_worse(s: &Score, base: &Score) -> bool {
 /// anywhere, so that `build` with `slots` differs from without.
 pub(crate) fn has_slots(columns: &[Vec<LNode>]) -> bool {
     gaps(columns, true) != gaps(columns, false)
+}
+
+/// The column order with every pass slot in the gap the drawn rows say it
+/// needs, `layout` being the order drawn without slots. A pass whose wanted
+/// row falls inside a column's stack of cards goes between the pair whose
+/// gap adds the least detour, nearest the wanted row; one above or below the
+/// stack goes above or below it. Each gap widens by a row per pass, so a
+/// column takes them in that order only while it stays within `SLOT_RISE`
+/// of the tallest column; the rest go above or below, whichever is nearer.
+pub(crate) fn reslot(g: &ViewGraph, l: &Layered, layout: &Layout) -> Vec<Vec<LNode>> {
+    let (out_deg, in_deg) = degrees(l);
+    let card = |id: NodeId| layout.card(id).map_or((0, 0), |k| (k.y, i32::from(k.h)));
+    let row = |id: NodeId| {
+        let (y, h) = card(id);
+        y + h / 2
+    };
+    // Rows the cards and pass rows reach, without the lanes.
+    let cards_h = i32::from(layout.height) - i32::from(layout.lanes);
+    let cols_of = pass_columns(l);
+    // A row a card in column `c` covers, margins included.
+    let covered = |c: usize, r: i32| {
+        layout
+            .cards
+            .iter()
+            .any(|k| k.col == c && r >= k.y - 1 && r <= k.y + i32::from(k.h))
+    };
+    l.columns
+        .iter()
+        .enumerate()
+        .map(|(here, col)| {
+            let cards: Vec<NodeId> = col
+                .iter()
+                .filter_map(|n| match n {
+                    LNode::Real(id) => Some(*id),
+                    LNode::Pass(_) => None,
+                })
+                .collect();
+            if cards.len() < 2 {
+                return col.clone();
+            }
+            let (top, _) = card(cards[0]);
+            let (ly, lh) = card(cards[cards.len() - 1]);
+            let bottom = ly + lh;
+            let room = cards_h + SLOT_RISE - (bottom - top);
+            // Above or below the stack, whichever is nearer.
+            let outside = |want: i32| {
+                if want - top > bottom - want {
+                    cards.len()
+                } else {
+                    0
+                }
+            };
+            // Blank row under each card but the last: the gap it heads.
+            let gap_row: Vec<i32> = cards[..cards.len() - 1]
+                .iter()
+                .map(|&id| {
+                    let (y, h) = card(id);
+                    y + h
+                })
+                .collect();
+            // (key, edge, region): region 0 is above the first card, k is
+            // the gap under card k - 1, `cards.len()` is below the last.
+            let mut inside = Vec::new();
+            let mut region: Vec<(usize, EdgeId)> = Vec::new();
+            for n in col {
+                let LNode::Pass(e) = *n else { continue };
+                let edge = &g.edges[e.0 as usize];
+                let (src, dst) = (row(edge.from), row(edge.to));
+                let outs = out_deg.get(&edge.from).copied().unwrap_or(0);
+                let ins = in_deg.get(&edge.to).copied().unwrap_or(0);
+                let want = wanted(outs, ins, src, dst);
+                let (lo, hi) = (src.min(dst), src.max(dst));
+                let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
+                // A gap this edge can use: its row is clear of cards in
+                // every other column the edge passes, as one row serves
+                // them all.
+                let usable = gap_row
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &r)| cols_of[&e].iter().all(|&c| c == here || !covered(c, r)))
+                    .map(|(k, &r)| ((detour(r), (r - want).abs()), k + 1))
+                    .min();
+                match usable {
+                    Some((key, k)) if want >= top && want < bottom => {
+                        inside.push((key, e, k, want));
+                    }
+                    _ => region.push((outside(want), e)),
+                }
+            }
+            inside.sort_unstable();
+            let mut count = vec![0usize; cards.len()];
+            let mut extra = 0;
+            for (_, e, k, want) in inside {
+                let grown = extra - slot_gap(count[k]) + slot_gap(count[k] + 1);
+                if grown <= room {
+                    count[k] += 1;
+                    extra = grown;
+                    region.push((k, e));
+                } else {
+                    region.push((outside(want), e));
+                }
+            }
+            interleave(&cards, region)
+        })
+        .collect()
+}
+
+/// The column with each pass slot in its region: 0 above the first card,
+/// `k` under card `k - 1`, `cards.len()` below the last; by edge id within
+/// a region.
+fn interleave(cards: &[NodeId], mut region: Vec<(usize, EdgeId)>) -> Vec<LNode> {
+    region.sort_unstable();
+    let mut out = Vec::new();
+    let mut passes = region.into_iter().peekable();
+    for k in 0..=cards.len() {
+        while let Some((_, e)) = passes.next_if(|&(r, _)| r == k) {
+            out.push(LNode::Pass(e));
+        }
+        if let Some(&id) = cards.get(k) {
+            out.push(LNode::Real(id));
+        }
+    }
+    out
 }
 
 /// The best placement for this column order. With `slots`, a pass slot is

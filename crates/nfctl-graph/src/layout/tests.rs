@@ -223,3 +223,31 @@ fn deterministic_and_fast() {
     assert!(took.as_millis() < 50, "{took:?}");
     check_endpoints(&g, &a);
 }
+
+#[test]
+fn skip_edge_runs_between_stacked_cards() {
+    // `s` sits beside a fan-out; its skip edge would wrap the whole stack
+    // in the middle column unless a slot opens between two of its cards.
+    let (g, l) = lay(
+        "a([a]) --> b[b]\n a --> c[c]\n a --> d[d]\n a --> e[e]\n b --> t[[t]]\n c --> t\n d --> t\n e --> t\n s([s]) --> t",
+    );
+    let skip = l
+        .routes
+        .iter()
+        .find(|r| g.edges[r.edge.0 as usize].from == node(&g, "s"))
+        .unwrap();
+    let ys: std::collections::BTreeSet<_> = skip.polyline.iter().map(|p| p.1).collect();
+    let (top, bottom) = l
+        .cards
+        .iter()
+        .filter(|c| c.col == 1)
+        .fold((i32::MAX, 0), |(t, b), c| {
+            (t.min(c.y), b.max(c.y + i32::from(c.h)))
+        });
+    assert!(
+        ys.iter().all(|&y| y > top && y < bottom),
+        "runs inside the stack: {:?}",
+        skip.polyline
+    );
+    check_endpoints(&g, &l);
+}

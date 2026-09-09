@@ -136,13 +136,19 @@ Two edges out of one card (or into one) may share a pass row when no row of
 its own is free without a detour; the shared run reads as their fork or join
 continuing across the column.
 
-Stacked cards sit one blank row apart. Where the column order puts an edge's
-pass slot between two stacked cards, the layout is also built with that gap
-widened to three rows (a margin, a pass row, a margin, so the column stays an
-odd height) and the middle row held for the edges whose slot sits there; the
-widened layout is kept when it scores lower without raising either tier.
-That is how a long edge runs between two stacked cards instead of around
-the whole stack.
+Stacked cards sit one blank row apart. Where pass slots sit between two
+stacked cards, the layout is also built with that gap widened to a margin, a
+row per pass and a margin (one row more when the count is even, so the column
+stays an odd height), the middle rows held for the edges whose slots sit
+there. Two orders are tried: the slots where the barycenter sweep left them,
+and the slots moved to the gap they need, which is the gap adding the least
+detour nearest the edge's wanted row, taken only when its row is clear of
+cards in every other column the edge passes (one row serves them all) and
+while the column stays within two rows of the layout's height; a slot with
+no such gap goes above or below the stack, whichever is nearer. A widened
+layout is kept when it scores lower without raising either tier or the
+height past that allowance. That is how a long edge runs between two stacked
+cards instead of around the whole stack.
 
 ## What this cannot draw
 

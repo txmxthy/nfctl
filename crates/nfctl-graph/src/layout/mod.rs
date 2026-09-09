@@ -229,19 +229,29 @@ pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
     let Some((s, layout, cols)) = best else {
         return route::build(g, &ranked, &layered, &edge_colour, &badges, opts, false).0;
     };
-    // The winner once more with a pass slot held open between stacked cards
-    // wherever its order puts one, kept when that lowers the total without
-    // raising either tier.
-    if !route::has_slots(&cols) {
-        return layout;
-    }
+    // The winner once more with pass slots held open between stacked cards:
+    // where its order puts them, then where the drawn rows say they belong.
+    // Kept when that lowers the total without raising either tier, or the
+    // height past the slots' allowance.
     layered.columns = cols;
-    let (slotted, s2) = route::build(g, &ranked, &layered, &edge_colour, &badges, opts, true);
-    if route::no_worse(&s2, &s) && s2.total < s.total {
-        slotted
-    } else {
-        layout
+    let reslotted = route::reslot(g, &layered, &layout);
+    let mut best = (s, layout);
+    let mut tried: Vec<Vec<Vec<order::LNode>>> = Vec::new();
+    for cols in [layered.columns.clone(), reslotted] {
+        if tried.contains(&cols) || !route::has_slots(&cols) {
+            continue;
+        }
+        tried.push(cols.clone());
+        layered.columns = cols;
+        let (slotted, s2) = route::build(g, &ranked, &layered, &edge_colour, &badges, opts, true);
+        if route::no_worse(&s2, &best.0)
+            && s2.total < best.0.total
+            && i32::from(s2.height) <= i32::from(best.0.height) + route::SLOT_RISE
+        {
+            best = (s2, slotted);
+        }
     }
+    best.1
 }
 
 fn badges_for(g: &ViewGraph, edge_colour: &[Option<EdgeColour>]) -> HashMap<NodeId, Vec<Badge>> {
