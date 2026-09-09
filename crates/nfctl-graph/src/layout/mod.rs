@@ -166,16 +166,14 @@ pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
     let mut layered = order::layer(g, &ranked);
     let orderings = order::orderings(&mut layered);
     let swap_search = layered.segments.len() <= SWAP_SEARCH_MAX_SEGMENTS;
+    // Every preview drawn, so a candidate's first placement is not drawn twice.
+    let mut previews: Vec<(Vec<Vec<order::LNode>>, Layout, Score)> = Vec::new();
     let mut preview = |cols: &[Vec<order::LNode>]| {
         layered.columns = cols.to_vec();
-        key(&route::preview(
-            g,
-            &ranked,
-            &layered,
-            &edge_colour,
-            &badges,
-            opts,
-        ))
+        let (l, s) = route::preview(g, &ranked, &layered, &edge_colour, &badges, opts);
+        let k = key(&s);
+        previews.push((cols.to_vec(), l, s));
+        k
     };
     let candidates: Vec<Vec<Vec<order::LNode>>> = if orderings.len() == 1 && !swap_search {
         orderings
@@ -219,23 +217,68 @@ pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
     };
     let mut best: Option<(Score, Layout, Vec<Vec<order::LNode>>)> = None;
     for cols in candidates {
+        let drawn = previews.iter().position(|(c, _, _)| *c == cols).map(|i| {
+            let (_, l, s) = previews.swap_remove(i);
+            (l, s)
+        });
         layered.columns = cols;
-        let (layout, s) = route::build(g, &ranked, &layered, &edge_colour, &badges, opts, false);
+        let (layout, s) = route::build(
+            g,
+            &ranked,
+            &layered,
+            &edge_colour,
+            &badges,
+            opts,
+            false,
+            drawn,
+        );
         if best.as_ref().is_none_or(|(bs, _, _)| key(&s) < key(bs)) {
             best = Some((s, layout, layered.columns.clone()));
         }
     }
     // `candidates` always holds the first pass, so the fallback never runs.
     let Some((s, layout, cols)) = best else {
-        return route::build(g, &ranked, &layered, &edge_colour, &badges, opts, false).0;
+        return route::build(
+            g,
+            &ranked,
+            &layered,
+            &edge_colour,
+            &badges,
+            opts,
+            false,
+            None,
+        )
+        .0;
     };
-    // The winner once more with pass slots held open between stacked cards:
-    // where its order puts them, then where the drawn rows say they belong.
-    // Kept when that lowers the total without raising either tier, or the
-    // height past the slots' allowance.
-    layered.columns = cols;
-    let reslotted = route::reslot(g, &layered, &layout);
-    let mut best = (s, layout);
+    polish(
+        g,
+        &ranked,
+        &mut layered,
+        &edge_colour,
+        &badges,
+        opts,
+        (s, layout, cols),
+    )
+}
+
+/// The winner once more with pass slots held open between stacked cards:
+/// where its order puts them, then where the drawn rows say they belong.
+/// Kept when that lowers the total without raising either tier, or the
+/// height past the slots' allowance. Then the winner with each fan centred
+/// on its extremes.
+fn polish(
+    g: &ViewGraph,
+    ranked: &rank::Ranked,
+    layered: &mut order::Layered,
+    edge_colour: &[Option<EdgeColour>],
+    badges: &HashMap<NodeId, Vec<Badge>>,
+    opts: LayoutOptions,
+    best: (Score, Layout, Vec<Vec<order::LNode>>),
+) -> Layout {
+    let (s, layout, cols) = best;
+    layered.columns.clone_from(&cols);
+    let reslotted = route::reslot(g, layered, &layout);
+    let mut best = (s, layout, cols, false);
     let mut tried: Vec<Vec<Vec<order::LNode>>> = Vec::new();
     for cols in [layered.columns.clone(), reslotted] {
         if tried.contains(&cols) || !route::has_slots(&cols) {
@@ -243,15 +286,27 @@ pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
         }
         tried.push(cols.clone());
         layered.columns = cols;
-        let (slotted, s2) = route::build(g, &ranked, &layered, &edge_colour, &badges, opts, true);
+        let (slotted, s2) = route::build(g, ranked, layered, edge_colour, badges, opts, true, None);
         if route::no_worse(&s2, &best.0)
             && s2.total < best.0.total
             && i32::from(s2.height) <= i32::from(best.0.height) + route::SLOT_RISE
         {
-            best = (s2, slotted);
+            best = (s2, slotted, layered.columns.clone(), true);
         }
     }
-    best.1
+    let (s, layout, cols, slots) = best;
+    layered.columns = cols;
+    route::refine(
+        g,
+        ranked,
+        layered,
+        edge_colour,
+        badges,
+        opts,
+        slots,
+        (layout, s),
+    )
+    .0
 }
 
 fn badges_for(g: &ViewGraph, edge_colour: &[Option<EdgeColour>]) -> HashMap<NodeId, Vec<Badge>> {

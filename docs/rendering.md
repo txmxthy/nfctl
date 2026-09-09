@@ -150,6 +150,22 @@ layout is kept when it scores lower without raising either tier or the
 height past that allowance. That is how a long edge runs between two stacked
 cards instead of around the whole stack.
 
+## Fans
+
+A fan-out is symmetric when the source's middle row is the midpoint of the
+outermost rows its branches leave the bus on; a fan-in likewise for the rows
+its edges join on. The placement sweeps centre a card on the median of its
+neighbours, which is the midpoint only when the neighbours are evenly spread,
+so the winning layout is refined once more: the sweeps run again with the
+midpoint of the extreme neighbour rows as the centre (both roundings, the
+grid being odd), then every card whose fan is off centre is nudged towards
+the midpoint by up to two rows, the cards stacked beyond it moving along.
+Each candidate's geometry is measured first, without drawing, for the
+asymmetry and detour it would have; only one that promises less is drawn,
+and it is kept only when the drawn total falls without raising either tier
+or the height. Where two stacked cards want the same row, or a stack fills
+the column, the fans stay as they are.
+
 ## What this cannot draw
 
 A cell has one colour. A bus carrying several tag combinations shows the

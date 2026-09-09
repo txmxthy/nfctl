@@ -1,7 +1,7 @@
 //! Coordinates: card and pass rows per column, gap widths from track counts,
 //! one polyline per edge, lanes for back edges.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::order::{LNode, Layered, cards};
 use super::rank::Ranked;
@@ -20,6 +20,13 @@ pub(crate) const SLOT_RISE: i32 = 2;
 /// Placement sweeps tried after the centred layout: left-to-right, then
 /// right-to-left, alternating.
 const SWEEPS: usize = 4;
+/// Rows a card may be nudged either way to centre its fans on their extremes.
+const NUDGE: i32 = 2;
+/// Passes of the nudge search.
+const NUDGE_PASSES: usize = 2;
+/// Rasters `refine` may spend; the largest corpus pipeline is near the
+/// debug-time budget before it starts.
+const REFINE_DRAWS: usize = 4;
 /// Left margin when a back edge targets column 0.
 const BACK_MARGIN: i32 = 3;
 /// Pseudo node keys so back-edge verticals never share a track with forward
@@ -184,15 +191,21 @@ fn geometry(
 }
 
 /// Candidate placements, the plain one first: every column centred on the
-/// tallest; then cards placed by their neighbours. A left-to-right sweep puts
-/// each card on the median row of its sources in the previous column, a
-/// right-to-left sweep on the median of its targets in the next column; a
-/// long edge counts as its real endpoint. Within a column cards stack in
-/// order, the column then shifts as a whole by the median of what its cards
-/// still want, and is pressed into the tallest column's height so the layout
-/// never grows. `build` scores each candidate on the drawn geometry and keeps
-/// the best.
-fn placements(g: &ViewGraph, l: &Layered, gaps: &Gaps, card_h: i32) -> (Placement, Vec<Placement>) {
+/// tallest; then cards placed by their neighbours, once per `centre`. A
+/// left-to-right sweep puts each card on the centre row of its sources in the
+/// previous column, a right-to-left sweep on the centre of its targets in the
+/// next column; a long edge counts as its real endpoint. Within a column
+/// cards stack in order, the column then shifts as a whole by the centre of
+/// what its cards still want, and is pressed into the tallest column's
+/// height so the layout never grows. The caller scores each candidate on the
+/// drawn geometry and keeps the best.
+fn placements(
+    g: &ViewGraph,
+    l: &Layered,
+    gaps: &Gaps,
+    card_h: i32,
+    centres: &[Centre],
+) -> (Placement, Vec<Placement>) {
     let cards = cards(&l.columns);
     let tallest = tallest(&cards, gaps, card_h);
     let cols = cards.len();
@@ -216,14 +229,13 @@ fn placements(g: &ViewGraph, l: &Layered, gaps: &Gaps, card_h: i32) -> (Placemen
         })
         .collect();
     hops.dedup();
-    let mut ys = centred(&cards, gaps, card_h);
-    let plain = ys.clone();
+    let plain = centred(&cards, gaps, card_h);
     let mut out = Vec::new();
     let row = |ys: &Placement, id: NodeId| {
         let (c, k) = at[&id];
         mid(ys[c][k])
     };
-    let sweep = |ys: &mut Placement, c: usize, down: bool| {
+    let sweep = |ys: &mut Placement, c: usize, down: bool, centre: Centre| {
         let desired: Vec<Option<i32>> = cards[c]
             .iter()
             .map(|&id| {
@@ -233,7 +245,7 @@ fn placements(g: &ViewGraph, l: &Layered, gaps: &Gaps, card_h: i32) -> (Placemen
                     .map(|&(from, to)| row(ys, if down { from } else { to }))
                     .collect();
                 rows.sort_unstable();
-                median(&rows)
+                centre(&rows)
             })
             .collect();
         let col = &mut ys[c];
@@ -249,28 +261,46 @@ fn placements(g: &ViewGraph, l: &Layered, gaps: &Gaps, card_h: i32) -> (Placemen
             .filter_map(|(w, &y)| w.map(|w| w - mid(y)))
             .collect();
         residual.sort_unstable();
-        let shift = median(&residual).unwrap_or((tallest - bottom) / 2);
+        let shift = centre(&residual).unwrap_or((tallest - bottom) / 2);
         for y in col.iter_mut() {
             *y += shift;
         }
         fit(col, &gaps[c], card_h, tallest);
     };
-    for pass in 0..SWEEPS {
-        if pass % 2 == 0 {
-            for c in 0..cols {
-                sweep(&mut ys, c, true);
+    for &centre in centres {
+        let mut ys = plain.clone();
+        for pass in 0..SWEEPS {
+            if pass % 2 == 0 {
+                for c in 0..cols {
+                    sweep(&mut ys, c, true, centre);
+                }
+            } else {
+                for c in (0..cols.saturating_sub(1)).rev() {
+                    sweep(&mut ys, c, false, centre);
+                }
             }
-        } else {
-            for c in (0..cols.saturating_sub(1)).rev() {
-                sweep(&mut ys, c, false);
+            if ys != plain && !out.contains(&ys) {
+                out.push(ys.clone());
             }
-        }
-        if ys != plain && !out.contains(&ys) {
-            out.push(ys.clone());
         }
     }
     (plain, out)
 }
+
+/// How a sweep centres a card on a sorted list of neighbour rows.
+type Centre = fn(&[i32]) -> Option<i32>;
+
+/// Midpoint of the first and last of a sorted list, rounded down or `up`.
+/// A fan is symmetric when its bus row is the midpoint of its outermost
+/// rows, whatever lies between; the median is what the eye expects of a
+/// stack of neighbours.
+fn extremes(sorted: &[i32], up: bool) -> Option<i32> {
+    let (lo, hi) = (*sorted.first()?, *sorted.last()?);
+    Some((lo + hi + i32::from(up)).div_euclid(2))
+}
+
+/// The two roundings of the extremes' midpoint.
+const EXTREMES: [Centre; 2] = [|s| extremes(s, false), |s| extremes(s, true)];
 
 /// Every column centred on the tallest.
 fn centred(cards: &[Vec<NodeId>], gaps: &Gaps, card_h: i32) -> Placement {
@@ -684,8 +714,8 @@ fn collapse(pts: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
     out
 }
 
-/// The score of the centred placement alone: a cheap stand-in for `build`
-/// when comparing column orders.
+/// The centred placement alone, drawn and scored: a cheap stand-in for
+/// `build` when comparing column orders, and its first candidate.
 pub(crate) fn preview(
     g: &ViewGraph,
     ranked: &Ranked,
@@ -693,13 +723,12 @@ pub(crate) fn preview(
     edge_colour: &[Option<EdgeColour>],
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
-) -> Score {
+) -> (Layout, Score) {
     let gaps = gaps(&layered.columns, false);
     let plain = centred(&cards(&layered.columns), &gaps, i32::from(opts.card_h));
-    score(
-        g,
-        &build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts),
-    )
+    let layout = build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts);
+    let s = score(g, &layout);
+    (layout, s)
 }
 
 /// `s` no worse than `base` on either tier.
@@ -842,6 +871,9 @@ fn interleave(cards: &[NodeId], mut region: Vec<(usize, EdgeId)>) -> Vec<LNode> 
 
 /// The best placement for this column order. With `slots`, a pass slot is
 /// held open between every pair of stacked cards the order puts one between.
+/// `centred` is the order's `preview`, when the caller has it: the same
+/// drawing as the first candidate, so it is not drawn twice.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build(
     g: &ViewGraph,
     ranked: &Ranked,
@@ -850,12 +882,19 @@ pub(crate) fn build(
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
     slots: bool,
+    centred: Option<(Layout, Score)>,
 ) -> (Layout, Score) {
     let gaps = gaps(&layered.columns, slots);
     let card_h = i32::from(opts.card_h);
-    let (plain, sweeps) = placements(g, layered, &gaps, card_h);
-    let mut best = build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts);
-    let base = score(g, &best);
+    let (plain, sweeps) = placements(g, layered, &gaps, card_h, &[median]);
+    let (mut best, base) = match centred {
+        Some(drawn) if !slots => drawn,
+        _ => {
+            let l = build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts);
+            let s = score(g, &l);
+            (l, s)
+        }
+    };
     let mut best_score = base.clone();
     let mut best_ys = plain;
     for ys in sweeps {
@@ -949,6 +988,203 @@ fn conflict_columns(g: &ViewGraph, ranked: &Ranked, l: &Layout, s: &Score) -> BT
             [ranked.rank[e.from.0 as usize], ranked.rank[e.to.0 as usize]]
         })
         .collect()
+}
+
+/// The winner once more with each fan centred on its extremes: the sweeps
+/// with the extremes' midpoint as the centre, then each card whose bus row
+/// is not the midpoint of the outermost rows its branches leave on (or join
+/// on) nudged there, as far as the cards stacked with it allow. A candidate
+/// is drawn only when its geometry alone (`proxy`) promises a lower soft
+/// tier, and kept when the drawn total falls without raising either tier or
+/// the height. Every raster costs, so the draws are budgeted.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn refine(
+    g: &ViewGraph,
+    ranked: &Ranked,
+    layered: &Layered,
+    edge_colour: &[Option<EdgeColour>],
+    badges: &HashMap<NodeId, Vec<Badge>>,
+    opts: LayoutOptions,
+    slots: bool,
+    best: (Layout, Score),
+) -> (Layout, Score) {
+    let gaps = gaps(&layered.columns, slots);
+    let card_h = i32::from(opts.card_h);
+    let (mut best, mut best_score) = best;
+    let columns = cards(&layered.columns);
+    let mut best_ys: Placement = columns
+        .iter()
+        .map(|col| {
+            col.iter()
+                .map(|&id| best.card(id).map_or(0, |k| k.y))
+                .collect()
+        })
+        .collect();
+    let at: HashMap<NodeId, (usize, usize)> = columns
+        .iter()
+        .enumerate()
+        .flat_map(|(c, col)| col.iter().enumerate().map(move |(k, &id)| (id, (c, k))))
+        .collect();
+    let proxy_of =
+        |ys: &Placement| proxy(g, ranked, layered, &geometry(g, layered, ys, &gaps, opts));
+    let mut cur = proxy_of(&best_ys);
+    // Rows the cards and pass rows reach, without the lanes.
+    let reach = i32::from(best_score.height) - i32::from(best.lanes);
+    let mut draws = 0;
+    // Draw `ys` when its geometry promises less; keep it when the score agrees.
+    let mut try_ys = |ys: Placement,
+                      best_ys: &mut Placement,
+                      best: &mut Layout,
+                      best_score: &mut Score,
+                      cur: &mut Proxy|
+     -> bool {
+        if draws == REFINE_DRAWS {
+            return false;
+        }
+        let p = proxy_of(&ys);
+        if p.soft() >= cur.soft() {
+            return false;
+        }
+        draws += 1;
+        let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
+        let s = score(g, &layout);
+        if !(no_worse(&s, best_score)
+            && s.total < best_score.total
+            && s.height <= best_score.height)
+        {
+            return false;
+        }
+        *best_ys = ys;
+        *best = layout;
+        *best_score = s;
+        *cur = p;
+        true
+    };
+    for ys in placements(g, layered, &gaps, card_h, &EXTREMES).1 {
+        try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur);
+    }
+    for _ in 0..NUDGE_PASSES {
+        let mut improved = false;
+        for (node, moves) in cur.wants.clone() {
+            let (c, k) = at[&node];
+            for d in moves {
+                // The cards stacked beyond it move along as far as needed.
+                let mut ys = best_ys.clone();
+                let col = &mut ys[c];
+                col[k] += d;
+                if d > 0 {
+                    for j in k + 1..col.len() {
+                        col[j] = col[j].max(col[j - 1] + card_h + gaps[c][j - 1]);
+                    }
+                } else {
+                    for j in (0..k).rev() {
+                        col[j] = col[j].min(col[j + 1] - card_h - gaps[c][j]);
+                    }
+                }
+                let bottom = col.last().map_or(0, |&y| y + card_h);
+                if col[0] < 0 || bottom > reach {
+                    continue;
+                }
+                if try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur) {
+                    improved = true;
+                    break;
+                }
+            }
+        }
+        if !improved {
+            break;
+        }
+    }
+    (best, best_score)
+}
+
+/// What the scorer's soft tier sees in a geometry before any raster: the
+/// asymmetry and detour of the forward edges (crossings need the drawing),
+/// and per card with a fan of two or more forward edges whose bus row is not
+/// the midpoint of the fan's outermost rows, the rows to move it by (both
+/// roundings when the midpoint falls between rows, at most `NUDGE` either
+/// way), in card order.
+struct Proxy {
+    asym: i32,
+    detour: i32,
+    wants: Vec<(NodeId, Vec<i32>)>,
+}
+
+impl Proxy {
+    fn soft(&self) -> i32 {
+        2 * self.asym + self.detour
+    }
+}
+
+fn proxy(g: &ViewGraph, ranked: &Ranked, l: &Layered, geo: &Geometry) -> Proxy {
+    // Rows each forward edge travels, column by column: its source's, each
+    // pass row, its target's. Segments come in column order per edge.
+    let mut rows: HashMap<EdgeId, Vec<i32>> = HashMap::new();
+    for s in &l.segments {
+        let (_, y0) = geo.attach[&s.from];
+        let (_, y1) = geo.attach[&s.to];
+        rows.entry(s.edge).or_insert_with(|| vec![y0]).push(y1);
+    }
+    let mut outs: BTreeMap<NodeId, Vec<i32>> = BTreeMap::new();
+    let mut ins: BTreeMap<NodeId, Vec<i32>> = BTreeMap::new();
+    let mut detour = 0;
+    for (ei, e) in g.edges.iter().enumerate() {
+        if ranked.back[ei] {
+            continue;
+        }
+        let Some(ys) = rows.get(&edge_id(ei)) else {
+            continue;
+        };
+        let (Some(&first), Some(&last)) = (ys.first(), ys.last()) else {
+            continue;
+        };
+        let steps: Vec<(i32, i32)> = ys.windows(2).map(|w| (w[0], w[1])).collect();
+        // The row after the first vertical run, and before the last: where
+        // the branch leaves its source's bus and joins its target's.
+        let leaves = steps
+            .iter()
+            .find(|(a, b)| a != b)
+            .map_or(first, |&(_, b)| b);
+        let joins = steps
+            .iter()
+            .rev()
+            .find(|(a, b)| a != b)
+            .map_or(last, |&(a, _)| a);
+        detour += steps.iter().map(|(a, b)| (b - a).abs()).sum::<i32>() - (last - first).abs();
+        outs.entry(e.from).or_default().push(leaves);
+        ins.entry(e.to).or_default().push(joins);
+    }
+    let mut asym = 0;
+    let mut wants: BTreeMap<NodeId, BTreeSet<i32>> = BTreeMap::new();
+    for (node, rows) in outs.iter().chain(&ins) {
+        if rows.len() < 2 {
+            continue;
+        }
+        let Some(&(_, bus)) = geo.attach.get(&LNode::Real(*node)) else {
+            continue;
+        };
+        let (Some(&lo), Some(&hi)) = (rows.iter().min(), rows.iter().max()) else {
+            continue;
+        };
+        asym += ((bus - lo) - (hi - bus)).abs();
+        // Twice the ideal bus row less twice the actual one.
+        let off = lo + hi - 2 * bus;
+        let moves = wants.entry(*node).or_default();
+        for d in [off.div_euclid(2), (off + 1).div_euclid(2)] {
+            let d = d.clamp(-NUDGE, NUDGE);
+            if d != 0 {
+                moves.insert(d);
+            }
+        }
+    }
+    Proxy {
+        asym,
+        detour,
+        wants: wants
+            .into_iter()
+            .map(|(n, m)| (n, m.into_iter().collect()))
+            .collect(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
