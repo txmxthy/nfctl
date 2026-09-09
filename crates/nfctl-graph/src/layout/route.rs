@@ -3,9 +3,9 @@
 
 use std::collections::HashMap;
 
-use super::order::{LNode, Layered};
+use super::order::{LNode, Layered, cards};
 use super::rank::Ranked;
-use super::score::score;
+use super::score::{Score, score};
 use super::tracks::{Span, pack};
 use super::{
     Badge, CardPos, EdgeColour, EdgeId, GapPlan, Layout, LayoutOptions, MIN_GAP, NodeId, Route,
@@ -46,20 +46,6 @@ struct Geometry {
 /// Card top rows per column, in column order.
 type Placement = Vec<Vec<i32>>;
 
-fn cards_per_column(l: &Layered) -> Vec<Vec<NodeId>> {
-    l.columns
-        .iter()
-        .map(|col| {
-            col.iter()
-                .filter_map(|n| match n {
-                    LNode::Real(id) => Some(*id),
-                    LNode::Pass(_) => None,
-                })
-                .collect()
-        })
-        .collect()
-}
-
 fn tallest(cards: &[Vec<NodeId>], card_h: i32) -> i32 {
     cards
         .iter()
@@ -78,7 +64,7 @@ fn geometry(g: &ViewGraph, l: &Layered, ys: &Placement, opts: LayoutOptions) -> 
         attach: HashMap::new(),
         cards: Vec::new(),
         columns: Vec::new(),
-        cards_h: tallest(&cards_per_column(l), card_h),
+        cards_h: tallest(&cards(&l.columns), card_h),
     };
     for (c, col) in l.columns.iter().enumerate() {
         let mut placed = 0;
@@ -117,7 +103,7 @@ fn geometry(g: &ViewGraph, l: &Layered, ys: &Placement, opts: LayoutOptions) -> 
 /// never grows. `build` scores each candidate on the drawn geometry and keeps
 /// the best.
 fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placement>) {
-    let cards = cards_per_column(l);
+    let cards = cards(&l.columns);
     let tallest = tallest(&cards, card_h);
     let cols = cards.len();
     let mid = |y: i32| y + card_h / 2;
@@ -140,15 +126,7 @@ fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placem
         })
         .collect();
     hops.dedup();
-    let mut ys: Placement = cards
-        .iter()
-        .map(|col| {
-            let height = i(col.len()) * card_h + i(col.len().saturating_sub(1)) * SLOT_GAP;
-            (0..col.len())
-                .map(|k| (tallest - height) / 2 + i(k) * (card_h + SLOT_GAP))
-                .collect()
-        })
-        .collect();
+    let mut ys = centred(&cards, card_h);
     let plain = ys.clone();
     let mut out = Vec::new();
     let row = |ys: &Placement, id: NodeId| {
@@ -203,6 +181,20 @@ fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placem
         }
     }
     (plain, out)
+}
+
+/// Every column centred on the tallest.
+fn centred(cards: &[Vec<NodeId>], card_h: i32) -> Placement {
+    let tallest = tallest(cards, card_h);
+    cards
+        .iter()
+        .map(|col| {
+            let height = i(col.len()) * card_h + i(col.len().saturating_sub(1)) * SLOT_GAP;
+            (0..col.len())
+                .map(|k| (tallest - height) / 2 + i(k) * (card_h + SLOT_GAP))
+                .collect()
+        })
+        .collect()
 }
 
 /// Middle value of a sorted list; the mean of the two middle ones when even.
@@ -554,6 +546,23 @@ fn collapse(pts: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
     out
 }
 
+/// The score of the centred placement alone: a cheap stand-in for `build`
+/// when comparing column orders.
+pub(crate) fn preview(
+    g: &ViewGraph,
+    ranked: &Ranked,
+    layered: &Layered,
+    edge_colour: &[Option<EdgeColour>],
+    badges: &HashMap<NodeId, Vec<Badge>>,
+    opts: LayoutOptions,
+) -> Score {
+    let plain = centred(&cards(&layered.columns), i32::from(opts.card_h));
+    score(
+        g,
+        &build_with(g, ranked, layered, &plain, edge_colour, badges, opts),
+    )
+}
+
 pub(crate) fn build(
     g: &ViewGraph,
     ranked: &Ranked,
@@ -561,11 +570,11 @@ pub(crate) fn build(
     edge_colour: &[Option<EdgeColour>],
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
-) -> Layout {
+) -> (Layout, Score) {
     let (plain, sweeps) = placements(g, layered, i32::from(opts.card_h));
     let mut best = build_with(g, ranked, layered, &plain, edge_colour, badges, opts);
     let base = score(g, &best);
-    let mut best_total = base.total;
+    let mut best_score = base.clone();
     for ys in sweeps {
         let layout = build_with(g, ranked, layered, &ys, edge_colour, badges, opts);
         let s = score(g, &layout);
@@ -576,12 +585,12 @@ pub(crate) fn build(
             .zip(base.vocabulary())
             .all(|(n, o)| *n <= o)
             && s.soft() <= base.soft();
-        if no_worse && s.total < best_total {
+        if no_worse && s.total < best_score.total {
             best = layout;
-            best_total = s.total;
+            best_score = s;
         }
     }
-    best
+    (best, best_score)
 }
 
 fn build_with(

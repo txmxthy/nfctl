@@ -40,9 +40,10 @@ Per layout it sums them into two tiers:
 `mixed_cells`, `gap_spread`, `width`, `height` are informational. `total` is
 `10·bends_over + 10·junction_over + 5·overlaps + 3·crossings + 2·asymmetry + detour`.
 
-Cell crossings are counted on the drawn geometry and do not equal
-`order.rs::crossings`, which counts layer-order inversions; do not try to
-reconcile them.
+Cell crossings are counted on the drawn geometry. Column order is judged the
+same way: `layout` draws every distinct card order the barycenter sweeps
+propose (`order.rs::orderings`), refines the best by adjacent card swaps, and
+keeps the lowest score; there is no separate inversion count.
 
 ## Tools
 

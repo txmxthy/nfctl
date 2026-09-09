@@ -1,4 +1,5 @@
-//! Layered graph with dummy pass nodes, ordered within columns by barycenter.
+//! Layered graph with dummy pass nodes; barycenter sweeps propose column
+//! orders, `layout` picks one by the drawn result.
 
 use super::rank::Ranked;
 use super::{EdgeId, MAX_SWEEPS, NodeId, ViewGraph, i};
@@ -56,38 +57,11 @@ pub(crate) fn layer(g: &ViewGraph, r: &Ranked) -> Layered {
             prev = next;
         }
     }
-    let mut layered = Layered { columns, segments };
-    reorder(&mut layered);
-    layered
+    Layered { columns, segments }
 }
 
 fn position(columns: &[Vec<LNode>], col: usize, n: LNode) -> Option<usize> {
     columns[col].iter().position(|&x| x == n)
-}
-
-fn crossings(l: &Layered) -> usize {
-    let mut total = 0;
-    for c in 0..l.columns.len().saturating_sub(1) {
-        let segs: Vec<(usize, usize)> = l
-            .segments
-            .iter()
-            .filter(|s| s.col == c)
-            .filter_map(|s| {
-                Some((
-                    position(&l.columns, c, s.from)?,
-                    position(&l.columns, c + 1, s.to)?,
-                ))
-            })
-            .collect();
-        for (i, a) in segs.iter().enumerate() {
-            for b in &segs[i + 1..] {
-                if (a.0 < b.0) != (a.1 < b.1) && a.0 != b.0 && a.1 != b.1 {
-                    total += 1;
-                }
-            }
-        }
-    }
-    total
 }
 
 /// Sort column `col` by the mean position of its neighbours in `other`
@@ -134,16 +108,43 @@ fn sweep_column(l: &mut Layered, col: usize, down: bool) {
     l.columns[col] = keyed.into_iter().map(|(_, _, n)| n).collect();
 }
 
-fn reorder(l: &mut Layered) {
+/// The cards of every column, in order: what the geometry depends on. Pass
+/// slots take their rows from the edge, wherever they sit in the column.
+pub(crate) fn cards(columns: &[Vec<LNode>]) -> Vec<Vec<NodeId>> {
+    columns
+        .iter()
+        .map(|col| {
+            col.iter()
+                .filter_map(|n| match n {
+                    LNode::Real(id) => Some(*id),
+                    LNode::Pass(_) => None,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Candidate column orders: the first downward pass, then every alternating
+/// barycenter sweep that puts the cards in an order not seen before. The
+/// caller draws each and keeps the best; the order here is the tie-break.
+pub(crate) fn orderings(l: &mut Layered) -> Vec<Vec<Vec<LNode>>> {
     let cols = l.columns.len();
     if cols < 2 {
-        return;
+        return vec![l.columns.clone()];
     }
+    let mut out: Vec<Vec<Vec<LNode>>> = Vec::new();
+    let mut seen: Vec<Vec<Vec<NodeId>>> = Vec::new();
+    let mut keep = |l: &Layered, out: &mut Vec<Vec<Vec<LNode>>>| {
+        let key = cards(&l.columns);
+        if !seen.contains(&key) {
+            seen.push(key);
+            out.push(l.columns.clone());
+        }
+    };
     for c in 1..cols {
         sweep_column(l, c, true);
     }
-    let mut best = l.columns.clone();
-    let mut best_x = crossings(l);
+    keep(l, &mut out);
     for sweep in 0..MAX_SWEEPS {
         if sweep % 2 == 0 {
             for c in 1..cols {
@@ -154,18 +155,22 @@ fn reorder(l: &mut Layered) {
                 sweep_column(l, c, false);
             }
         }
-        let x = crossings(l);
-        if x < best_x {
-            best.clone_from(&l.columns);
-            best_x = x;
-        } else if x == best_x && sweep > 1 {
-            break;
-        }
-        if best_x == 0 {
-            break;
-        }
+        keep(l, &mut out);
     }
-    l.columns = best;
+    out
+}
+
+/// `(column, index, index)` of every pair of cards adjacent in a column,
+/// pass slots between them ignored.
+pub(crate) fn card_pairs(columns: &[Vec<LNode>]) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    for (c, col) in columns.iter().enumerate() {
+        let at: Vec<usize> = (0..col.len())
+            .filter(|&k| matches!(col[k], LNode::Real(_)))
+            .collect();
+        out.extend(at.windows(2).map(|w| (c, w[0], w[1])));
+    }
+    out
 }
 
 /// Barycenter as a rational so ordering is exact and deterministic.
