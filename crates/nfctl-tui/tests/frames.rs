@@ -243,3 +243,32 @@ async fn edge_colours_follow_tag_combinations() {
     assert!(colours(&on).len() >= 3, "on: {:?}", colours(&on));
     assert!(colours(&off).len() <= 2, "off: {:?}", colours(&off));
 }
+
+/// The TAGS column and the `->` between the names take the edge's colour.
+#[tokio::test]
+async fn edge_table_is_coloured_like_the_edges() {
+    let panel = sharded_panel(false).await;
+    let mut term = Terminal::new(TestBackend::new(140, 32)).unwrap();
+    term.draw(|f| panel.view(f, f.area())).unwrap();
+    let buf = term.backend().buffer().clone();
+    // Find the row for `router -> audit`: its tag cell must not be the default colour.
+    let mut found = false;
+    for y in 0..buf.area.height {
+        let line: String = (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol().to_owned())
+            .collect();
+        if let Some(col) = line.find("audit") {
+            if line.contains("router -> audit") {
+                let tag_x = line.rfind("audit").unwrap();
+                let arrow_x = line.find("->").unwrap();
+                let tag_fg = buf[(u16::try_from(tag_x).unwrap(), y)].fg;
+                let arrow_fg = buf[(u16::try_from(arrow_x).unwrap(), y)].fg;
+                assert_ne!(tag_fg, ratatui::style::Color::Reset, "tag coloured");
+                assert_eq!(tag_fg, arrow_fg, "arrow matches its tag");
+                found = true;
+            }
+            let _ = col;
+        }
+    }
+    assert!(found, "edge row present");
+}

@@ -4,7 +4,7 @@ use nfctl_core::service::PipelineView;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Row, Table};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
 use crate::cards::CardView;
 use crate::event::{Action, AppEvent};
@@ -217,7 +217,7 @@ impl Model for DetailPanel {
             self.palette,
         );
 
-        frame.render_widget(edge_table(v, edges.width), edges);
+        frame.render_widget(edge_table(v, edges.width, self.palette), edges);
 
         let warnings: Vec<Line> = v
             .warnings
@@ -233,8 +233,20 @@ impl Model for DetailPanel {
     }
 }
 
-fn edge_table(v: &PipelineView, width: u16) -> Table<'_> {
+/// Tags and the arrow between the two names take the edge's colour, the same
+/// one it is drawn in above.
+fn edge_table(v: &PipelineView, width: u16, palette: Palette) -> Table<'_> {
+    use nfctl_graph::layout::{EdgeColour, ViewGraph, colours};
     const HEADER: [&str; 6] = ["EDGE", "TAGS", "PENDING", "USAGE", "", "WATERMARK"];
+    let topology = &v.pipeline.spec.topology;
+    // Expanded view: one view edge per topology edge, in the same order.
+    let colour_of: std::collections::HashMap<(&VertexName, &VertexName), Option<EdgeColour>> =
+        topology
+            .edges()
+            .iter()
+            .zip(colours(&ViewGraph::expanded(topology)))
+            .map(|(e, c)| ((&e.from, &e.to), c))
+            .collect();
     let tags = |from: &VertexName, to: &VertexName| -> String {
         v.pipeline
             .spec
@@ -280,7 +292,24 @@ fn edge_table(v: &PipelineView, width: u16) -> Table<'_> {
         })
         .collect();
     let widths = crate::table::fill(&HEADER, &cells, width, 2, &[0, 1]);
-    Table::new(cells.into_iter().map(Row::new), widths)
+    let rows = v.edges.iter().zip(cells).map(|(e, mut c)| {
+        let colour = colour_of.get(&(&e.from, &e.to)).copied().flatten();
+        let ink = palette.edge(colour);
+        let edge = Line::from(vec![
+            Span::raw(e.from.to_string()),
+            Span::styled(" -> ", ink),
+            Span::raw(e.to.to_string()),
+        ]);
+        let tags = Line::styled(std::mem::take(&mut c[1]), ink);
+        let rest: Vec<Cell> = c.into_iter().skip(2).map(Cell::from).collect();
+        Row::new(
+            [Cell::from(edge), Cell::from(tags)]
+                .into_iter()
+                .chain(rest)
+                .collect::<Vec<_>>(),
+        )
+    });
+    Table::new(rows, widths)
         .column_spacing(2)
         .header(Row::new(HEADER).style(style::title()))
 }
