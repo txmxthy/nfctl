@@ -1,7 +1,8 @@
 //! Pack the vertical runs in one gap onto tracks: two runs share a track when
 //! they do not overlap, or when they share a source or a target, so a fan-out
 //! is one bus with a junction per branch. Then order the
-//! tracks left to right so horizontals cross as few verticals as possible.
+//! tracks left to right so no horizontal lands on another run's corner and
+//! horizontals cross as few verticals as possible.
 
 use super::EdgeId;
 
@@ -62,33 +63,60 @@ pub(crate) fn pack(spans: &[Span]) -> (Vec<usize>, usize) {
     )
 }
 
-/// Cost of drawing track `a` left of track `b`: one per horizontal crossing a
-/// vertical, ten when a horizontal lands on another run's corner row (it would
-/// read as one line).
-fn cost(a: &[Span], b: &[Span]) -> u32 {
-    let mut c = 0;
+/// Cost of drawing track `a` left of track `b`: horizontals landing on
+/// another run's corner row (an overlap: it would read as one line), then
+/// horizontals crossing a vertical.
+fn cost(a: &[Span], b: &[Span]) -> (u32, u32) {
+    let (mut landings, mut crossings) = (0, 0);
     for x in a {
         for y in b {
             // y's entry horizontal runs across x's track.
             if x.lo < y.y_in && y.y_in < x.hi {
-                c += 1;
+                crossings += 1;
             }
             // x's exit horizontal runs across y's track.
             if y.lo < x.y_out && x.y_out < y.hi {
-                c += 1;
+                crossings += 1;
             }
             if x.lo < x.hi && x.y_out == y.y_in {
-                c += 10;
+                landings += 1;
             }
         }
     }
-    c
+    (landings, crossings)
 }
 
-/// Adjacent-swap descent over the pairwise cost matrix (a linear ordering problem).
+fn total(tracks: &[Vec<Span>], perm: &[usize]) -> (u32, u32) {
+    let mut sum = (0, 0);
+    for (i, &a) in perm.iter().enumerate() {
+        for &b in &perm[i + 1..] {
+            let c = cost(&tracks[a], &tracks[b]);
+            sum = (sum.0 + c.0, sum.1 + c.1);
+        }
+    }
+    sum
+}
+
+/// Gaps with this many tracks or fewer try every order.
+const EXACT: usize = 6;
+
+/// Order the tracks left to right: no landing on another run's corner where
+/// any order avoids it, then the fewest crossings (a linear ordering
+/// problem). Every permutation for small gaps, an adjacent-swap descent
+/// beyond; ties keep the earlier order.
 fn order_tracks(tracks: &[Vec<Span>]) -> Vec<usize> {
     let n = tracks.len();
     let mut perm: Vec<usize> = (0..n).collect();
+    if n <= EXACT {
+        let mut best = (total(tracks, &perm), perm.clone());
+        while next_permutation(&mut perm) {
+            let c = total(tracks, &perm);
+            if c < best.0 {
+                best = (c, perm.clone());
+            }
+        }
+        return best.1;
+    }
     let mut improved = true;
     while improved {
         improved = false;
@@ -101,4 +129,17 @@ fn order_tracks(tracks: &[Vec<Span>]) -> Vec<usize> {
         }
     }
     perm
+}
+
+/// Advance to the next permutation in lexicographic order; false at the last.
+fn next_permutation(p: &mut [usize]) -> bool {
+    let Some(i) = (1..p.len()).rev().find(|&i| p[i - 1] < p[i]) else {
+        return false;
+    };
+    let Some(j) = (i..p.len()).rev().find(|&j| p[j] > p[i - 1]) else {
+        return false;
+    };
+    p.swap(i - 1, j);
+    p[i..].reverse();
+    true
 }

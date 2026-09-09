@@ -81,10 +81,15 @@ plain packing. A straight edge (source and target on the same row) takes no
 track at all.
 
 Gap width is `tracks + 2`, minimum 5, and the tracks sit centred in the gap.
-Tracks are then ordered left to right by an adjacent-swap descent over the
-number of horizontals that would cross each vertical, with a heavy penalty
-when one run's exit row lands on another's corner row (it would read as one
-line).
+Tracks are then ordered left to right so that no run's exit row lands on
+another run's corner row (it would read as one line) wherever some order
+avoids it, and then so horizontals cross as few verticals as possible: every
+order is tried for a gap of up to six tracks, an adjacent-swap descent beyond.
+
+No order helps when two cards sit on the rows of two cards in the next column
+and are joined crosswise: whichever vertical is left, its exit lands on the
+other's corner. `route::build` then shifts a whole column off its neighbours'
+rows, by up to half a card step, while that removes an overlap.
 
 ### Two examples from the fixture
 

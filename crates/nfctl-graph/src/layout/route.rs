@@ -64,7 +64,13 @@ fn geometry(g: &ViewGraph, l: &Layered, ys: &Placement, opts: LayoutOptions) -> 
         attach: HashMap::new(),
         cards: Vec::new(),
         columns: Vec::new(),
-        cards_h: tallest(&cards(&l.columns), card_h),
+        cards_h: ys
+            .iter()
+            .flatten()
+            .map(|&y| y + card_h)
+            .max()
+            .unwrap_or(0)
+            .max(tallest(&cards(&l.columns), card_h)),
     };
     for (c, col) in l.columns.iter().enumerate() {
         let mut placed = 0;
@@ -571,10 +577,12 @@ pub(crate) fn build(
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
 ) -> (Layout, Score) {
-    let (plain, sweeps) = placements(g, layered, i32::from(opts.card_h));
+    let card_h = i32::from(opts.card_h);
+    let (plain, sweeps) = placements(g, layered, card_h);
     let mut best = build_with(g, ranked, layered, &plain, edge_colour, badges, opts);
     let base = score(g, &best);
     let mut best_score = base.clone();
+    let mut best_ys = plain;
     for ys in sweeps {
         let layout = build_with(g, ranked, layered, &ys, edge_colour, badges, opts);
         let s = score(g, &layout);
@@ -588,7 +596,40 @@ pub(crate) fn build(
         if no_worse && s.total < best_score.total {
             best = layout;
             best_score = s;
+            best_ys = ys;
         }
+    }
+    // Two cards on the rows of two in the next column, joined crosswise,
+    // cannot be drawn: whichever track is left, its exit lands on the
+    // other's corner. Shift a whole column off its neighbours' rows, up to
+    // half a step, while that removes an overlap; the lowest total, then
+    // the lowest layout, wins.
+    let half = card_h.midpoint(SLOT_GAP);
+    while best_score.overlaps > 0 {
+        let mut found: Option<(Placement, Layout, Score)> = None;
+        let rank = |s: &Score| (s.vocabulary(), s.total, s.height);
+        for c in 0..best_ys.len() {
+            for d in (1..=half).flat_map(|d| [d, -d]) {
+                if best_ys[c].iter().any(|&y| y + d < 0) {
+                    continue;
+                }
+                let mut ys = best_ys.clone();
+                for y in &mut ys[c] {
+                    *y += d;
+                }
+                let layout = build_with(g, ranked, layered, &ys, edge_colour, badges, opts);
+                let s = score(g, &layout);
+                if s.vocabulary() < best_score.vocabulary()
+                    && found.as_ref().is_none_or(|(_, _, f)| rank(&s) < rank(f))
+                {
+                    found = Some((ys, layout, s));
+                }
+            }
+        }
+        let Some((ys, layout, s)) = found else { break };
+        best_ys = ys;
+        best = layout;
+        best_score = s;
     }
     (best, best_score)
 }
