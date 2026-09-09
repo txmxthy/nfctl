@@ -115,6 +115,16 @@ track by rule 1, and the junction is `L U D`:
    └─▶ audit          coloured
 ```
 
+## Long edges
+
+An edge that skips columns crosses each of them on a pass row. The row is
+chosen after the cards are placed: the row the edge leaves its source on if
+no card in that column covers it (or the row beside it), else the row it
+enters its target on, else the free row nearest the source row. A long edge
+therefore runs straight wherever it can and bends only where a card is in
+the way, and an edge from a lower source under a card runs beneath the card
+rather than around it.
+
 ## What this cannot draw
 
 A cell has one colour. A bus carrying several tag combinations shows the

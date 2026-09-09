@@ -39,18 +39,20 @@ struct Geometry {
     cards_h: i32,
 }
 
-fn geometry(l: &Layered, opts: LayoutOptions) -> Geometry {
-    let slot_h = |n: &LNode| match n {
-        LNode::Real(_) => i32::from(opts.card_h),
-        LNode::Pass(_) => 1,
-    };
-    // One blank row between stacked slots. With odd card heights this keeps
-    // every column an odd height, so centring lands on a row and a source
-    // sits exactly between the two targets it fans out to.
+fn geometry(g: &ViewGraph, l: &Layered, opts: LayoutOptions) -> Geometry {
+    let card_h = i32::from(opts.card_h);
+    // Cards only: pass slots are placed afterwards, on a row the edge already
+    // travels on wherever that row is free. One blank row between stacked
+    // cards keeps every column an odd height, so centring lands on a row and
+    // a source sits exactly between the two targets it fans out to.
+    let cards_in = |col: &Vec<LNode>| col.iter().filter(|n| matches!(n, LNode::Real(_))).count();
     let heights: Vec<i32> = l
         .columns
         .iter()
-        .map(|col| col.iter().map(slot_h).sum::<i32>() + i(col.len().saturating_sub(1)))
+        .map(|col| {
+            let n = cards_in(col);
+            i(n) * card_h + i(n.saturating_sub(1)) * SLOT_GAP
+        })
         .collect();
     let tallest = heights.iter().copied().max().unwrap_or(0);
     let mut geo = Geometry {
@@ -60,42 +62,94 @@ fn geometry(l: &Layered, opts: LayoutOptions) -> Geometry {
         cards_h: tallest,
     };
     for (c, col) in l.columns.iter().enumerate() {
-        // Shorter columns sit centred on the tallest one, so a chain that fans
-        // out and back in reads as one horizontal line through the middle.
         let mut y = (tallest - heights[c]) / 2;
         let mut slots = Vec::new();
-        for (k, &n) in col.iter().enumerate() {
-            if k > 0 {
+        let mut placed = 0;
+        for &n in col {
+            let LNode::Real(id) = n else {
+                slots.push(match n {
+                    LNode::Pass(e) => Slot::Pass(e),
+                    LNode::Real(id) => Slot::Card(id),
+                });
+                continue;
+            };
+            if placed > 0 {
                 y += SLOT_GAP;
             }
-            match n {
-                LNode::Real(id) => {
-                    // Every card is the same (odd) height so edges meet a true
-                    // middle row and siblings line up; the badge row is blank
-                    // when nothing tagged arrives.
-                    let h = opts.card_h;
-                    // Edges meet the card on its middle row.
-                    geo.attach.insert(n, (c, y + i32::from(h) / 2));
-                    geo.cards.push(CardPos {
-                        node: id,
-                        col: c,
-                        x: 0,
-                        y,
-                        h,
-                    });
-                    slots.push(Slot::Card(id));
-                    y += i32::from(h);
-                }
-                LNode::Pass(e) => {
-                    geo.attach.insert(n, (c, y));
-                    slots.push(Slot::Pass(e));
-                    y += 1;
-                }
-            }
+            placed += 1;
+            geo.attach.insert(n, (c, y + card_h / 2));
+            geo.cards.push(CardPos {
+                node: id,
+                col: c,
+                x: 0,
+                y,
+                h: opts.card_h,
+            });
+            slots.push(Slot::Card(id));
+            y += card_h;
         }
         geo.columns.push(slots);
     }
+    pass_rows(g, l, &mut geo, card_h);
     geo
+}
+
+/// Give every pass slot a row. First choice: the row the edge leaves its
+/// source on, so a long edge runs straight; then the row it enters its
+/// target on; then the free row nearest the source row. A row is free in a
+/// column when no card there covers it or the row beside it, and no other
+/// pass in that column has it.
+fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
+    let blocked = |geo: &Geometry, c: usize, row: i32| {
+        geo.cards
+            .iter()
+            .filter(|k| k.col == c)
+            .any(|k| row >= k.y - 1 && row <= k.y + card_h)
+            || geo
+                .attach
+                .iter()
+                .any(|(n, &(pc, py))| matches!(n, LNode::Pass(_)) && pc == c && py == row)
+    };
+    let mut passes: Vec<(usize, EdgeId)> = l
+        .columns
+        .iter()
+        .enumerate()
+        .flat_map(|(c, col)| {
+            col.iter().filter_map(move |n| match n {
+                LNode::Pass(e) => Some((c, *e)),
+                LNode::Real(_) => None,
+            })
+        })
+        .collect();
+    // Longer edges first: they have the least freedom.
+    passes.sort_by_key(|&(c, e)| {
+        let edge = &g.edges[e.0 as usize];
+        let (sc, _) = geo.attach[&LNode::Real(edge.from)];
+        let (tc, _) = geo.attach[&LNode::Real(edge.to)];
+        (std::cmp::Reverse(tc - sc), c, e)
+    });
+    for (c, e) in passes {
+        let edge = &g.edges[e.0 as usize];
+        let (_, src_row) = geo.attach[&LNode::Real(edge.from)];
+        let (_, dst_row) = geo.attach[&LNode::Real(edge.to)];
+        let mut row = None;
+        for candidate in [src_row, dst_row] {
+            if !blocked(geo, c, candidate) {
+                row = Some(candidate);
+                break;
+            }
+        }
+        let row = row.unwrap_or_else(|| {
+            // Every row past the tallest column is free, so the search ends.
+            let limit = geo.cards_h + 2;
+            (1..=limit + src_row)
+                .flat_map(|d| [src_row - d, src_row + d])
+                .find(|&r| r >= 0 && !blocked(geo, c, r))
+                .unwrap_or(src_row)
+        });
+        geo.attach.insert(LNode::Pass(e), (c, row));
+        geo.cards_h = geo.cards_h.max(row + 1);
+    }
 }
 
 /// One lane row per back-edge source; shortest hops nearest the cards.
@@ -351,7 +405,7 @@ pub(crate) fn build(
 ) -> Layout {
     let cols = layered.columns.len();
     let card_w = i32::from(opts.card_w);
-    let geo = geometry(layered, opts);
+    let geo = geometry(g, layered, opts);
     let lane = lanes(g, ranked, geo.cards_h);
     let sp = spans(g, ranked, layered, &geo, &lane);
     let margin = if g
