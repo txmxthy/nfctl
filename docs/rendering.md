@@ -117,13 +117,15 @@ track by rule 1, and the junction is `L U D`:
 
 ## Long edges
 
-An edge that skips columns crosses each of them on a pass row. The row is
-chosen after the cards are placed: the row the edge leaves its source on if
-no card in that column covers it (or the row beside it), else the row it
-enters its target on, else the free row nearest the source row. A long edge
-therefore runs straight wherever it can and bends only where a card is in
-the way, and an edge from a lower source under a card runs beneath the card
-rather than around it.
+An edge that skips columns crosses each of them on one pass row, chosen
+after the cards are placed. The row it wants is its source's row, or its
+target's row when it leaves a fork for a target with a single in-edge (so
+the branch bends once, at the bus). The row must be free in every column
+the edge passes: no card covers it or the row beside it, and no other pass
+in that column has it. Otherwise the edge takes a free row between its two
+ends, nearest the wanted one, and only when there is none a row outside
+them. Longer edges pick first. A long edge therefore runs straight across
+every column it passes and bends only at its ends.
 
 ## What this cannot draw
 

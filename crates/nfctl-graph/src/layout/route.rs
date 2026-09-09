@@ -237,11 +237,13 @@ fn fit(col: &mut [i32], card_h: i32, height: i32) {
     }
 }
 
-/// Give every pass slot a row. First choice: the row the edge leaves its
-/// source on, so a long edge runs straight; then the row it enters its
-/// target on; then the free row nearest the source row. A row is free in a
-/// column when no card there covers it or the row beside it, and no other
-/// pass in that column has it.
+/// Give every pass slot a row, one row per edge across all the columns it
+/// passes so a long edge runs straight. The row wanted: the target's row
+/// when the edge leaves a fork for a target with one in-edge, the source's
+/// row when it leaves a card with one out-edge for a join, else the source's
+/// row. The row must be free in every pass column, otherwise the free row
+/// nearest the wanted one. A row is free in a column when no card there
+/// covers it or the row beside it, and no other pass in that column has it.
 fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
     let blocked = |geo: &Geometry, c: usize, row: i32| {
         geo.cards
@@ -253,44 +255,58 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
                 .iter()
                 .any(|(n, &(pc, py))| matches!(n, LNode::Pass(_)) && pc == c && py == row)
     };
-    let mut passes: Vec<(usize, EdgeId)> = l
-        .columns
-        .iter()
-        .enumerate()
-        .flat_map(|(c, col)| {
-            col.iter().filter_map(move |n| match n {
-                LNode::Pass(e) => Some((c, *e)),
-                LNode::Real(_) => None,
-            })
-        })
-        .collect();
+    // Forward degrees: every forward edge has one segment out of its real
+    // source and one into its real target.
+    let mut out_deg: HashMap<NodeId, usize> = HashMap::new();
+    let mut in_deg: HashMap<NodeId, usize> = HashMap::new();
+    for s in &l.segments {
+        if let LNode::Real(id) = s.from {
+            *out_deg.entry(id).or_default() += 1;
+        }
+        if let LNode::Real(id) = s.to {
+            *in_deg.entry(id).or_default() += 1;
+        }
+    }
+    // Pass columns per edge, in column order.
+    let mut cols_of: HashMap<EdgeId, Vec<usize>> = HashMap::new();
+    for (c, col) in l.columns.iter().enumerate() {
+        for n in col {
+            if let LNode::Pass(e) = n {
+                cols_of.entry(*e).or_default().push(c);
+            }
+        }
+    }
+    let mut edges: Vec<(EdgeId, Vec<usize>)> = cols_of.into_iter().collect();
     // Longer edges first: they have the least freedom.
-    passes.sort_by_key(|&(c, e)| {
-        let edge = &g.edges[e.0 as usize];
-        let (sc, _) = geo.attach[&LNode::Real(edge.from)];
-        let (tc, _) = geo.attach[&LNode::Real(edge.to)];
-        (std::cmp::Reverse(tc - sc), c, e)
-    });
-    for (c, e) in passes {
+    edges.sort_by_key(|(e, cols)| (std::cmp::Reverse(cols.len()), *e));
+    for (e, cols) in edges {
         let edge = &g.edges[e.0 as usize];
         let (_, src_row) = geo.attach[&LNode::Real(edge.from)];
         let (_, dst_row) = geo.attach[&LNode::Real(edge.to)];
-        let mut row = None;
-        for candidate in [src_row, dst_row] {
-            if !blocked(geo, c, candidate) {
-                row = Some(candidate);
-                break;
-            }
+        let outs = out_deg.get(&edge.from).copied().unwrap_or(0);
+        let ins = in_deg.get(&edge.to).copied().unwrap_or(0);
+        let want = if outs >= 2 && ins == 1 {
+            dst_row
+        } else {
+            src_row
+        };
+        let free = |geo: &Geometry, row: i32| cols.iter().all(|&c| !blocked(geo, c, row));
+        let row = if free(geo, want) {
+            want
+        } else {
+            // Any row between the two ends adds no detour; among those (or
+            // failing that, the rest) the one nearest the wanted row. Every
+            // row past the tallest column is free, so the range suffices.
+            let (lo, hi) = (src_row.min(dst_row), src_row.max(dst_row));
+            let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
+            (0..=geo.cards_h + 2)
+                .filter(|&r| free(geo, r))
+                .min_by_key(|&r| (detour(r), (r - want).abs(), r))
+                .unwrap_or(want)
+        };
+        for &c in &cols {
+            geo.attach.insert(LNode::Pass(e), (c, row));
         }
-        let row = row.unwrap_or_else(|| {
-            // Every row past the tallest column is free, so the search ends.
-            let limit = geo.cards_h + 2;
-            (1..=limit + src_row)
-                .flat_map(|d| [src_row - d, src_row + d])
-                .find(|&r| r >= 0 && !blocked(geo, c, r))
-                .unwrap_or(src_row)
-        });
-        geo.attach.insert(LNode::Pass(e), (c, row));
         geo.cards_h = geo.cards_h.max(row + 1);
     }
 }
