@@ -1,7 +1,7 @@
 //! Coordinates: card and pass rows per column, gap widths from track counts,
 //! one polyline per edge, lanes for back edges.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use super::order::{LNode, Layered, cards};
 use super::rank::Ranked;
@@ -41,25 +41,76 @@ struct Geometry {
     cards: Vec<CardPos>,
     columns: Vec<Vec<Slot>>,
     cards_h: i32,
+    /// Edges on each pass row given out so far, per column.
+    taken: HashMap<(usize, i32), Vec<EdgeId>>,
+    /// Rows held open between two stacked cards, per column.
+    reserved: BTreeSet<(usize, i32)>,
+    /// The held row an edge's pass slot sits on, per column it passes.
+    slot: HashMap<(usize, EdgeId), i32>,
 }
 
 /// Card top rows per column, in column order.
 type Placement = Vec<Vec<i32>>;
 
-fn tallest(cards: &[Vec<NodeId>], card_h: i32) -> i32 {
+/// Blank rows between each pair of stacked cards, per column.
+type Gaps = Vec<Vec<i32>>;
+
+/// One blank row between stacked cards keeps every column an odd height, so
+/// a card placed on the median of its neighbours sits exactly between two of
+/// them. With `slots`, a pair the column order puts a pass slot between gets
+/// three (a margin, a pass row, a margin), which keeps the parity.
+fn gaps(columns: &[Vec<LNode>], slots: bool) -> Gaps {
+    columns
+        .iter()
+        .map(|col| {
+            let mut out = Vec::new();
+            let mut cards = 0;
+            let mut pass = false;
+            for n in col {
+                match n {
+                    LNode::Pass(_) => pass = true,
+                    LNode::Real(_) => {
+                        if cards > 0 {
+                            out.push(if slots && pass {
+                                SLOT_GAP + 2
+                            } else {
+                                SLOT_GAP
+                            });
+                        }
+                        cards += 1;
+                        pass = false;
+                    }
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+fn height_of(cards: usize, gaps: &[i32], card_h: i32) -> i32 {
+    i(cards) * card_h + gaps.iter().sum::<i32>()
+}
+
+fn tallest(cards: &[Vec<NodeId>], gaps: &Gaps, card_h: i32) -> i32 {
     cards
         .iter()
-        .map(|c| i(c.len()) * card_h + i(c.len().saturating_sub(1)) * SLOT_GAP)
+        .zip(gaps)
+        .map(|(c, g)| height_of(c.len(), g, card_h))
         .max()
         .unwrap_or(0)
 }
 
-fn geometry(g: &ViewGraph, l: &Layered, ys: &Placement, opts: LayoutOptions) -> Geometry {
+fn geometry(
+    g: &ViewGraph,
+    l: &Layered,
+    ys: &Placement,
+    gaps: &Gaps,
+    opts: LayoutOptions,
+) -> Geometry {
     let card_h = i32::from(opts.card_h);
     // Cards only: pass slots are placed afterwards, on a row the edge already
-    // travels on wherever that row is free. One blank row between stacked
-    // cards keeps every column an odd height, so a card placed on the median
-    // of its neighbours sits exactly between two of them.
+    // travels on wherever that row is free, or on the row held open for it
+    // between two stacked cards.
     let mut geo = Geometry {
         attach: HashMap::new(),
         cards: Vec::new(),
@@ -70,16 +121,36 @@ fn geometry(g: &ViewGraph, l: &Layered, ys: &Placement, opts: LayoutOptions) -> 
             .map(|&y| y + card_h)
             .max()
             .unwrap_or(0)
-            .max(tallest(&cards(&l.columns), card_h)),
+            .max(tallest(&cards(&l.columns), gaps, card_h)),
+        taken: HashMap::new(),
+        reserved: BTreeSet::new(),
+        slot: HashMap::new(),
     };
     for (c, col) in l.columns.iter().enumerate() {
         let mut placed = 0;
+        let mut prev: Option<i32> = None;
+        let mut pending: Vec<EdgeId> = Vec::new();
         let slots = col
             .iter()
             .map(|&n| match n {
-                LNode::Pass(e) => Slot::Pass(e),
+                LNode::Pass(e) => {
+                    pending.push(e);
+                    Slot::Pass(e)
+                }
                 LNode::Real(id) => {
                     let y = ys[c][placed];
+                    if let Some(py) = prev
+                        && gaps[c][placed - 1] > SLOT_GAP
+                    {
+                        // The middle of the gap, past both margins.
+                        let row = (py + card_h + y - 1) / 2;
+                        geo.reserved.insert((c, row));
+                        for e in pending.drain(..) {
+                            geo.slot.insert((c, e), row);
+                        }
+                    }
+                    pending.clear();
+                    prev = Some(y);
                     placed += 1;
                     geo.attach.insert(n, (c, y + card_h / 2));
                     geo.cards.push(CardPos {
@@ -108,9 +179,9 @@ fn geometry(g: &ViewGraph, l: &Layered, ys: &Placement, opts: LayoutOptions) -> 
 /// still want, and is pressed into the tallest column's height so the layout
 /// never grows. `build` scores each candidate on the drawn geometry and keeps
 /// the best.
-fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placement>) {
+fn placements(g: &ViewGraph, l: &Layered, gaps: &Gaps, card_h: i32) -> (Placement, Vec<Placement>) {
     let cards = cards(&l.columns);
-    let tallest = tallest(&cards, card_h);
+    let tallest = tallest(&cards, gaps, card_h);
     let cols = cards.len();
     let mid = |y: i32| y + card_h / 2;
     // (column, index in column) per card.
@@ -132,7 +203,7 @@ fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placem
         })
         .collect();
     hops.dedup();
-    let mut ys = centred(&cards, card_h);
+    let mut ys = centred(&cards, gaps, card_h);
     let plain = ys.clone();
     let mut out = Vec::new();
     let row = |ys: &Placement, id: NodeId| {
@@ -153,11 +224,10 @@ fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placem
             })
             .collect();
         let col = &mut ys[c];
-        let mut bottom = -SLOT_GAP;
+        let mut bottom = 0;
         for (k, want) in desired.iter().enumerate() {
-            col[k] = want.map_or(bottom + SLOT_GAP, |w| {
-                (w - card_h / 2).max(bottom + SLOT_GAP)
-            });
+            let floor = if k == 0 { 0 } else { bottom + gaps[c][k - 1] };
+            col[k] = want.map_or(floor, |w| (w - card_h / 2).max(floor));
             bottom = col[k] + card_h;
         }
         let mut residual: Vec<i32> = desired
@@ -170,7 +240,7 @@ fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placem
         for y in col.iter_mut() {
             *y += shift;
         }
-        fit(col, card_h, tallest);
+        fit(col, &gaps[c], card_h, tallest);
     };
     for pass in 0..SWEEPS {
         if pass % 2 == 0 {
@@ -190,14 +260,19 @@ fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placem
 }
 
 /// Every column centred on the tallest.
-fn centred(cards: &[Vec<NodeId>], card_h: i32) -> Placement {
-    let tallest = tallest(cards, card_h);
+fn centred(cards: &[Vec<NodeId>], gaps: &Gaps, card_h: i32) -> Placement {
+    let tallest = tallest(cards, gaps, card_h);
     cards
         .iter()
-        .map(|col| {
-            let height = i(col.len()) * card_h + i(col.len().saturating_sub(1)) * SLOT_GAP;
+        .zip(gaps)
+        .map(|(col, g)| {
+            let mut y = (tallest - height_of(col.len(), g, card_h)) / 2;
             (0..col.len())
-                .map(|k| (tallest - height) / 2 + i(k) * (card_h + SLOT_GAP))
+                .map(|k| {
+                    let top = y;
+                    y += card_h + g.get(k).copied().unwrap_or(0);
+                    top
+                })
                 .collect()
         })
         .collect()
@@ -218,19 +293,22 @@ fn median(sorted: &[i32]) -> Option<i32> {
 
 /// Press a stacked column into rows `0..height`, keeping order and moving
 /// each card as little as possible.
-fn fit(col: &mut [i32], card_h: i32, height: i32) {
-    let step = card_h + SLOT_GAP;
+fn fit(col: &mut [i32], gaps: &[i32], card_h: i32, height: i32) {
     let n = col.len();
     for k in (0..n).rev() {
         let limit = if k + 1 < n {
-            col[k + 1] - step
+            col[k + 1] - card_h - gaps[k]
         } else {
             height - card_h
         };
         col[k] = col[k].min(limit);
     }
     for k in 0..n {
-        let limit = if k > 0 { col[k - 1] + step } else { 0 };
+        let limit = if k > 0 {
+            col[k - 1] + card_h + gaps[k - 1]
+        } else {
+            0
+        };
         col[k] = col[k].max(limit);
     }
 }
@@ -240,18 +318,26 @@ fn fit(col: &mut [i32], card_h: i32, height: i32) {
 /// when the edge leaves a fork for a target with one in-edge, the source's
 /// row when it leaves a card with one out-edge for a join, else the source's
 /// row. The row must be free in every pass column, otherwise the free row
-/// nearest the wanted one. A row is free in a column when no card there
-/// covers it or the row beside it, and no other pass in that column has it.
+/// nearest the wanted one, a row held open for this edge between two stacked
+/// cards before any other. A row is free in a column when no card there
+/// covers it or the row beside it, no pass of an unrelated edge (another
+/// source and another target) in that column has it, and it is not held open
+/// for other edges. Related edges may share a row: the shared run is their
+/// fork or join.
 fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
-    let blocked = |geo: &Geometry, c: usize, row: i32| {
+    let blocked = |geo: &Geometry, c: usize, row: i32, e: EdgeId, share: bool| {
+        let edge = &g.edges[e.0 as usize];
         geo.cards
             .iter()
             .filter(|k| k.col == c)
             .any(|k| row >= k.y - 1 && row <= k.y + card_h)
-            || geo
-                .attach
-                .iter()
-                .any(|(n, &(pc, py))| matches!(n, LNode::Pass(_)) && pc == c && py == row)
+            || geo.taken.get(&(c, row)).is_some_and(|v| {
+                v.iter().any(|o| {
+                    let o = &g.edges[o.0 as usize];
+                    !share || (o.from != edge.from && o.to != edge.to)
+                })
+            })
+            || (geo.reserved.contains(&(c, row)) && geo.slot.get(&(c, e)) != Some(&row))
     };
     // Forward degrees: every forward edge has one segment out of its real
     // source and one into its real target.
@@ -288,22 +374,36 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
         } else {
             src_row
         };
-        let free = |geo: &Geometry, row: i32| cols.iter().all(|&c| !blocked(geo, c, row));
-        let row = if free(geo, want) {
+        let free = |geo: &Geometry, row: i32, share: bool| {
+            cols.iter().all(|&c| !blocked(geo, c, row, e, share))
+        };
+        let row = if free(geo, want, false) {
             want
         } else {
             // Any row between the two ends adds no detour; among those (or
-            // failing that, the rest) the one nearest the wanted row. Every
-            // row past the tallest column is free, so the range suffices.
+            // failing that, the rest) a row of its own before one shared
+            // with a related edge, a row held open for this edge, then the
+            // one nearest the wanted row. Every row past the tallest column
+            // is free, so the range suffices.
             let (lo, hi) = (src_row.min(dst_row), src_row.max(dst_row));
             let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
+            let held = |r: i32| cols.iter().any(|&c| geo.slot.get(&(c, e)) == Some(&r));
             (0..=geo.cards_h + 2)
-                .filter(|&r| free(geo, r))
-                .min_by_key(|&r| (detour(r), (r - want).abs(), r))
+                .filter(|&r| free(geo, r, true))
+                .min_by_key(|&r| {
+                    (
+                        detour(r),
+                        !free(geo, r, false),
+                        !held(r),
+                        (r - want).abs(),
+                        r,
+                    )
+                })
                 .unwrap_or(want)
         };
         for &c in &cols {
             geo.attach.insert(LNode::Pass(e), (c, row));
+            geo.taken.entry((c, row)).or_default().push(e);
         }
         geo.cards_h = geo.cards_h.max(row + 1);
     }
@@ -562,13 +662,31 @@ pub(crate) fn preview(
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
 ) -> Score {
-    let plain = centred(&cards(&layered.columns), i32::from(opts.card_h));
+    let gaps = gaps(&layered.columns, false);
+    let plain = centred(&cards(&layered.columns), &gaps, i32::from(opts.card_h));
     score(
         g,
-        &build_with(g, ranked, layered, &plain, edge_colour, badges, opts),
+        &build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts),
     )
 }
 
+/// `s` no worse than `base` on either tier.
+pub(crate) fn no_worse(s: &Score, base: &Score) -> bool {
+    s.vocabulary()
+        .iter()
+        .zip(base.vocabulary())
+        .all(|(n, o)| *n <= o)
+        && s.soft() <= base.soft()
+}
+
+/// Whether the column order puts a pass slot between two stacked cards
+/// anywhere, so that `build` with `slots` differs from without.
+pub(crate) fn has_slots(columns: &[Vec<LNode>]) -> bool {
+    gaps(columns, true) != gaps(columns, false)
+}
+
+/// The best placement for this column order. With `slots`, a pass slot is
+/// held open between every pair of stacked cards the order puts one between.
 pub(crate) fn build(
     g: &ViewGraph,
     ranked: &Ranked,
@@ -576,24 +694,20 @@ pub(crate) fn build(
     edge_colour: &[Option<EdgeColour>],
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
+    slots: bool,
 ) -> (Layout, Score) {
+    let gaps = gaps(&layered.columns, slots);
     let card_h = i32::from(opts.card_h);
-    let (plain, sweeps) = placements(g, layered, card_h);
-    let mut best = build_with(g, ranked, layered, &plain, edge_colour, badges, opts);
+    let (plain, sweeps) = placements(g, layered, &gaps, card_h);
+    let mut best = build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts);
     let base = score(g, &best);
     let mut best_score = base.clone();
     let mut best_ys = plain;
     for ys in sweeps {
-        let layout = build_with(g, ranked, layered, &ys, edge_colour, badges, opts);
+        let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
         let s = score(g, &layout);
         // Never worse than the centred layout on either tier, then lowest total.
-        let no_worse = s
-            .vocabulary()
-            .iter()
-            .zip(base.vocabulary())
-            .all(|(n, o)| *n <= o)
-            && s.soft() <= base.soft();
-        if no_worse && s.total < best_score.total {
+        if no_worse(&s, &base) && s.total < best_score.total {
             best = layout;
             best_score = s;
             best_ys = ys;
@@ -603,13 +717,15 @@ pub(crate) fn build(
     // cannot be drawn: whichever track is left, its exit lands on the
     // other's corner. Shift a whole column off its neighbours' rows, up to
     // half a step, while that removes an overlap; the lowest total, then
-    // the lowest layout, wins.
+    // the lowest layout, wins. Only the columns beside the gap the
+    // overlapping edges meet in are tried: every score costs a raster.
     let half = card_h.midpoint(SLOT_GAP);
     while best_score.overlaps > 0 {
         let mut found: Option<(Placement, Layout, Score)> = None;
         let rank = |s: &Score| (s.vocabulary(), s.total, s.height);
-        for c in 0..best_ys.len() {
-            for d in (1..=half).flat_map(|d| [d, -d]) {
+        let columns = conflict_columns(g, ranked, &best, &best_score);
+        for d in (1..=half).flat_map(|d| [d, -d]) {
+            for &c in &columns {
                 if best_ys[c].iter().any(|&y| y + d < 0) {
                     continue;
                 }
@@ -617,7 +733,7 @@ pub(crate) fn build(
                 for y in &mut ys[c] {
                     *y += d;
                 }
-                let layout = build_with(g, ranked, layered, &ys, edge_colour, badges, opts);
+                let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
                 let s = score(g, &layout);
                 if s.vocabulary() < best_score.vocabulary()
                     && found.as_ref().is_none_or(|(_, _, f)| rank(&s) < rank(f))
@@ -634,18 +750,66 @@ pub(crate) fn build(
     (best, best_score)
 }
 
+/// The columns beside every gap where two or more overlapping edges have a
+/// vertical run; failing that, the columns the overlapping edges start or
+/// end in.
+fn conflict_columns(g: &ViewGraph, ranked: &Ranked, l: &Layout, s: &Score) -> BTreeSet<usize> {
+    let overlapping: Vec<usize> = s
+        .edges
+        .iter()
+        .filter(|es| es.overlaps > 0)
+        .map(|es| es.edge.0 as usize)
+        .collect();
+    let gap_at = |x: i32| {
+        l.gaps
+            .iter()
+            .position(|gp| x >= gp.x0 && x < gp.x0 + i32::from(gp.width))
+    };
+    let mut per_gap: HashMap<usize, usize> = HashMap::new();
+    for &ei in &overlapping {
+        let mut seen = BTreeSet::new();
+        for w in l.routes[ei].polyline.windows(2) {
+            if w[0].0 == w[1].0
+                && let Some(k) = gap_at(w[0].0)
+            {
+                seen.insert(k);
+            }
+        }
+        for k in seen {
+            *per_gap.entry(k).or_default() += 1;
+        }
+    }
+    let beside: BTreeSet<usize> = per_gap
+        .iter()
+        .filter(|&(_, &n)| n >= 2)
+        .flat_map(|(&k, _)| [k, k + 1])
+        .collect();
+    if !beside.is_empty() {
+        return beside;
+    }
+    overlapping
+        .iter()
+        .flat_map(|&ei| {
+            let e = &g.edges[ei];
+            [ranked.rank[e.from.0 as usize], ranked.rank[e.to.0 as usize]]
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_with(
     g: &ViewGraph,
     ranked: &Ranked,
     layered: &Layered,
     ys: &Placement,
+    gaps: &Gaps,
     edge_colour: &[Option<EdgeColour>],
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
 ) -> Layout {
     let cols = layered.columns.len();
     let card_w = i32::from(opts.card_w);
-    let geo = geometry(g, layered, ys, opts);
+    let geo = geometry(g, layered, ys, gaps, opts);
     let lane = lanes(g, ranked, geo.cards_h);
     let sp = spans(g, ranked, layered, &geo, &lane);
     let margin = if g

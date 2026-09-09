@@ -126,11 +126,23 @@ An edge that skips columns crosses each of them on one pass row, chosen
 after the cards are placed. The row it wants is its source's row, or its
 target's row when it leaves a fork for a target with a single in-edge (so
 the branch bends once, at the bus). The row must be free in every column
-the edge passes: no card covers it or the row beside it, and no other pass
-in that column has it. Otherwise the edge takes a free row between its two
-ends, nearest the wanted one, and only when there is none a row outside
-them. Longer edges pick first. A long edge therefore runs straight across
-every column it passes and bends only at its ends.
+the edge passes: no card covers it or the row beside it, and no pass of an
+unrelated edge in that column has it. Otherwise the edge takes a free row
+between its two ends, nearest the wanted one, and only when there is none a
+row outside them. Longer edges pick first. A long edge therefore runs
+straight across every column it passes and bends only at its ends.
+
+Two edges out of one card (or into one) may share a pass row when no row of
+its own is free without a detour; the shared run reads as their fork or join
+continuing across the column.
+
+Stacked cards sit one blank row apart. Where the column order puts an edge's
+pass slot between two stacked cards, the layout is also built with that gap
+widened to three rows (a margin, a pass row, a margin, so the column stays an
+odd height) and the middle row held for the edges whose slot sits there; the
+widened layout is kept when it scores lower without raising either tier.
+That is how a long edge runs between two stacked cards instead of around
+the whole stack.
 
 ## What this cannot draw
 

@@ -217,20 +217,31 @@ pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
         }
         out
     };
-    let mut best: Option<(Key, Layout)> = None;
+    let mut best: Option<(Score, Layout, Vec<Vec<order::LNode>>)> = None;
     for cols in candidates {
         layered.columns = cols;
-        let (layout, s) = route::build(g, &ranked, &layered, &edge_colour, &badges, opts);
-        let k = key(&s);
-        if best.as_ref().is_none_or(|(bk, _)| k < *bk) {
-            best = Some((k, layout));
+        let (layout, s) = route::build(g, &ranked, &layered, &edge_colour, &badges, opts, false);
+        if best.as_ref().is_none_or(|(bs, _, _)| key(&s) < key(bs)) {
+            best = Some((s, layout, layered.columns.clone()));
         }
     }
     // `candidates` always holds the first pass, so the fallback never runs.
-    best.map_or_else(
-        || route::build(g, &ranked, &layered, &edge_colour, &badges, opts).0,
-        |(_, l)| l,
-    )
+    let Some((s, layout, cols)) = best else {
+        return route::build(g, &ranked, &layered, &edge_colour, &badges, opts, false).0;
+    };
+    // The winner once more with a pass slot held open between stacked cards
+    // wherever its order puts one, kept when that lowers the total without
+    // raising either tier.
+    if !route::has_slots(&cols) {
+        return layout;
+    }
+    layered.columns = cols;
+    let (slotted, s2) = route::build(g, &ranked, &layered, &edge_colour, &badges, opts, true);
+    if route::no_worse(&s2, &s) && s2.total < s.total {
+        slotted
+    } else {
+        layout
+    }
 }
 
 fn badges_for(g: &ViewGraph, edge_colour: &[Option<EdgeColour>]) -> HashMap<NodeId, Vec<Badge>> {
