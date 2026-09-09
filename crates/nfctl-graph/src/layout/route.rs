@@ -45,6 +45,23 @@ const BACK_MARGIN: i32 = 3;
 const LANE_OUT: u32 = u32::MAX - 1;
 const LANE_IN: u32 = u32::MAX - 2;
 
+/// What every drawing of one graph shares: the graph, its ranks, the colour
+/// per edge, the badges per node and the card size.
+#[derive(Clone, Copy)]
+pub(crate) struct Ctx<'a> {
+    pub g: &'a ViewGraph,
+    pub ranked: &'a Ranked,
+    pub edge_colour: &'a [Option<EdgeColour>],
+    pub badges: &'a HashMap<NodeId, Vec<Badge>>,
+    pub opts: LayoutOptions,
+}
+
+impl Ctx<'_> {
+    fn card_h(&self) -> i32 {
+        i32::from(self.opts.card_h)
+    }
+}
+
 fn edge_id(index: usize) -> EdgeId {
     EdgeId(u32::try_from(index).unwrap_or(u32::MAX))
 }
@@ -750,28 +767,42 @@ fn collapse(pts: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
 
 /// The centred placement alone, drawn and scored: a cheap stand-in for
 /// `build` when comparing column orders, and its first candidate.
-pub(crate) fn preview(
-    g: &ViewGraph,
-    ranked: &Ranked,
-    layered: &Layered,
-    edge_colour: &[Option<EdgeColour>],
-    badges: &HashMap<NodeId, Vec<Badge>>,
-    opts: LayoutOptions,
-) -> (Layout, Score) {
+pub(crate) fn preview(ctx: &Ctx, layered: &Layered) -> (Layout, Score) {
     let gaps = gaps(&layered.columns, false);
-    let plain = centred(&cards(&layered.columns), &gaps, i32::from(opts.card_h));
-    let layout = build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts);
-    let s = score(g, &layout);
+    let plain = centred(&cards(&layered.columns), &gaps, ctx.card_h());
+    let layout = build_with(ctx, layered, &plain, &gaps);
+    let s = score(ctx.g, &layout);
     (layout, s)
 }
 
+/// What one column order is worth: the vocabulary tier, then the total,
+/// then crossings. Ties fall to whichever came first.
+pub(crate) type Key = ([usize; 5], i64, usize);
+
+pub(crate) fn order_key(s: &Score) -> Key {
+    (s.vocabulary(), s.total, s.crossings)
+}
+
 /// `s` no worse than `base` on either tier.
-pub(crate) fn no_worse(s: &Score, base: &Score) -> bool {
+fn no_worse(s: &Score, base: &Score) -> bool {
     s.vocabulary()
         .iter()
         .zip(base.vocabulary())
         .all(|(n, o)| *n <= o)
         && s.soft() <= base.soft()
+}
+
+/// The height a layout `height` rows tall may grow to for pass slots.
+pub(crate) fn slot_ceiling(height: u16) -> u16 {
+    height.saturating_add(u16::try_from(SLOT_RISE).unwrap_or(0))
+}
+
+/// The rule every placement loop accepts a candidate by: `s` lowers the
+/// incumbent's total without rising on either tier past `tiers` (the
+/// incumbent, or the layout a loop holds its tiers to) or in height past
+/// `ceiling`.
+pub(crate) fn accept(s: &Score, incumbent: &Score, tiers: &Score, ceiling: u16) -> bool {
+    no_worse(s, tiers) && s.total < incumbent.total && s.height <= ceiling
 }
 
 /// Whether the column order puts a pass slot between two stacked cards
@@ -909,24 +940,20 @@ fn interleave(cards: &[NodeId], mut region: Vec<(usize, EdgeId)>) -> Vec<LNode> 
 /// held open between every pair of stacked cards the order puts one between.
 /// `centred` is the order's `preview`, when the caller has it: the same
 /// drawing as the first candidate, so it is not drawn twice.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn build(
-    g: &ViewGraph,
-    ranked: &Ranked,
+    ctx: &Ctx,
     layered: &Layered,
-    edge_colour: &[Option<EdgeColour>],
-    badges: &HashMap<NodeId, Vec<Badge>>,
-    opts: LayoutOptions,
     slots: bool,
     centred: Option<(Layout, Score)>,
 ) -> (Layout, Score) {
+    let (g, ranked) = (ctx.g, ctx.ranked);
     let gaps = gaps(&layered.columns, slots);
-    let card_h = i32::from(opts.card_h);
+    let card_h = ctx.card_h();
     let (plain, sweeps) = placements(g, layered, &gaps, card_h, &[median], 0);
     let (mut best, base) = match centred {
         Some(drawn) if !slots => drawn,
         _ => {
-            let l = build_with(g, ranked, layered, &plain, &gaps, edge_colour, badges, opts);
+            let l = build_with(ctx, layered, &plain, &gaps);
             let s = score(g, &l);
             (l, s)
         }
@@ -934,10 +961,11 @@ pub(crate) fn build(
     let mut best_score = base.clone();
     let mut best_ys = plain;
     for ys in sweeps {
-        let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
+        let layout = build_with(ctx, layered, &ys, &gaps);
         let s = score(g, &layout);
-        // Never worse than the centred layout on either tier, then lowest total.
-        if no_worse(&s, &base) && s.total < best_score.total {
+        // Never worse than the centred layout on either tier, then lowest
+        // total, whatever the height.
+        if accept(&s, &best_score, &base, u16::MAX) {
             best = layout;
             best_score = s;
             best_ys = ys;
@@ -963,7 +991,7 @@ pub(crate) fn build(
                 for y in &mut ys[c] {
                     *y += d;
                 }
-                let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
+                let layout = build_with(ctx, layered, &ys, &gaps);
                 let s = score(g, &layout);
                 if s.vocabulary() < best_score.vocabulary()
                     && found.as_ref().is_none_or(|(_, _, f)| rank(&s) < rank(f))
@@ -1038,17 +1066,13 @@ fn conflict_columns(g: &ViewGraph, ranked: &Ranked, l: &Layout, s: &Score) -> BT
 /// geometries; every state it accepts is then drawn in proxy order, as many
 /// as the draw budget allows, and the lowest drawn total is kept when it
 /// falls without raising either tier or the height past the allowance.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn refine(
-    g: &ViewGraph,
-    ranked: &Ranked,
+    ctx: &Ctx,
     layered: &Layered,
-    edge_colour: &[Option<EdgeColour>],
-    badges: &HashMap<NodeId, Vec<Badge>>,
-    opts: LayoutOptions,
     slots: bool,
     best: (Layout, Score),
 ) -> (Layout, Score) {
+    let g = ctx.g;
     let gaps = gaps(&layered.columns, slots);
     let (mut best, mut best_score) = best;
     let columns = cards(&layered.columns);
@@ -1066,24 +1090,27 @@ pub(crate) fn refine(
         .flat_map(|(c, col)| col.iter().enumerate().map(move |(k, &id)| (id, (c, k))))
         .collect();
     let edges = g.edges.len().max(1);
-    let budget = (REFINE_DRAW_EDGES / edges).clamp(1, REFINE_DRAWS);
-    let cur = proxy(g, ranked, layered, &geometry(g, layered, &ys, &gaps, opts));
-    let mut search = Search {
+    let draws = (REFINE_DRAW_EDGES / edges).clamp(1, REFINE_DRAWS);
+    let geometries = (REFINE_PROXY_EDGES / edges).max(1);
+    // The starting placement is measured out of the same budget.
+    let cur = proxy(
         g,
-        ranked,
+        ctx.ranked,
+        layered,
+        &geometry(g, layered, &ys, &gaps, ctx.opts),
+    );
+    let mut search = Search {
+        ctx: *ctx,
         layered,
         gaps: &gaps,
-        opts,
-        left: (REFINE_PROXY_EDGES / edges).max(1) - 1,
+        left: geometries - 1,
         ys,
         cur,
         seen: Vec::new(),
     };
     // Rows the cards and pass rows reach, without the lanes.
     let reach = i32::from(best_score.height) - i32::from(best.lanes);
-    let ceiling = best_score
-        .height
-        .saturating_add(u16::try_from(SLOT_RISE).unwrap_or(0));
+    let ceiling = slot_ceiling(best_score.height);
     'search: for rise in [0, SLOT_RISE] {
         if search.sweeps(rise).is_none() {
             break;
@@ -1105,13 +1132,14 @@ pub(crate) fn refine(
             break;
         }
     }
+    // Every accepted measure is below the one before it, so the order is
+    // total: best measure first.
     let mut seen = search.seen;
     seen.sort_by_key(|(p, _)| *p);
-    seen.dedup_by_key(|(p, _)| *p);
-    for (_, ys) in seen.into_iter().take(budget) {
-        let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
+    for (_, ys) in seen.into_iter().take(draws) {
+        let layout = build_with(ctx, layered, &ys, &gaps);
         let s = score(g, &layout);
-        if no_worse(&s, &best_score) && s.total < best_score.total && s.height <= ceiling {
+        if accept(&s, &best_score, &best_score, ceiling) {
             best = layout;
             best_score = s;
         }
@@ -1122,11 +1150,9 @@ pub(crate) fn refine(
 /// The refinement's state: the placement it is at, its measure, and every
 /// placement it accepted on the way, with its measure, in order.
 struct Search<'a> {
-    g: &'a ViewGraph,
-    ranked: &'a Ranked,
+    ctx: Ctx<'a>,
     layered: &'a Layered,
     gaps: &'a Gaps,
-    opts: LayoutOptions,
     /// Geometries it may still measure.
     left: usize,
     ys: Placement,
@@ -1136,7 +1162,7 @@ struct Search<'a> {
 
 impl Search<'_> {
     fn card_h(&self) -> i32 {
-        i32::from(self.opts.card_h)
+        self.ctx.card_h()
     }
 
     /// The measure of `ys`, or `None` once the budget is spent.
@@ -1145,8 +1171,8 @@ impl Search<'_> {
             return None;
         }
         self.left -= 1;
-        let geo = geometry(self.g, self.layered, ys, self.gaps, self.opts);
-        Some(proxy(self.g, self.ranked, self.layered, &geo))
+        let geo = geometry(self.ctx.g, self.layered, ys, self.gaps, self.ctx.opts);
+        Some(proxy(self.ctx.g, self.ctx.ranked, self.layered, &geo))
     }
 
     /// Move to `ys` when it measures less than where the search is.
@@ -1165,7 +1191,7 @@ impl Search<'_> {
     fn sweeps(&mut self, rise: i32) -> Option<()> {
         let mut found: Option<(Proxy, Placement)> = None;
         for ys in placements(
-            self.g,
+            self.ctx.g,
             self.layered,
             self.gaps,
             self.card_h(),
@@ -1548,20 +1574,11 @@ fn proxy(g: &ViewGraph, ranked: &Ranked, l: &Layered, geo: &Geometry) -> Proxy {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_with(
-    g: &ViewGraph,
-    ranked: &Ranked,
-    layered: &Layered,
-    ys: &Placement,
-    gaps: &Gaps,
-    edge_colour: &[Option<EdgeColour>],
-    badges: &HashMap<NodeId, Vec<Badge>>,
-    opts: LayoutOptions,
-) -> Layout {
+fn build_with(ctx: &Ctx, layered: &Layered, ys: &Placement, gaps: &Gaps) -> Layout {
+    let (g, ranked) = (ctx.g, ctx.ranked);
     let cols = layered.columns.len();
-    let card_w = i32::from(opts.card_w);
-    let geo = geometry(g, layered, ys, gaps, opts);
+    let card_w = i32::from(ctx.opts.card_w);
+    let geo = geometry(g, layered, ys, gaps, ctx.opts);
     let lane = lanes(g, ranked, geo.cards_h);
     let sp = spans(g, ranked, layered, &geo, &lane);
     let margin = if g
@@ -1588,7 +1605,7 @@ fn build_with(
                 edge: edge_id(ei),
                 polyline,
                 head,
-                colour: edge_colour[ei],
+                colour: ctx.edge_colour[ei],
             }
         })
         .collect();
@@ -1604,7 +1621,7 @@ fn build_with(
         gaps: cx.gaps,
         routes,
         lanes,
-        badges: badges.clone(),
+        badges: ctx.badges.clone(),
         width: u16::try_from(cx.width).unwrap_or(u16::MAX),
         height: u16::try_from(geo.cards_h)
             .unwrap_or(u16::MAX)
