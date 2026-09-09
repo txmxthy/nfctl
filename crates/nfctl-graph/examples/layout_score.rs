@@ -16,7 +16,15 @@ use nfctl_graph::layout::Score;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let scores = common::scores();
+    let opts = if args.iter().any(|a| a == "--ribbon") {
+        nfctl_graph::layout::LayoutOptions {
+            bundling: nfctl_graph::layout::Bundling::Ribbon,
+            ..common::SCORE_OPTS
+        }
+    } else {
+        common::SCORE_OPTS
+    };
+    let scores = common::scores_with(opts);
     if let Some(i) = args.iter().position(|a| a == "--json") {
         let path = args.get(i + 1).expect("--json PATH");
         if let Some(dir) = std::path::Path::new(path).parent() {

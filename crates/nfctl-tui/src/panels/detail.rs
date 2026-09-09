@@ -25,6 +25,7 @@ pub struct DetailPanel {
     /// Scroll so the selected card is visible on the next draw.
     follow: bool,
     palette: Palette,
+    bundling: nfctl_graph::layout::Bundling,
 }
 
 impl DetailPanel {
@@ -38,7 +39,16 @@ impl DetailPanel {
             scroll: std::cell::Cell::new(0),
             follow: false,
             palette: Palette::default(),
+            bundling: nfctl_graph::layout::Bundling::default(),
         }
+    }
+
+    /// Draw long edges as a ribbon of adjacent rows instead of letting each
+    /// take the row that costs it least.
+    #[must_use]
+    pub fn with_bundling(mut self, bundling: nfctl_graph::layout::Bundling) -> Self {
+        self.bundling = bundling;
+        self
     }
 
     #[must_use]
@@ -166,7 +176,12 @@ impl Model for DetailPanel {
             return;
         };
         let p = &v.pipeline;
-        let cards = CardView::new(&p.spec.topology, inner.width, self.expand_shards);
+        let cards = CardView::new(
+            &p.spec.topology,
+            inner.width,
+            self.expand_shards,
+            self.bundling,
+        );
         let scroll = self.scroll_for(&cards, inner.width);
         let cards_h = cards.height();
         // The edge table sits at the bottom, at most half the panel; the cards

@@ -33,6 +33,7 @@ pub fn corpus() -> Vec<(String, String)> {
 
 /// The gallery's 220-column geometry.
 pub const SCORE_OPTS: nfctl_graph::layout::LayoutOptions = nfctl_graph::layout::LayoutOptions {
+    bundling: nfctl_graph::layout::Bundling::Spread,
     card_w: 18,
     card_h: 5,
 };
@@ -40,7 +41,14 @@ pub const SCORE_OPTS: nfctl_graph::layout::LayoutOptions = nfctl_graph::layout::
 /// Expanded-layout scores for every fixture pipeline and, when present, every
 /// corpus pipeline, keyed `fixture/<name>` and `corpus/<file>/<pipeline>`.
 pub fn scores() -> std::collections::BTreeMap<String, nfctl_graph::layout::Score> {
-    use nfctl_graph::layout::{ViewGraph, layout, score};
+    scores_with(SCORE_OPTS)
+}
+
+/// The same, at a chosen geometry.
+pub fn scores_with(
+    opts: nfctl_graph::layout::LayoutOptions,
+) -> std::collections::BTreeMap<String, nfctl_graph::layout::Score> {
+    use nfctl_graph::layout::{ViewGraph, layout, score_full};
     let mut out = std::collections::BTreeMap::new();
     let text = std::fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/fixtures/demo.yaml"),
@@ -50,7 +58,7 @@ pub fn scores() -> std::collections::BTreeMap<String, nfctl_graph::layout::Score
         let g = ViewGraph::expanded(&p.spec.topology);
         out.insert(
             format!("fixture/{}", p.key.name),
-            score(&g, &layout(&g, SCORE_OPTS)),
+            score_full(&g, &layout(&g, opts)),
         );
     }
     for (file, src) in corpus() {
@@ -58,7 +66,7 @@ pub fn scores() -> std::collections::BTreeMap<String, nfctl_graph::layout::Score
             let g = ViewGraph::expanded(&t);
             out.insert(
                 format!("corpus/{file}/{pl}"),
-                score(&g, &layout(&g, SCORE_OPTS)),
+                score_full(&g, &layout(&g, opts)),
             );
         }
     }

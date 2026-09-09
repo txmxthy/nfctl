@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 use nfctl_core::fake::{FakeCluster, FakeDaemons, Fixture};
 use nfctl_core::model::{Namespace, PipelineKey, PipelineName, PipelinePhase, Timestamp, Topology};
 use nfctl_core::service::pipeline_view;
-use nfctl_graph::layout::{LayoutOptions, ViewGraph, layout, score};
+use nfctl_graph::layout::{Bundling, LayoutOptions, ViewGraph, layout, score};
 use nfctl_graph::{Format, RenderOptions, from_mermaid, render_with, to_mermaid};
 use nfctl_tui::panels::detail::DetailPanel;
 use nfctl_tui::{AppEvent, CrossingStyle, Model, Palette, WorkerReply};
@@ -42,6 +42,7 @@ fn item_score(t: &Topology) -> nfctl_graph::layout::Score {
         &layout(
             &g,
             LayoutOptions {
+                bundling: nfctl_graph::layout::Bundling::Spread,
                 card_w: 18,
                 card_h: 5,
             },
@@ -181,8 +182,10 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
     let view = pipeline_view(&cluster, &FakeDaemons::default(), &p.key, Timestamp::now())
         .await
         .unwrap();
-    let panel = |expand: bool, palette: Palette| {
-        let mut panel = DetailPanel::new(p.key.clone()).with_palette(palette);
+    let panel = |expand: bool, palette: Palette, bundling: Bundling| {
+        let mut panel = DetailPanel::new(p.key.clone())
+            .with_palette(palette)
+            .with_bundling(bundling);
         panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(
             view.clone()
         )))));
@@ -207,7 +210,7 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
     };
     let mut frames = Vec::new();
     for expand in [false, true] {
-        let panel = panel(expand, Palette::default());
+        let panel = panel(expand, Palette::default(), Bundling::Spread);
         for w in WIDTHS {
             let label = format!(
                 "cards {w} {}",
@@ -216,15 +219,25 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
             frames.push((label, draw(&panel, expand, w)));
         }
     }
-    // The bridge crossing style, on the widest expanded frame only.
-    let bridged = panel(
-        true,
-        Palette::default().with_crossing(CrossingStyle::Bridge),
-    );
-    frames.push((
-        "cards 220 expanded · bridge".to_owned(),
-        draw(&bridged, true, 220),
-    ));
+    // The variants, on the widest expanded frame only: crossings drawn as
+    // bridges, long edges bundled into a ribbon, and both together.
+    let bridge = Palette::default().with_crossing(CrossingStyle::Bridge);
+    for (label, palette, bundling) in [
+        ("cards 220 expanded · bridge", bridge, Bundling::Spread),
+        (
+            "cards 220 expanded · ribbon",
+            Palette::default(),
+            Bundling::Ribbon,
+        ),
+        (
+            "cards 220 expanded · ribbon+bridge",
+            bridge,
+            Bundling::Ribbon,
+        ),
+    ] {
+        let variant = panel(true, palette, bundling);
+        frames.push((label.to_owned(), draw(&variant, true, 220)));
+    }
     frames
 }
 

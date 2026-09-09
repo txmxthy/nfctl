@@ -62,6 +62,10 @@ pub struct Score {
     pub mixed_cells: usize,
     /// Widest gap minus narrowest gap.
     pub gap_spread: u16,
+    /// Blank rows left between the runs that cross a column, summed over the
+    /// columns. Zero when every set of parallel runs is one solid ribbon.
+    #[serde(default)]
+    pub scatter: usize,
     pub height: u16,
     pub width: u16,
     pub total: i64,
@@ -93,7 +97,7 @@ impl std::fmt::Display for Score {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "bends>2 {:>2}  skip>4 {:>2}  back>4 {:>2}  junc>1 {:>2}  overlap {:>3}  cross {:>3}  asym {:>3}  detour {:>3}  mixed {:>3}  gap± {:>2}  {}x{}  total {:>4}",
+            "bends>2 {:>2}  skip>4 {:>2}  back>4 {:>2}  junc>1 {:>2}  overlap {:>3}  cross {:>3}  asym {:>3}  detour {:>3}  mixed {:>3}  gap± {:>2}  scatter {:>3}  {}x{}  total {:>4}",
             self.bends_over_fwd,
             self.bends_over_skip,
             self.bends_over_back,
@@ -104,6 +108,7 @@ impl std::fmt::Display for Score {
             self.detour,
             self.mixed_cells,
             self.gap_spread,
+            self.scatter,
             self.width,
             self.height,
             self.total
@@ -179,6 +184,57 @@ fn components(cells: &BTreeSet<(i32, i32)>) -> usize {
         }
     }
     n
+}
+
+/// Blank rows between the runs crossing each column: how far the parallel
+/// runs are from being one solid ribbon. Rows a card covers do not count.
+/// Reporting only, so it is not on the path the layout search runs; use
+/// [`score_full`] when the number is wanted.
+#[must_use]
+pub fn scatter(l: &Layout) -> usize {
+    let Some(card_w) = l
+        .gaps
+        .first()
+        .map(|g| g.x0 - l.col_x.first().copied().unwrap_or(0))
+    else {
+        return 0;
+    };
+    let mut total = 0;
+    for (c, &x0) in l.col_x.iter().enumerate() {
+        let x1 = x0 + card_w;
+        let mut rows: BTreeSet<i32> = BTreeSet::new();
+        for r in &l.routes {
+            for w in r.polyline.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if a.1 == b.1 && a.0.min(b.0) <= x0 && a.0.max(b.0) >= x1 {
+                    rows.insert(a.1);
+                }
+            }
+        }
+        let (Some(&lo), Some(&hi)) = (rows.iter().next(), rows.iter().next_back()) else {
+            continue;
+        };
+        for row in lo..=hi {
+            let blocked = l
+                .cards
+                .iter()
+                .any(|k| k.col == c && row >= k.y - 1 && row <= k.y + i32::from(k.h));
+            if !rows.contains(&row) && !blocked {
+                total += 1;
+            }
+        }
+    }
+    total
+}
+
+/// Score a layout of `g`, reporting metrics included. The layout search calls
+/// [`score`] instead, which leaves the reporting-only ones out.
+#[must_use]
+pub fn score_full(g: &ViewGraph, l: &Layout) -> Score {
+    Score {
+        scatter: scatter(l),
+        ..score(g, l)
+    }
 }
 
 /// Score a layout of `g`.
@@ -346,6 +402,7 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
         detour,
         mixed_cells,
         gap_spread,
+        scatter: 0,
         height: l.height,
         width: l.width,
         total,
@@ -360,6 +417,7 @@ mod tests {
     use crate::layout::{LayoutOptions, layout};
 
     const OPTS: LayoutOptions = LayoutOptions {
+        bundling: crate::layout::Bundling::Spread,
         card_w: 18,
         card_h: 5,
     };

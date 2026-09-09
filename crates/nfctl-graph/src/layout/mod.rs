@@ -12,7 +12,7 @@ mod tests;
 mod tracks;
 mod view;
 
-pub use score::{EdgeScore, Score, score};
+pub use score::{EdgeScore, Score, scatter, score, score_full};
 pub use view::{ViewEdge, ViewGraph, ViewNode};
 
 use std::collections::HashMap;
@@ -102,8 +102,22 @@ impl Layout {
     }
 }
 
+/// Where the horizontal runs of long edges sit when several cross the same
+/// columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Bundling {
+    /// Each edge takes the row that costs it the least, so runs scatter.
+    #[default]
+    Spread,
+    /// Runs crossing the same columns are pulled into one band of adjacent
+    /// rows, read like a ribbon cable.
+    Ribbon,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct LayoutOptions {
+    /// How parallel runs through the same columns are placed.
+    pub bundling: Bundling,
     pub card_w: u16,
     /// Rows per card, borders included. Odd, so there is a middle row; the
     /// last content row holds tag badges.

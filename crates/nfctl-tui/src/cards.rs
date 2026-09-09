@@ -5,7 +5,9 @@
 
 use nfctl_core::model::Topology;
 use nfctl_core::service::{PipelineView, VertexView};
-use nfctl_graph::layout::{self, EdgeColour, EdgeId, Layout, LayoutOptions, ViewGraph, ViewNode};
+use nfctl_graph::layout::{
+    self, Bundling, EdgeColour, EdgeId, Layout, LayoutOptions, ViewGraph, ViewNode,
+};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -31,7 +33,7 @@ pub struct CardView {
 }
 
 impl CardView {
-    pub fn new(t: &Topology, width: u16, expand_shards: bool) -> Self {
+    pub fn new(t: &Topology, width: u16, expand_shards: bool, bundling: Bundling) -> Self {
         let graph = if expand_shards {
             ViewGraph::expanded(t)
         } else {
@@ -57,6 +59,7 @@ impl CardView {
         let layout = layout::layout(
             &graph,
             LayoutOptions {
+                bundling,
                 card_w,
                 card_h: CARD_HEIGHT,
             },

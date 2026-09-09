@@ -8,8 +8,8 @@ use super::rank::Ranked;
 use super::score::{Score, score};
 use super::tracks::{Span, pack};
 use super::{
-    Badge, CardPos, EdgeColour, EdgeId, GapPlan, Layout, LayoutOptions, MIN_GAP, NodeId, Route,
-    Slot, Track, ViewGraph, i,
+    Badge, Bundling, CardPos, EdgeColour, EdgeId, GapPlan, Layout, LayoutOptions, MIN_GAP, NodeId,
+    Route, Slot, Track, ViewGraph, i,
 };
 
 /// Blank rows between stacked slots in a column.
@@ -251,7 +251,87 @@ fn geometry(
         geo.columns.push(slots);
     }
     pass_rows(g, l, &mut geo, card_h);
+    if opts.bundling == Bundling::Ribbon {
+        ribbon(g, l, &mut geo, card_h);
+    }
     geo
+}
+
+/// How far a long edge may be pulled off the row that costs it least, to sit
+/// against the run above it.
+const RIBBON_BUDGET: i32 = 3;
+
+/// Pull the runs that cross the same columns against each other, so long
+/// edges read like a ribbon cable instead of scattered lines. Each run moves
+/// up to sit directly under the last one placed in every column it crosses,
+/// but only while that costs it no more than `RIBBON_BUDGET` rows of detour,
+/// so nothing is dragged far from where it belongs. Rows are taken in order,
+/// so runs keep their order and none crosses another inside the ribbon.
+fn ribbon(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
+    let cols = l.columns.len();
+    if cols == 0 {
+        return;
+    }
+    let mut covered: Vec<Vec<bool>> = vec![vec![false; row_index(geo.cards_h) + 1]; cols];
+    for k in &geo.cards {
+        for r in (k.y - 1).max(0)..=(k.y + card_h) {
+            if let Some(hit) = covered[k.col].get_mut(row_index(r)) {
+                *hit = true;
+            }
+        }
+    }
+    // Every pass edge with the row it holds, nearest the top first.
+    let mut placed: Vec<(EdgeId, i32, &Vec<usize>)> = l
+        .passes
+        .iter()
+        .map(|(e, cols)| (*e, geo.at(LNode::Pass(*e)).1, cols))
+        .collect();
+    placed.sort_by_key(|(e, row, _)| (*row, *e));
+    // The rows given out so far, per column, and by which edge.
+    let mut taken: Vec<Vec<Vec<EdgeId>>> = vec![Vec::new(); cols];
+    // The lowest row used so far in each column.
+    let mut last: Vec<Option<i32>> = vec![None; cols];
+    for (e, row, pass_cols) in placed {
+        let edge = &g.edges[e.0 as usize];
+        let (_, src_row) = geo.at(LNode::Real(edge.from));
+        let (_, dst_row) = geo.at(LNode::Real(edge.to));
+        let (lo, hi) = (src_row.min(dst_row), src_row.max(dst_row));
+        let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
+        let free = |taken: &[Vec<Vec<EdgeId>>], r: i32| {
+            r >= 0
+                && pass_cols.iter().all(|&col| {
+                    let at = row_index(r);
+                    !covered[col].get(at).copied().unwrap_or(false)
+                        && taken[col].get(at).is_none_or(|v| {
+                            v.iter().all(|other| {
+                                let other = &g.edges[other.0 as usize];
+                                other.from == edge.from || other.to == edge.to
+                            })
+                        })
+                        && !geo.reserved[col].get(at).copied().unwrap_or(false)
+                })
+        };
+        // Directly under the last run placed in every column this one crosses.
+        let against = pass_cols
+            .iter()
+            .filter_map(|&col| last[col].map(|r| r + 1))
+            .max()
+            .unwrap_or(0)
+            .max(0);
+        let row = (against..row)
+            .find(|&r| free(&taken, r) && detour(r) <= detour(row) + RIBBON_BUDGET)
+            .unwrap_or(row);
+        for &col in pass_cols {
+            geo.place(LNode::Pass(e), (col, row));
+            let at = row_index(row);
+            if taken[col].len() <= at {
+                taken[col].resize(at + 1, Vec::new());
+            }
+            taken[col][at].push(e);
+            last[col] = Some(last[col].map_or(row, |r| r.max(row)));
+        }
+        geo.cards_h = geo.cards_h.max(row + 1);
+    }
 }
 
 /// Candidate placements, the plain one first: every column centred on the

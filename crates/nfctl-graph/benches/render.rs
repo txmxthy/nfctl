@@ -5,7 +5,7 @@
 mod common;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use nfctl_graph::layout::{LayoutOptions, ViewGraph, layout};
+use nfctl_graph::layout::{Bundling, LayoutOptions, ViewGraph, layout};
 use nfctl_graph::{Direction, Format, from_mermaid, render, to_mermaid};
 
 fn bench(c: &mut Criterion) {
@@ -30,6 +30,7 @@ fn bench(c: &mut Criterion) {
                     layout(
                         &g,
                         LayoutOptions {
+                            bundling: Bundling::Spread,
                             card_w: 18,
                             card_h: 5,
                         },

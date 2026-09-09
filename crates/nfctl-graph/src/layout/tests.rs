@@ -12,6 +12,7 @@ fn topo(body: &str) -> Topology {
 }
 
 const OPTS: LayoutOptions = LayoutOptions {
+    bundling: Bundling::Spread,
     card_w: 12,
     card_h: 5,
 };
