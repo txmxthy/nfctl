@@ -33,7 +33,7 @@ fn corpus_imports_and_renders() {
             for g in [ViewGraph::collapsed(&t), ViewGraph::expanded(&t)] {
                 let opts = LayoutOptions {
                     card_w: 18,
-                    card_h: 4,
+                    card_h: 5,
                 };
                 let start = std::time::Instant::now();
                 let l = layout(&g, opts);

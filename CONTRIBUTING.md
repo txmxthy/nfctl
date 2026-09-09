@@ -30,3 +30,11 @@ Annotations belong to the build they were drawn on: when the page is
 regenerated (it reloads itself), older ones move under `~stale` in the JSON
 and stop being painted, so a frame never shows marks made on a previous
 layout.
+
+## Layout quality
+
+`just layout-score` prints a score for every fixture and corpus pipeline's
+expanded layout (bends over budget, junctions, overlaps, crossings,
+asymmetry, detour); the gate in `crates/nfctl-graph/tests/layout_quality.rs`
+keeps those numbers from regressing. [docs/layout-lab.md](docs/layout-lab.md)
+defines the vocabulary the scorer measures and how to work a change through it.

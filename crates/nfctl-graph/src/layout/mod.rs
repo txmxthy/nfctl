@@ -5,11 +5,13 @@
 mod order;
 mod rank;
 mod route;
+pub mod score;
 #[cfg(test)]
 mod tests;
 mod tracks;
 mod view;
 
+pub use score::{EdgeScore, Score, score};
 pub use view::{ViewEdge, ViewGraph, ViewNode};
 
 use std::collections::HashMap;
@@ -17,11 +19,15 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct EdgeId(pub u32);
 
 /// Palette slot for an edge's tag combination; the renderer owns the hues.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct EdgeColour(pub u8);
 
 pub const PALETTE_SIZE: u8 = 6;

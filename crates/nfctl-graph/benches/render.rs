@@ -31,7 +31,7 @@ fn bench(c: &mut Criterion) {
                         &g,
                         LayoutOptions {
                             card_w: 18,
-                            card_h: 4,
+                            card_h: 5,
                         },
                     )
                 });

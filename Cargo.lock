@@ -1923,6 +1923,8 @@ dependencies = [
  "insta",
  "nfctl-core",
  "orthodag",
+ "serde",
+ "serde_json",
  "serde_yaml_ng",
  "thiserror 2.0.20",
 ]

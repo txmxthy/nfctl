@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 use nfctl_core::fake::{FakeCluster, FakeDaemons, Fixture};
 use nfctl_core::model::{Namespace, PipelineKey, PipelineName, PipelinePhase, Timestamp, Topology};
 use nfctl_core::service::pipeline_view;
-use nfctl_graph::layout::ViewGraph;
+use nfctl_graph::layout::{LayoutOptions, ViewGraph, layout, score};
 use nfctl_graph::{Format, RenderOptions, from_mermaid, render_with, to_mermaid};
 use nfctl_tui::panels::detail::DetailPanel;
 use nfctl_tui::{AppEvent, Model, WorkerReply};
@@ -32,6 +32,21 @@ const WIDTHS: [u16; 3] = [110, 160, 220];
 struct Item {
     name: String,
     topology: Topology,
+}
+
+/// The expanded layout's score at the gallery's 220-column geometry.
+fn item_score(t: &Topology) -> nfctl_graph::layout::Score {
+    let g = ViewGraph::expanded(t);
+    score(
+        &g,
+        &layout(
+            &g,
+            LayoutOptions {
+                card_w: 18,
+                card_h: 5,
+            },
+        ),
+    )
 }
 
 fn items(public: bool) -> Vec<Item> {
@@ -232,6 +247,9 @@ nav h1{font-size:13px;margin:0 4px 2px;letter-spacing:.06em;text-transform:upper
 nav p{margin:0 4px 10px;color:var(--muted);font-size:12px;line-height:1.4}
 nav a{display:block;color:var(--muted);text-decoration:none;padding:2px 6px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 nav a.on,nav a:hover{color:var(--fg);background:var(--line)}
+nav a .sc{float:right;color:var(--dim);font-size:11px}
+nav .sort{margin:0 4px 8px;color:var(--muted);font-size:12px}nav .sort button{font:inherit;background:var(--line);color:var(--fg);border:0;padding:1px 6px;border-radius:3px;cursor:pointer}nav .sort button.on{background:var(--accent);color:var(--bg)}
+.score{margin:0 0 8px;color:var(--muted);font-size:12px;white-space:pre}
 nav a:focus-visible,.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 main{flex:1;overflow:auto;padding:14px 16px}
 h2{font-size:14px;margin:0 0 10px;font-weight:600}
@@ -338,6 +356,9 @@ function exportAll(){let n=0;document.querySelectorAll('.frame').forEach(f=>{con
  setTimeout(()=>{sec.style.display='block';f.classList.add('on');fit(f);exportPng(f);if(!shown)f.classList.remove('on');if(!secShown)sec.style.display='none';},200*n++);});if(!n)alert('nothing annotated yet');}
 show(location.hash.slice(1)||items[0].dataset.id);
 window.onhashchange=()=>show(location.hash.slice(1));
+document.querySelectorAll('.sort button').forEach(b=>b.onclick=()=>{const nav=b.closest('nav');const as=[...nav.querySelectorAll('a')];
+ as.sort((x,y)=>b.dataset.sort==='score'?(+y.dataset.score)-(+x.dataset.score)||x.dataset.id.localeCompare(y.dataset.id):(+x.dataset.id.slice(1))-(+y.dataset.id.slice(1)));
+ as.forEach(a=>nav.appendChild(a));document.querySelectorAll('.sort button').forEach(x=>x.classList.toggle('on',x===b));});
 window.onresize=()=>document.querySelectorAll('.frame.on').forEach(fit);
 ";
 
@@ -360,11 +381,14 @@ async fn main() {
         "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>nfctl Layout Gallery</title><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap\"><style>{STYLE}</style><nav><h1>nfctl layout gallery</h1><p>{} pipelines from the test suite, drawn as the terminal would: the card view at 110, 160 and 220 columns with shard groups collapsed or expanded, and the box-drawing <code>dag</code> output. Tabs stick across pipelines.</p>",
         items.len()
     );
+    html.push_str("<p class=\"sort\">sort: <button data-sort=\"name\" class=\"on\">name</button> <button data-sort=\"score\">score</button></p>");
     for (i, it) in items.iter().enumerate() {
+        let sc = item_score(&it.topology);
         let _ = write!(
             html,
-            "<a href=\"#i{i}\" data-id=\"i{i}\" title=\"{0}\">{0}</a>",
-            escape(&it.name)
+            "<a href=\"#i{i}\" data-id=\"i{i}\" data-score=\"{1}\" title=\"{0}\">{0}<span class=\"sc\">{1}</span></a>",
+            escape(&it.name),
+            sc.total
         );
     }
     html.push_str("</nav><main>");
@@ -373,10 +397,11 @@ async fn main() {
         frames.extend(dag_frames(it));
         let _ = write!(
             html,
-            "<section id=\"i{i}\" style=\"display:none\"><h2>{}<small>{} vertices · {} edges</small></h2><div class=\"tabs\">",
+            "<section id=\"i{i}\" style=\"display:none\"><h2>{}<small>{} vertices · {} edges</small></h2><p class=\"score\">expanded 220: {}</p><div class=\"tabs\">",
             escape(&it.name),
             it.topology.vertices().len(),
-            it.topology.edges().len()
+            it.topology.edges().len(),
+            escape(&item_score(&it.topology).to_string())
         );
         for (label, _) in &frames {
             let _ = write!(html, "<button data-tab=\"{label}\">{label}</button>");
