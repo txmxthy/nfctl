@@ -1,7 +1,7 @@
 //! Coordinates: card and pass rows per column, gap widths from track counts,
 //! one polyline per edge, lanes for back edges.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 
 use super::order::{LNode, Layered, cards};
 use super::rank::Ranked;
@@ -24,6 +24,15 @@ const SWEEPS: usize = 4;
 const NUDGE: i32 = 2;
 /// Passes of the nudge search.
 const NUDGE_PASSES: usize = 2;
+/// Rows a column, or every column from one on, may shift either way.
+const COLUMN_SHIFT: i32 = 4;
+/// Passes of the column-shift search.
+const COLUMN_PASSES: usize = 4;
+/// Rounds of nudges then column shifts.
+const REFINE_ROUNDS: usize = 3;
+/// Geometries `refine` may measure, at most, as `REFINE_PROXY_EDGES` edges'
+/// worth: a geometry costs in proportion to the edges placed, like a raster.
+const REFINE_PROXY_EDGES: usize = 1600;
 /// Rasters `refine` may spend, at most; a raster costs in proportion to the
 /// edges drawn, and the largest corpus pipeline is near the debug-time budget
 /// before it starts, so the budget is `REFINE_DRAW_EDGES` edges' worth.
@@ -47,19 +56,50 @@ fn key(n: LNode) -> u32 {
     }
 }
 
+/// A row as an index into a per-column table; rows are never negative.
+fn row_index(row: i32) -> usize {
+    usize::try_from(row).unwrap_or(0)
+}
+
 /// Column and attach row per layered node, plus the card and slot lists.
 struct Geometry {
-    attach: HashMap<LNode, (usize, i32)>,
+    /// Column and attach row per layered node: nodes first, then an entry
+    /// per edge for its pass slots.
+    attach: Vec<Option<(usize, i32)>>,
+    nodes: usize,
     cards: Vec<CardPos>,
     columns: Vec<Vec<Slot>>,
     cards_h: i32,
-    /// Edges on each pass row given out so far, per column.
-    taken: HashMap<(usize, i32), Vec<EdgeId>>,
-    /// Rows held open between two stacked cards, per column.
-    reserved: BTreeSet<(usize, i32)>,
+    /// Rows held open between two stacked cards, per column and row.
+    reserved: Vec<Vec<bool>>,
     /// The held rows (`lo..=hi`) of the gap an edge's pass slot sits in, per
     /// column it passes.
     slot: HashMap<(usize, EdgeId), (i32, i32)>,
+}
+
+impl Geometry {
+    fn slot_of(&self, n: LNode) -> usize {
+        match n {
+            LNode::Real(id) => id.0 as usize,
+            LNode::Pass(e) => self.nodes + e.0 as usize,
+        }
+    }
+
+    /// Where a layered node attaches; every node is placed before it is asked for.
+    fn at(&self, n: LNode) -> (usize, i32) {
+        self.attach
+            .get(self.slot_of(n))
+            .copied()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    fn place(&mut self, n: LNode, at: (usize, i32)) {
+        let k = self.slot_of(n);
+        if let Some(cell) = self.attach.get_mut(k) {
+            *cell = Some(at);
+        }
+    }
 }
 
 /// Card top rows per column, in column order.
@@ -131,19 +171,20 @@ fn geometry(
     // Cards only: pass slots are placed afterwards, on a row the edge already
     // travels on wherever that row is free, or on the row held open for it
     // between two stacked cards.
+    let height = ys
+        .iter()
+        .flatten()
+        .map(|&y| y + card_h)
+        .max()
+        .unwrap_or(0)
+        .max(tallest(&cards(&l.columns), gaps, card_h));
     let mut geo = Geometry {
-        attach: HashMap::new(),
+        attach: vec![None; g.nodes.len() + g.edges.len()],
+        nodes: g.nodes.len(),
         cards: Vec::new(),
         columns: Vec::new(),
-        cards_h: ys
-            .iter()
-            .flatten()
-            .map(|&y| y + card_h)
-            .max()
-            .unwrap_or(0)
-            .max(tallest(&cards(&l.columns), gaps, card_h)),
-        taken: HashMap::new(),
-        reserved: BTreeSet::new(),
+        cards_h: height,
+        reserved: vec![vec![false; row_index(height) + 1]; l.columns.len()],
         slot: HashMap::new(),
     };
     for (c, col) in l.columns.iter().enumerate() {
@@ -166,7 +207,11 @@ fn geometry(
                         let n = i(pending.len());
                         let lo = py + card_h + 1 + (gaps[c][placed - 1] - 2 - n) / 2;
                         let hi = lo + n - 1;
-                        geo.reserved.extend((lo..=hi).map(|r| (c, r)));
+                        for r in lo..=hi {
+                            if let Some(held) = geo.reserved[c].get_mut(row_index(r)) {
+                                *held = true;
+                            }
+                        }
                         for e in pending.drain(..) {
                             geo.slot.insert((c, e), (lo, hi));
                         }
@@ -174,7 +219,7 @@ fn geometry(
                     pending.clear();
                     prev = Some(y);
                     placed += 1;
-                    geo.attach.insert(n, (c, y + card_h / 2));
+                    geo.place(n, (c, y + card_h / 2));
                     geo.cards.push(CardPos {
                         node: id,
                         col: c,
@@ -359,35 +404,6 @@ fn fit(col: &mut [i32], gaps: &[i32], card_h: i32, height: i32) {
     }
 }
 
-/// Pass columns per edge, in column order.
-fn pass_columns(l: &Layered) -> HashMap<EdgeId, Vec<usize>> {
-    let mut cols_of: HashMap<EdgeId, Vec<usize>> = HashMap::new();
-    for (c, col) in l.columns.iter().enumerate() {
-        for n in col {
-            if let LNode::Pass(e) = n {
-                cols_of.entry(*e).or_default().push(c);
-            }
-        }
-    }
-    cols_of
-}
-
-/// Forward degrees: every forward edge has one segment out of its real
-/// source and one into its real target.
-fn degrees(l: &Layered) -> (HashMap<NodeId, usize>, HashMap<NodeId, usize>) {
-    let mut out_deg: HashMap<NodeId, usize> = HashMap::new();
-    let mut in_deg: HashMap<NodeId, usize> = HashMap::new();
-    for s in &l.segments {
-        if let LNode::Real(id) = s.from {
-            *out_deg.entry(id).or_default() += 1;
-        }
-        if let LNode::Real(id) = s.to {
-            *in_deg.entry(id).or_default() += 1;
-        }
-    }
-    (out_deg, in_deg)
-}
-
 /// The row an edge's pass slots want: the target's when the edge leaves a
 /// fork for a target with one in-edge, else the source's (which is also the
 /// row of a card with one out-edge feeding a join).
@@ -409,40 +425,51 @@ fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32) -> i32 {
 /// edges. Related edges may share a row: the shared run is their fork or
 /// join.
 fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
-    let held_for = |geo: &Geometry, c: usize, row: i32, e: EdgeId| {
-        geo.slot
-            .get(&(c, e))
-            .is_some_and(|&(lo, hi)| (lo..=hi).contains(&row))
-    };
-    let blocked = |geo: &Geometry, c: usize, row: i32, e: EdgeId, share: bool| {
-        let edge = &g.edges[e.0 as usize];
-        geo.cards
+    let cols = l.columns.len();
+    // Rows a card covers, margins included, per column and row.
+    let mut covered: Vec<Vec<bool>> = vec![vec![false; row_index(geo.cards_h) + 1]; cols];
+    for k in &geo.cards {
+        for r in (k.y - 1).max(0)..=(k.y + card_h) {
+            if let Some(hit) = covered[k.col].get_mut(row_index(r)) {
+                *hit = true;
+            }
+        }
+    }
+    // Edges on each pass row given out so far, per column and row.
+    let mut taken: Vec<Vec<Vec<EdgeId>>> = vec![Vec::new(); cols];
+    for (e, cols) in &l.passes {
+        let (e, edge) = (*e, &g.edges[e.0 as usize]);
+        let (_, src_row) = geo.at(LNode::Real(edge.from));
+        let (_, dst_row) = geo.at(LNode::Real(edge.to));
+        let want = wanted(
+            l.out_deg[edge.from.0 as usize],
+            l.in_deg[edge.to.0 as usize],
+            src_row,
+            dst_row,
+        );
+        // The rows held open for this edge's slot, per pass column.
+        let held_rows: Vec<Option<(i32, i32)>> = cols
             .iter()
-            .filter(|k| k.col == c)
-            .any(|k| row >= k.y - 1 && row <= k.y + card_h)
-            || geo.taken.get(&(c, row)).is_some_and(|v| {
-                v.iter().any(|o| {
-                    let o = &g.edges[o.0 as usize];
-                    !share || (o.from != edge.from && o.to != edge.to)
+            .map(|&c| geo.slot.get(&(c, e)).copied())
+            .collect();
+        let held_in =
+            |k: usize, row: i32| held_rows[k].is_some_and(|(lo, hi)| (lo..=hi).contains(&row));
+        let blocked = |taken: &[Vec<Vec<EdgeId>>], k: usize, row: i32, share: bool| {
+            let (col, at) = (cols[k], row_index(row));
+            row < 0
+                || covered[col].get(at).copied().unwrap_or(false)
+                || taken[col].get(at).is_some_and(|v| {
+                    v.iter().any(|other| {
+                        let other = &g.edges[other.0 as usize];
+                        !share || (other.from != edge.from && other.to != edge.to)
+                    })
                 })
-            })
-            || (geo.reserved.contains(&(c, row)) && !held_for(geo, c, row, e))
-    };
-    let (out_deg, in_deg) = degrees(l);
-    let mut edges: Vec<(EdgeId, Vec<usize>)> = pass_columns(l).into_iter().collect();
-    // Longer edges first: they have the least freedom.
-    edges.sort_by_key(|(e, cols)| (std::cmp::Reverse(cols.len()), *e));
-    for (e, cols) in edges {
-        let edge = &g.edges[e.0 as usize];
-        let (_, src_row) = geo.attach[&LNode::Real(edge.from)];
-        let (_, dst_row) = geo.attach[&LNode::Real(edge.to)];
-        let outs = out_deg.get(&edge.from).copied().unwrap_or(0);
-        let ins = in_deg.get(&edge.to).copied().unwrap_or(0);
-        let want = wanted(outs, ins, src_row, dst_row);
-        let free = |geo: &Geometry, row: i32, share: bool| {
-            cols.iter().all(|&c| !blocked(geo, c, row, e, share))
+                || (geo.reserved[col].get(at).copied().unwrap_or(false) && !held_in(k, row))
         };
-        let row = if free(geo, want, false) {
+        let free = |taken: &[Vec<Vec<EdgeId>>], row: i32, share: bool| {
+            (0..cols.len()).all(|k| !blocked(taken, k, row, share))
+        };
+        let row = if free(&taken, want, false) {
             want
         } else {
             // Any row between the two ends adds no detour; among those (or
@@ -452,13 +479,13 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
             // is free, so the range suffices.
             let (lo, hi) = (src_row.min(dst_row), src_row.max(dst_row));
             let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
-            let held = |r: i32| cols.iter().any(|&c| held_for(geo, c, r, e));
+            let held = |r: i32| (0..cols.len()).any(|k| held_in(k, r));
             (0..=geo.cards_h + 2)
-                .filter(|&r| free(geo, r, true))
+                .filter(|&r| free(&taken, r, true))
                 .min_by_key(|&r| {
                     (
                         detour(r),
-                        !free(geo, r, false),
+                        !free(&taken, r, false),
                         !held(r),
                         (r - want).abs(),
                         r,
@@ -466,9 +493,13 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
                 })
                 .unwrap_or(want)
         };
-        for &c in &cols {
-            geo.attach.insert(LNode::Pass(e), (c, row));
-            geo.taken.entry((c, row)).or_default().push(e);
+        for &col in cols {
+            geo.place(LNode::Pass(e), (col, row));
+            let at = row_index(row);
+            if taken[col].len() <= at {
+                taken[col].resize(at + 1, Vec::new());
+            }
+            taken[col][at].push(e);
         }
         geo.cards_h = geo.cards_h.max(row + 1);
     }
@@ -526,8 +557,8 @@ fn spans(
         .segments
         .iter()
         .map(|s| {
-            let (_, y0) = geo.attach[&s.from];
-            let (_, y1) = geo.attach[&s.to];
+            let (_, y0) = geo.at(s.from);
+            let (_, y1) = geo.at(s.to);
             push(
                 s.col,
                 Span {
@@ -547,8 +578,8 @@ fn spans(
         if !r.back[ei] {
             continue;
         }
-        let (cu, yu) = geo.attach[&LNode::Real(e.from)];
-        let (cv, yv) = geo.attach[&LNode::Real(e.to)];
+        let (cu, yu) = geo.at(LNode::Real(e.from));
+        let (cv, yv) = geo.at(LNode::Real(e.to));
         let ly = lane[&e.from];
         let out = (cu + 1 < cols).then(|| {
             push(
@@ -653,8 +684,8 @@ fn forward_route(
     let mut pts = Vec::new();
     for (k, &si) in segs.iter().enumerate() {
         let s = &l.segments[si];
-        let (c, y0) = geo.attach[&s.from];
-        let (_, y1) = geo.attach[&s.to];
+        let (c, y0) = geo.at(s.from);
+        let (_, y1) = geo.at(s.to);
         if k == 0 {
             pts.push((cx.col_x[c] + card_w, y0));
         }
@@ -682,8 +713,8 @@ fn back_route(
     ei: usize,
 ) -> Vec<(i32, i32)> {
     let e = &g.edges[ei];
-    let (cu, yu) = geo.attach[&LNode::Real(e.from)];
-    let (cv, yv) = geo.attach[&LNode::Real(e.to)];
+    let (cu, yu) = geo.at(LNode::Real(e.from));
+    let (cv, yv) = geo.at(LNode::Real(e.to));
     let ly = lane[&e.from];
     let (out, inn) = sp.back.get(&ei).copied().unwrap_or((None, None));
     let x_out = cx.col_x[cu] + card_w;
@@ -757,7 +788,6 @@ pub(crate) fn has_slots(columns: &[Vec<LNode>]) -> bool {
 /// column takes them in that order only while it stays within `SLOT_RISE`
 /// of the tallest column; the rest go above or below, whichever is nearer.
 pub(crate) fn reslot(g: &ViewGraph, l: &Layered, layout: &Layout) -> Vec<Vec<LNode>> {
-    let (out_deg, in_deg) = degrees(l);
     let card = |id: NodeId| layout.card(id).map_or((0, 0), |k| (k.y, i32::from(k.h)));
     let row = |id: NodeId| {
         let (y, h) = card(id);
@@ -765,7 +795,7 @@ pub(crate) fn reslot(g: &ViewGraph, l: &Layered, layout: &Layout) -> Vec<Vec<LNo
     };
     // Rows the cards and pass rows reach, without the lanes.
     let cards_h = i32::from(layout.height) - i32::from(layout.lanes);
-    let cols_of = pass_columns(l);
+    let cols_of: HashMap<EdgeId, &Vec<usize>> = l.passes.iter().map(|(e, c)| (*e, c)).collect();
     // A row a card in column `c` covers, margins included.
     let covered = |c: usize, r: i32| {
         layout
@@ -815,9 +845,12 @@ pub(crate) fn reslot(g: &ViewGraph, l: &Layered, layout: &Layout) -> Vec<Vec<LNo
                 let LNode::Pass(e) = *n else { continue };
                 let edge = &g.edges[e.0 as usize];
                 let (src, dst) = (row(edge.from), row(edge.to));
-                let outs = out_deg.get(&edge.from).copied().unwrap_or(0);
-                let ins = in_deg.get(&edge.to).copied().unwrap_or(0);
-                let want = wanted(outs, ins, src, dst);
+                let want = wanted(
+                    l.out_deg[edge.from.0 as usize],
+                    l.in_deg[edge.to.0 as usize],
+                    src,
+                    dst,
+                );
                 let (lo, hi) = (src.min(dst), src.max(dst));
                 let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
                 // A gap this edge can use: its row is clear of cards in
@@ -996,12 +1029,15 @@ fn conflict_columns(g: &ViewGraph, ranked: &Ranked, l: &Layout, s: &Score) -> BT
 /// The winner once more with each fan centred on its extremes: the sweeps
 /// with the extremes' midpoint as the centre, then each card whose bus row
 /// is not the midpoint of the outermost rows its branches leave on (or join
-/// on) nudged there, as far as the cards stacked with it allow. When a nudge
-/// would push its stack past the layout's height, both run once more with
-/// the layout allowed to grow by `SLOT_RISE`. A candidate is drawn only when
-/// its geometry alone (`proxy`) promises a lower soft tier, and kept when the
-/// drawn total falls without raising either tier or the height past the
-/// allowance. Every raster costs, so the draws are budgeted.
+/// on) nudged there, as far as the cards stacked with it allow, then whole
+/// columns shifted, alone or with every column after them, while that
+/// brings rows together. The columns may grow the layout by `SLOT_RISE`
+/// from the start; when a nudge is refused by the layout's height, the
+/// sweeps and nudges run once more with that allowance too.
+/// The search steps on the geometry alone (`proxy`), within a budget of
+/// geometries; every state it accepts is then drawn in proxy order, as many
+/// as the draw budget allows, and the lowest drawn total is kept when it
+/// falls without raising either tier or the height past the allowance.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine(
     g: &ViewGraph,
@@ -1014,10 +1050,9 @@ pub(crate) fn refine(
     best: (Layout, Score),
 ) -> (Layout, Score) {
     let gaps = gaps(&layered.columns, slots);
-    let card_h = i32::from(opts.card_h);
     let (mut best, mut best_score) = best;
     let columns = cards(&layered.columns);
-    let mut best_ys: Placement = columns
+    let ys: Placement = columns
         .iter()
         .map(|col| {
             col.iter()
@@ -1030,64 +1065,154 @@ pub(crate) fn refine(
         .enumerate()
         .flat_map(|(c, col)| col.iter().enumerate().map(move |(k, &id)| (id, (c, k))))
         .collect();
-    let proxy_of =
-        |ys: &Placement| proxy(g, ranked, layered, &geometry(g, layered, ys, &gaps, opts));
-    let mut cur = proxy_of(&best_ys);
+    let edges = g.edges.len().max(1);
+    let budget = (REFINE_DRAW_EDGES / edges).clamp(1, REFINE_DRAWS);
+    let cur = proxy(g, ranked, layered, &geometry(g, layered, &ys, &gaps, opts));
+    let mut search = Search {
+        g,
+        ranked,
+        layered,
+        gaps: &gaps,
+        opts,
+        left: (REFINE_PROXY_EDGES / edges).max(1) - 1,
+        ys,
+        cur,
+        seen: Vec::new(),
+    };
     // Rows the cards and pass rows reach, without the lanes.
     let reach = i32::from(best_score.height) - i32::from(best.lanes);
     let ceiling = best_score
         .height
         .saturating_add(u16::try_from(SLOT_RISE).unwrap_or(0));
-    let mut draws = 0;
-    let budget = (REFINE_DRAW_EDGES / g.edges.len().max(1)).clamp(1, REFINE_DRAWS);
-    // Draw `ys` when its geometry promises less; keep it when the score agrees.
-    let mut try_ys = |ys: Placement,
-                      best_ys: &mut Placement,
-                      best: &mut Layout,
-                      best_score: &mut Score,
-                      cur: &mut Proxy|
-     -> bool {
-        if draws == budget {
-            return false;
-        }
-        let p = proxy_of(&ys);
-        if p.soft() >= cur.soft() {
-            return false;
-        }
-        draws += 1;
-        let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
-        let s = score(g, &layout);
-        if !(no_worse(&s, best_score) && s.total < best_score.total && s.height <= ceiling) {
-            return false;
-        }
-        *best_ys = ys;
-        *best = layout;
-        *best_score = s;
-        *cur = p;
-        true
-    };
-    for rise in [0, SLOT_RISE] {
-        for ys in placements(g, layered, &gaps, card_h, &EXTREMES, rise).1 {
-            try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur);
+    'search: for rise in [0, SLOT_RISE] {
+        if search.sweeps(rise).is_none() {
+            break;
         }
         // A nudge the height refused: what the rise is for.
         let mut held = false;
+        for _ in 0..REFINE_ROUNDS {
+            let Some(nudged) = search.nudges(&at, reach, rise, &mut held) else {
+                break 'search;
+            };
+            let Some(shifted) = search.columns(reach + SLOT_RISE) else {
+                break 'search;
+            };
+            if !nudged && !shifted {
+                break;
+            }
+        }
+        if !held {
+            break;
+        }
+    }
+    let mut seen = search.seen;
+    seen.sort_by_key(|(p, _)| *p);
+    seen.dedup_by_key(|(p, _)| *p);
+    for (_, ys) in seen.into_iter().take(budget) {
+        let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
+        let s = score(g, &layout);
+        if no_worse(&s, &best_score) && s.total < best_score.total && s.height <= ceiling {
+            best = layout;
+            best_score = s;
+        }
+    }
+    (best, best_score)
+}
+
+/// The refinement's state: the placement it is at, its measure, and every
+/// placement it accepted on the way, with its measure, in order.
+struct Search<'a> {
+    g: &'a ViewGraph,
+    ranked: &'a Ranked,
+    layered: &'a Layered,
+    gaps: &'a Gaps,
+    opts: LayoutOptions,
+    /// Geometries it may still measure.
+    left: usize,
+    ys: Placement,
+    cur: Proxy,
+    seen: Vec<(i32, Placement)>,
+}
+
+impl Search<'_> {
+    fn card_h(&self) -> i32 {
+        i32::from(self.opts.card_h)
+    }
+
+    /// The measure of `ys`, or `None` once the budget is spent.
+    fn measure(&mut self, ys: &Placement) -> Option<Proxy> {
+        if self.left == 0 {
+            return None;
+        }
+        self.left -= 1;
+        let geo = geometry(self.g, self.layered, ys, self.gaps, self.opts);
+        Some(proxy(self.g, self.ranked, self.layered, &geo))
+    }
+
+    /// Move to `ys` when it measures less than where the search is.
+    fn step(&mut self, ys: Placement, p: Proxy) -> bool {
+        if p.soft() >= self.cur.soft() {
+            return false;
+        }
+        self.seen.push((p.soft(), ys.clone()));
+        self.ys = ys;
+        self.cur = p;
+        true
+    }
+
+    /// The sweeps with the extremes' midpoint as the centre, the one that
+    /// measures least taken. `None` once the budget is spent.
+    fn sweeps(&mut self, rise: i32) -> Option<()> {
+        let mut found: Option<(Proxy, Placement)> = None;
+        for ys in placements(
+            self.g,
+            self.layered,
+            self.gaps,
+            self.card_h(),
+            &EXTREMES,
+            rise,
+        )
+        .1
+        {
+            let Some(p) = self.measure(&ys) else { break };
+            if found.as_ref().is_none_or(|(f, _)| p.soft() < f.soft()) {
+                found = Some((p, ys));
+            }
+        }
+        if let Some((p, ys)) = found {
+            self.step(ys, p);
+        }
+        (self.left > 0).then_some(())
+    }
+
+    /// Each card whose fan is off centre nudged towards its midpoint, the
+    /// cards stacked beyond it moving along, the first that measures less
+    /// taken, for `NUDGE_PASSES`. A nudge the height refuses sets `held`.
+    /// Whether one was taken; `None` once the budget is spent.
+    fn nudges(
+        &mut self,
+        at: &HashMap<NodeId, (usize, usize)>,
+        reach: i32,
+        rise: i32,
+        held: &mut bool,
+    ) -> Option<bool> {
+        let card_h = self.card_h();
+        let mut moved = false;
         for _ in 0..NUDGE_PASSES {
             let mut improved = false;
-            for (node, moves) in cur.wants.clone() {
+            for (node, moves) in self.cur.wants.clone() {
                 let (c, k) = at[&node];
                 for d in moves {
-                    // The cards stacked beyond it move along as far as needed.
-                    let mut ys = best_ys.clone();
+                    let mut ys = self.ys.clone();
                     let col = &mut ys[c];
                     col[k] += d;
                     if d > 0 {
                         for j in k + 1..col.len() {
-                            col[j] = col[j].max(col[j - 1] + card_h + gaps[c][j - 1]);
+                            col[j] = col[j].max(col[j - 1] + card_h + self.gaps[c][j - 1]);
                         }
                     } else {
                         for j in (0..k).rev() {
-                            col[j] = col[j].min(col[j + 1] - card_h - gaps[c][j]);
+                            col[j] = col[j].min(col[j + 1] - card_h - self.gaps[c][j]);
                         }
                     }
                     let bottom = col.last().map_or(0, |&y| y + card_h);
@@ -1095,11 +1220,13 @@ pub(crate) fn refine(
                         continue;
                     }
                     if bottom > reach + rise {
-                        held = true;
+                        *held = true;
                         continue;
                     }
-                    if try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur) {
+                    let p = self.measure(&ys)?;
+                    if self.step(ys, p) {
                         improved = true;
+                        moved = true;
                         break;
                     }
                 }
@@ -1108,11 +1235,111 @@ pub(crate) fn refine(
                 break;
             }
         }
-        if !held {
-            break;
+        Some(moved)
+    }
+
+    /// Whole columns shifted, within rows `0..limit`: the shifts in the
+    /// order the cached paths rate them, each measured until one measures
+    /// less, for `COLUMN_PASSES`. Whether one was taken; `None` once the
+    /// budget is spent.
+    fn columns(&mut self, limit: i32) -> Option<bool> {
+        let card_h = self.card_h();
+        let mut moved = false;
+        for _ in 0..COLUMN_PASSES {
+            let cols = self.ys.len();
+            let mut ranked_shifts: Vec<(i32, usize, usize, bool, i32)> = column_shifts(cols)
+                .enumerate()
+                .map(|(i, (k, suffix, d))| {
+                    let mut delta = vec![0; cols];
+                    let to = if suffix { cols } else { k + 1 };
+                    for x in &mut delta[k..to] {
+                        *x = d;
+                    }
+                    (self.cur.paths.measure(&delta).soft(), i, k, suffix, d)
+                })
+                .collect();
+            ranked_shifts.sort_unstable();
+            let mut improved = false;
+            'shifts: for (_, _, k, suffix, d) in ranked_shifts {
+                for t in [0, 1] {
+                    let Some(ys) = column_shift(&self.ys, k, suffix, d, t, card_h, limit) else {
+                        continue;
+                    };
+                    if ys == self.ys {
+                        continue;
+                    }
+                    let p = self.measure(&ys)?;
+                    // A slot between stacked cards was held for an edge
+                    // running straight into it; a column may not move its
+                    // card off that row.
+                    if p.paths.leaves_slot(&self.cur.paths) {
+                        continue;
+                    }
+                    if self.step(ys, p) {
+                        improved = true;
+                        moved = true;
+                        break 'shifts;
+                    }
+                }
+            }
+            if !improved {
+                break;
+            }
+        }
+        Some(moved)
+    }
+}
+
+/// The column shifts: `(k, suffix, d)` moves column `k` by `d` rows, alone
+/// or with every column after it. The last column alone is the last suffix.
+fn column_shifts(cols: usize) -> impl Iterator<Item = (usize, bool, i32)> {
+    (1..=COLUMN_SHIFT).flat_map(|d| [d, -d]).flat_map(move |d| {
+        (0..cols).flat_map(move |k| {
+            [(k, true, d), (k, false, d)]
+                .into_iter()
+                .filter(move |&(k, suffix, _)| (!suffix || k > 0) && (suffix || k + 1 < cols))
+        })
+    })
+}
+
+/// `ys` with column `k` moved `d` rows, alone or with every column after
+/// it (`suffix`), then the whole layout moved back into rows `0..limit` as
+/// little as possible plus `t` rows down, when that fits.
+fn column_shift(
+    ys: &Placement,
+    k: usize,
+    suffix: bool,
+    d: i32,
+    t: i32,
+    card_h: i32,
+    limit: i32,
+) -> Option<Placement> {
+    let cols = ys.len();
+    let mut shifted = ys.clone();
+    let to = if suffix { cols } else { k + 1 };
+    for col in &mut shifted[k..to] {
+        for y in col.iter_mut() {
+            *y += d;
         }
     }
-    (best, best_score)
+    let top = *shifted.iter().filter_map(|c| c.first()).min()?;
+    let bottom = *shifted.iter().filter_map(|c| c.last()).max()? + card_h;
+    let t = t + if top < 0 {
+        -top
+    } else if bottom > limit {
+        limit - bottom
+    } else {
+        0
+    };
+    if top + t < 0 || bottom + t > limit {
+        return None;
+    }
+    for col in &mut shifted {
+        for y in col.iter_mut() {
+            *y += t;
+        }
+    }
+    Some(shifted)
 }
 
 /// What the scorer's soft tier sees in a geometry before any raster: the
@@ -1120,11 +1347,13 @@ pub(crate) fn refine(
 /// and per card with a fan of two or more forward edges whose bus row is not
 /// the midpoint of the fan's outermost rows, the rows to move it by (both
 /// roundings when the midpoint falls between rows, at most `NUDGE` either
-/// way), in card order.
+/// way), in card order. `paths` is the geometry it was measured on, kept so
+/// a column shift can be estimated without placing the pass rows again.
 struct Proxy {
     asym: i32,
     detour: i32,
     wants: Vec<(NodeId, Vec<i32>)>,
+    paths: Paths,
 }
 
 impl Proxy {
@@ -1133,74 +1362,189 @@ impl Proxy {
     }
 }
 
-fn proxy(g: &ViewGraph, ranked: &Ranked, l: &Layered, geo: &Geometry) -> Proxy {
-    // Rows each forward edge travels, column by column: its source's, each
-    // pass row, its target's. Segments come in column order per edge.
-    let mut rows: HashMap<EdgeId, Vec<i32>> = HashMap::new();
-    for s in &l.segments {
-        let (_, y0) = geo.attach[&s.from];
-        let (_, y1) = geo.attach[&s.to];
-        rows.entry(s.edge).or_insert_with(|| vec![y0]).push(y1);
+/// `(row, column)` at an edge's source, each pass slot, and its target, the
+/// column being the one whose shift moves the point.
+type Path = Vec<(i32, usize)>;
+
+/// The rows every forward edge travels, column by column, and every card's
+/// bus row, each with the column whose shift moves it: a card's own, and
+/// for a pass row the column of the endpoint whose row it wants, since one
+/// row serves every column an edge passes.
+struct Paths {
+    /// Per forward edge: source, target, its path.
+    edges: Vec<(NodeId, NodeId, Path)>,
+    /// Per node index: `(column, bus row)`.
+    bus: Vec<Option<(usize, i32)>>,
+    /// Per forward edge (as `edges`): whether a slot between stacked cards
+    /// is held open for it.
+    slotted: Vec<bool>,
+}
+
+/// Asymmetry and detour of a geometry, and how far each fan's card is from
+/// its midpoint.
+struct Measure {
+    asym: i32,
+    detour: i32,
+    /// Twice the ideal bus row less twice the actual one, per node index.
+    off: Vec<Option<i32>>,
+}
+
+impl Measure {
+    fn soft(&self) -> i32 {
+        2 * self.asym + self.detour
     }
-    let mut outs: BTreeMap<NodeId, Vec<i32>> = BTreeMap::new();
-    let mut ins: BTreeMap<NodeId, Vec<i32>> = BTreeMap::new();
-    let mut detour = 0;
-    for (ei, e) in g.edges.iter().enumerate() {
-        if ranked.back[ei] {
-            continue;
+}
+
+impl Paths {
+    fn from_geometry(g: &ViewGraph, ranked: &Ranked, l: &Layered, geo: &Geometry) -> Self {
+        // Rows each forward edge travels, column by column: its source's, each
+        // pass row, its target's. Segments come in column order per edge.
+        let mut rows: Vec<Path> = vec![Vec::new(); g.edges.len()];
+        // The column a pass row follows, per edge, once known.
+        let mut anchor: Vec<Option<usize>> = vec![None; g.edges.len()];
+        for s in &l.segments {
+            let ei = s.edge.0 as usize;
+            let (c0, y0) = geo.at(s.from);
+            let (c1, y1) = geo.at(s.to);
+            if rows[ei].is_empty() {
+                rows[ei].push((y0, c0));
+            }
+            let col = match s.to {
+                LNode::Real(_) => c1,
+                LNode::Pass(_) => *anchor[ei].get_or_insert_with(|| {
+                    let e = &g.edges[ei];
+                    let (cs, ys) = geo.at(LNode::Real(e.from));
+                    let (ct, yt) = geo.at(LNode::Real(e.to));
+                    let outs = l.out_deg[e.from.0 as usize];
+                    let ins = l.in_deg[e.to.0 as usize];
+                    if wanted(outs, ins, ys, yt) == yt && ys != yt {
+                        ct
+                    } else {
+                        cs
+                    }
+                }),
+            };
+            rows[ei].push((y1, col));
         }
-        let Some(ys) = rows.get(&edge_id(ei)) else {
-            continue;
-        };
-        let (Some(&first), Some(&last)) = (ys.first(), ys.last()) else {
-            continue;
-        };
-        let steps: Vec<(i32, i32)> = ys.windows(2).map(|w| (w[0], w[1])).collect();
-        // The row after the first vertical run, and before the last: where
-        // the branch leaves its source's bus and joins its target's.
-        let leaves = steps
+        let mut slotted = Vec::new();
+        let edges = g
+            .edges
             .iter()
-            .find(|(a, b)| a != b)
-            .map_or(first, |&(_, b)| b);
-        let joins = steps
-            .iter()
-            .rev()
-            .find(|(a, b)| a != b)
-            .map_or(last, |&(a, _)| a);
-        detour += steps.iter().map(|(a, b)| (b - a).abs()).sum::<i32>() - (last - first).abs();
-        outs.entry(e.from).or_default().push(leaves);
-        ins.entry(e.to).or_default().push(joins);
+            .zip(rows)
+            .enumerate()
+            .filter(|&(ei, (_, ref pts))| !ranked.back[ei] && !pts.is_empty())
+            .map(|(ei, (e, pts))| {
+                slotted.push(geo.slot.keys().any(|&(_, se)| se.0 as usize == ei));
+                (e.from, e.to, pts)
+            })
+            .collect();
+        let bus = geo.attach[..geo.nodes].to_vec();
+        Paths {
+            edges,
+            bus,
+            slotted,
+        }
     }
-    let mut asym = 0;
-    let mut wants: BTreeMap<NodeId, BTreeSet<i32>> = BTreeMap::new();
-    for (node, rows) in outs.iter().chain(&ins) {
-        if rows.len() < 2 {
-            continue;
+
+    /// Whether an edge with a pass slot held open for it ran straight from
+    /// its source or into its target in `before` and no longer does here.
+    fn leaves_slot(&self, before: &Paths) -> bool {
+        let straight_end = |pts: &[(i32, usize)]| {
+            pts.len() >= 3 && (pts[0].0 == pts[1].0 || pts[pts.len() - 2].0 == pts[pts.len() - 1].0)
+        };
+        self.edges
+            .iter()
+            .zip(&before.edges)
+            .zip(&before.slotted)
+            .any(|(((_, _, now), (_, _, was)), &slotted)| {
+                slotted && straight_end(was) && !straight_end(now)
+            })
+    }
+
+    /// The measure with every column moved by `delta` rows, pass rows
+    /// following the column they are anchored to.
+    fn measure(&self, delta: &[i32]) -> Measure {
+        let at = |&(row, col): &(i32, usize)| row + delta.get(col).copied().unwrap_or(0);
+        let n = self.bus.len();
+        let mut outs: Vec<Option<(i32, i32)>> = vec![None; n];
+        let mut ins: Vec<Option<(i32, i32)>> = vec![None; n];
+        let mut fan = vec![0usize; 2 * n];
+        let mut detour = 0;
+        let extend = |slot: &mut Option<(i32, i32)>, row: i32| {
+            *slot = Some(slot.map_or((row, row), |(lo, hi)| (lo.min(row), hi.max(row))));
+        };
+        for (from, to, pts) in &self.edges {
+            let rows: Vec<i32> = pts.iter().map(at).collect();
+            let (Some(&first), Some(&last)) = (rows.first(), rows.last()) else {
+                continue;
+            };
+            // The row after the first vertical run, and before the last:
+            // where the branch leaves its source's bus and joins its target's.
+            let leaves = rows
+                .windows(2)
+                .find(|w| w[0] != w[1])
+                .map_or(first, |w| w[1]);
+            let joins = rows
+                .windows(2)
+                .rev()
+                .find(|w| w[0] != w[1])
+                .map_or(last, |w| w[0]);
+            detour +=
+                rows.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<i32>() - (last - first).abs();
+            let (f, t) = (from.0 as usize, to.0 as usize);
+            extend(&mut outs[f], leaves);
+            fan[f] += 1;
+            extend(&mut ins[t], joins);
+            fan[n + t] += 1;
         }
-        let Some(&(_, bus)) = geo.attach.get(&LNode::Real(*node)) else {
-            continue;
-        };
-        let (Some(&lo), Some(&hi)) = (rows.iter().min(), rows.iter().max()) else {
-            continue;
-        };
-        asym += ((bus - lo) - (hi - bus)).abs();
-        // Twice the ideal bus row less twice the actual one.
-        let off = lo + hi - 2 * bus;
-        let moves = wants.entry(*node).or_default();
-        for d in [off.div_euclid(2), (off + 1).div_euclid(2)] {
-            let d = d.clamp(-NUDGE, NUDGE);
-            if d != 0 {
-                moves.insert(d);
+        let mut asym = 0;
+        let mut off = vec![None; n];
+        for (k, rows) in outs.iter().chain(&ins).enumerate() {
+            let node = k % n;
+            let (Some(&(lo, hi)), true) = (rows.as_ref(), fan[k] >= 2) else {
+                continue;
+            };
+            let Some((col, bus)) = self.bus[node] else {
+                continue;
+            };
+            let bus = bus + delta.get(col).copied().unwrap_or(0);
+            asym += ((bus - lo) - (hi - bus)).abs();
+            // Twice the ideal bus row less twice the actual one; a card
+            // both fanning out and in keeps whichever is further.
+            let o = lo + hi - 2 * bus;
+            let slot: &mut Option<i32> = &mut off[node];
+            if slot.is_none_or(|cur: i32| o.abs() > cur.abs()) {
+                *slot = Some(o);
             }
         }
+        Measure { asym, detour, off }
     }
+}
+
+fn proxy(g: &ViewGraph, ranked: &Ranked, l: &Layered, geo: &Geometry) -> Proxy {
+    let paths = Paths::from_geometry(g, ranked, l, geo);
+    let m = paths.measure(&vec![0; l.columns.len()]);
+    let wants = m
+        .off
+        .iter()
+        .enumerate()
+        .filter_map(|(n, off)| {
+            let off = (*off)?;
+            let mut moves: Vec<i32> = [off.div_euclid(2), (off + 1).div_euclid(2)]
+                .into_iter()
+                .map(|d| d.clamp(-NUDGE, NUDGE))
+                .filter(|&d| d != 0)
+                .collect();
+            moves.sort_unstable();
+            moves.dedup();
+            (!moves.is_empty()).then(|| (NodeId(u32::try_from(n).unwrap_or(u32::MAX)), moves))
+        })
+        .collect();
     Proxy {
-        asym,
-        detour,
-        wants: wants
-            .into_iter()
-            .map(|(n, m)| (n, m.into_iter().collect()))
-            .collect(),
+        asym: m.asym,
+        detour: m.detour,
+        wants,
+        paths,
     }
 }
 

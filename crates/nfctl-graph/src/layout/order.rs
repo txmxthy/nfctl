@@ -23,6 +23,13 @@ pub(crate) struct Segment {
 pub(crate) struct Layered {
     pub columns: Vec<Vec<LNode>>,
     pub segments: Vec<Segment>,
+    /// Forward degrees per node index: every forward edge has one segment
+    /// out of its real source and one into its real target.
+    pub out_deg: Vec<usize>,
+    pub in_deg: Vec<usize>,
+    /// Pass columns per edge, in column order; the order the pass rows are
+    /// given out in: longer edges first, they have the least freedom.
+    pub passes: Vec<(EdgeId, Vec<usize>)>,
 }
 
 pub(crate) fn layer(g: &ViewGraph, r: &Ranked) -> Layered {
@@ -57,7 +64,32 @@ pub(crate) fn layer(g: &ViewGraph, r: &Ranked) -> Layered {
             prev = next;
         }
     }
-    Layered { columns, segments }
+    let mut out_deg = vec![0; g.nodes.len()];
+    let mut in_deg = vec![0; g.nodes.len()];
+    let mut pass_cols: Vec<Vec<usize>> = vec![Vec::new(); g.edges.len()];
+    for s in &segments {
+        if let LNode::Real(id) = s.from {
+            out_deg[id.0 as usize] += 1;
+        }
+        match s.to {
+            LNode::Real(id) => in_deg[id.0 as usize] += 1,
+            LNode::Pass(e) => pass_cols[e.0 as usize].push(s.col + 1),
+        }
+    }
+    let mut passes: Vec<(EdgeId, Vec<usize>)> = pass_cols
+        .into_iter()
+        .enumerate()
+        .filter(|(_, cols)| !cols.is_empty())
+        .map(|(ei, cols)| (EdgeId(u32::try_from(ei).unwrap_or(u32::MAX)), cols))
+        .collect();
+    passes.sort_by_key(|(e, cols)| (std::cmp::Reverse(cols.len()), *e));
+    Layered {
+        columns,
+        segments,
+        out_deg,
+        in_deg,
+        passes,
+    }
 }
 
 fn position(columns: &[Vec<LNode>], col: usize, n: LNode) -> Option<usize> {

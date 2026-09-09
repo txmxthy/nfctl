@@ -176,20 +176,28 @@ A fan-out is symmetric when the source's middle row is the midpoint of the
 outermost rows its branches leave the bus on; a fan-in likewise for the rows
 its edges join on. The placement sweeps centre a card on the median of its
 neighbours, which is the midpoint only when the neighbours are evenly spread,
-so the winning layout is refined once more: the sweeps run again with the
-midpoint of the extreme neighbour rows as the centre (both roundings, the
-grid being odd), then every card whose fan is off centre is nudged towards
-the midpoint by up to two rows, the cards stacked beyond it moving along.
-When a nudge would push its stack past the layout's height, both run once
-more with the layout allowed to grow by two rows, the pass slots' allowance.
-Each candidate's geometry is measured first, without drawing, for the
-asymmetry and detour it would have; only one that promises less is drawn,
-and it is kept only when the drawn total falls without raising either tier
-or the height past that allowance. The draws are budgeted by the edges
-drawn, so the largest pipeline spends few. Where two stacked cards want the
-same row the fans stay as they are: two cards fanning to the same pair, or
-fanned into from the same pair, each sit a card's step from the row they
-both want, whatever the gap between them.
+so the winning layout is refined once more, on its geometry alone: the sweeps
+run again with the midpoint of the extreme neighbour rows as the centre (both
+roundings, the grid being odd) and the best is taken; every card whose fan is
+off centre is nudged towards the midpoint by up to two rows, the cards stacked
+beyond it moving along; then whole columns shift, a column alone or with
+every column after it, by up to four rows either way, the layout moved back
+into view (and once more a row further down, which changes where a pass row
+may run), in the order the rows of the current geometry rate them, the first
+shift that measures better taken; nudges and column shifts alternate while
+either helps. A column may not move a card off the row a pass slot between
+stacked cards was held open for. The column shifts may grow the layout by
+two rows, the pass slots' allowance, from the start; when a nudge is refused
+by the layout's height, the sweeps and nudges run once more with that
+allowance too. Each step is measured on the geometry, for the asymmetry and
+detour it would have, never drawn; the geometries are budgeted by the edges
+placed, so the largest pipeline measures few. The states the search accepted
+are then drawn, best measure first, as many as the draw budget allows (again
+by the edges drawn), and the lowest drawn total is kept when it falls without
+raising either tier or the height past that allowance. Where two stacked
+cards want the same row the fans stay as they are: two cards fanning to the
+same pair, or fanned into from the same pair, each sit a card's step from
+the row they both want, whatever the gap between them.
 
 ## What this cannot draw
 
