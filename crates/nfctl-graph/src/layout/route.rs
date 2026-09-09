@@ -24,9 +24,11 @@ const SWEEPS: usize = 4;
 const NUDGE: i32 = 2;
 /// Passes of the nudge search.
 const NUDGE_PASSES: usize = 2;
-/// Rasters `refine` may spend; the largest corpus pipeline is near the
-/// debug-time budget before it starts.
+/// Rasters `refine` may spend, at most; a raster costs in proportion to the
+/// edges drawn, and the largest corpus pipeline is near the debug-time budget
+/// before it starts, so the budget is `REFINE_DRAW_EDGES` edges' worth.
 const REFINE_DRAWS: usize = 4;
+const REFINE_DRAW_EDGES: usize = 48;
 /// Left margin when a back edge targets column 0.
 const BACK_MARGIN: i32 = 3;
 /// Pseudo node keys so back-edge verticals never share a track with forward
@@ -197,17 +199,18 @@ fn geometry(
 /// next column; a long edge counts as its real endpoint. Within a column
 /// cards stack in order, the column then shifts as a whole by the centre of
 /// what its cards still want, and is pressed into the tallest column's
-/// height so the layout never grows. The caller scores each candidate on the
-/// drawn geometry and keeps the best.
+/// height plus `rise` so the layout never grows past that. The caller scores
+/// each candidate on the drawn geometry and keeps the best.
 fn placements(
     g: &ViewGraph,
     l: &Layered,
     gaps: &Gaps,
     card_h: i32,
     centres: &[Centre],
+    rise: i32,
 ) -> (Placement, Vec<Placement>) {
     let cards = cards(&l.columns);
-    let tallest = tallest(&cards, gaps, card_h);
+    let tallest = tallest(&cards, gaps, card_h) + rise;
     let cols = cards.len();
     let mid = |y: i32| y + card_h / 2;
     // (column, index in column) per card.
@@ -886,7 +889,7 @@ pub(crate) fn build(
 ) -> (Layout, Score) {
     let gaps = gaps(&layered.columns, slots);
     let card_h = i32::from(opts.card_h);
-    let (plain, sweeps) = placements(g, layered, &gaps, card_h, &[median]);
+    let (plain, sweeps) = placements(g, layered, &gaps, card_h, &[median], 0);
     let (mut best, base) = match centred {
         Some(drawn) if !slots => drawn,
         _ => {
@@ -993,10 +996,12 @@ fn conflict_columns(g: &ViewGraph, ranked: &Ranked, l: &Layout, s: &Score) -> BT
 /// The winner once more with each fan centred on its extremes: the sweeps
 /// with the extremes' midpoint as the centre, then each card whose bus row
 /// is not the midpoint of the outermost rows its branches leave on (or join
-/// on) nudged there, as far as the cards stacked with it allow. A candidate
-/// is drawn only when its geometry alone (`proxy`) promises a lower soft
-/// tier, and kept when the drawn total falls without raising either tier or
-/// the height. Every raster costs, so the draws are budgeted.
+/// on) nudged there, as far as the cards stacked with it allow. When a nudge
+/// would push its stack past the layout's height, both run once more with
+/// the layout allowed to grow by `SLOT_RISE`. A candidate is drawn only when
+/// its geometry alone (`proxy`) promises a lower soft tier, and kept when the
+/// drawn total falls without raising either tier or the height past the
+/// allowance. Every raster costs, so the draws are budgeted.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine(
     g: &ViewGraph,
@@ -1030,7 +1035,11 @@ pub(crate) fn refine(
     let mut cur = proxy_of(&best_ys);
     // Rows the cards and pass rows reach, without the lanes.
     let reach = i32::from(best_score.height) - i32::from(best.lanes);
+    let ceiling = best_score
+        .height
+        .saturating_add(u16::try_from(SLOT_RISE).unwrap_or(0));
     let mut draws = 0;
+    let budget = (REFINE_DRAW_EDGES / g.edges.len().max(1)).clamp(1, REFINE_DRAWS);
     // Draw `ys` when its geometry promises less; keep it when the score agrees.
     let mut try_ys = |ys: Placement,
                       best_ys: &mut Placement,
@@ -1038,7 +1047,7 @@ pub(crate) fn refine(
                       best_score: &mut Score,
                       cur: &mut Proxy|
      -> bool {
-        if draws == REFINE_DRAWS {
+        if draws == budget {
             return false;
         }
         let p = proxy_of(&ys);
@@ -1048,10 +1057,7 @@ pub(crate) fn refine(
         draws += 1;
         let layout = build_with(g, ranked, layered, &ys, &gaps, edge_colour, badges, opts);
         let s = score(g, &layout);
-        if !(no_worse(&s, best_score)
-            && s.total < best_score.total
-            && s.height <= best_score.height)
-        {
+        if !(no_worse(&s, best_score) && s.total < best_score.total && s.height <= ceiling) {
             return false;
         }
         *best_ys = ys;
@@ -1060,38 +1066,49 @@ pub(crate) fn refine(
         *cur = p;
         true
     };
-    for ys in placements(g, layered, &gaps, card_h, &EXTREMES).1 {
-        try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur);
-    }
-    for _ in 0..NUDGE_PASSES {
-        let mut improved = false;
-        for (node, moves) in cur.wants.clone() {
-            let (c, k) = at[&node];
-            for d in moves {
-                // The cards stacked beyond it move along as far as needed.
-                let mut ys = best_ys.clone();
-                let col = &mut ys[c];
-                col[k] += d;
-                if d > 0 {
-                    for j in k + 1..col.len() {
-                        col[j] = col[j].max(col[j - 1] + card_h + gaps[c][j - 1]);
+    for rise in [0, SLOT_RISE] {
+        for ys in placements(g, layered, &gaps, card_h, &EXTREMES, rise).1 {
+            try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur);
+        }
+        // A nudge the height refused: what the rise is for.
+        let mut held = false;
+        for _ in 0..NUDGE_PASSES {
+            let mut improved = false;
+            for (node, moves) in cur.wants.clone() {
+                let (c, k) = at[&node];
+                for d in moves {
+                    // The cards stacked beyond it move along as far as needed.
+                    let mut ys = best_ys.clone();
+                    let col = &mut ys[c];
+                    col[k] += d;
+                    if d > 0 {
+                        for j in k + 1..col.len() {
+                            col[j] = col[j].max(col[j - 1] + card_h + gaps[c][j - 1]);
+                        }
+                    } else {
+                        for j in (0..k).rev() {
+                            col[j] = col[j].min(col[j + 1] - card_h - gaps[c][j]);
+                        }
                     }
-                } else {
-                    for j in (0..k).rev() {
-                        col[j] = col[j].min(col[j + 1] - card_h - gaps[c][j]);
+                    let bottom = col.last().map_or(0, |&y| y + card_h);
+                    if col[0] < 0 {
+                        continue;
                     }
-                }
-                let bottom = col.last().map_or(0, |&y| y + card_h);
-                if col[0] < 0 || bottom > reach {
-                    continue;
-                }
-                if try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur) {
-                    improved = true;
-                    break;
+                    if bottom > reach + rise {
+                        held = true;
+                        continue;
+                    }
+                    if try_ys(ys, &mut best_ys, &mut best, &mut best_score, &mut cur) {
+                        improved = true;
+                        break;
+                    }
                 }
             }
+            if !improved {
+                break;
+            }
         }
-        if !improved {
+        if !held {
             break;
         }
     }

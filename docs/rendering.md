@@ -180,11 +180,16 @@ so the winning layout is refined once more: the sweeps run again with the
 midpoint of the extreme neighbour rows as the centre (both roundings, the
 grid being odd), then every card whose fan is off centre is nudged towards
 the midpoint by up to two rows, the cards stacked beyond it moving along.
+When a nudge would push its stack past the layout's height, both run once
+more with the layout allowed to grow by two rows, the pass slots' allowance.
 Each candidate's geometry is measured first, without drawing, for the
 asymmetry and detour it would have; only one that promises less is drawn,
 and it is kept only when the drawn total falls without raising either tier
-or the height. Where two stacked cards want the same row, or a stack fills
-the column, the fans stay as they are.
+or the height past that allowance. The draws are budgeted by the edges
+drawn, so the largest pipeline spends few. Where two stacked cards want the
+same row the fans stay as they are: two cards fanning to the same pair, or
+fanned into from the same pair, each sit a card's step from the row they
+both want, whatever the gap between them.
 
 ## What this cannot draw
 
