@@ -2,7 +2,9 @@
 //! and the whole command line after `--`; clap asks the completer attached to
 //! the positional for candidates. Names come from the fixture on the line, a
 //! short-lived cache, or one bounded call to the cluster. A completer has
-//! nowhere to report errors, so every failure degrades to an empty list.
+//! nowhere to report errors, so every failure degrades to an empty list — and
+//! nothing on this path may reach the terminal, not even from a child process
+//! the kube client spawns (see `Hushed`, and ADR 0008).
 
 use std::ffi::{OsStr, OsString};
 use std::hash::{Hash as _, Hasher as _};
@@ -208,7 +210,82 @@ fn write_cache(path: &PathBuf, catalog: &Catalog) {
     }
 }
 
+// ---- keeping the terminal clean -------------------------------------------
+
+/// Silences this process's stdin and stderr for as long as it is alive.
+///
+/// A kubeconfig context can authenticate through an exec credential plugin,
+/// which kube runs as a child process with our own stdin and stderr when the
+/// context does not say `interactiveMode: Never` (kube-client
+/// `client::auth::auth_exec`). The child writes straight to the terminal, so a
+/// plugin that cannot refresh silently prints its "log in again" text over the
+/// prompt line on every Tab. No error handling of ours can catch that: the
+/// bytes never pass through this process, and the lookup's timeout only stops
+/// us waiting for a child that has already written. Pointing the two inherited
+/// descriptors at `/dev/null` is the only place to intercept it, and it also
+/// stops an interactive plugin reading the terminal behind the shell's back.
+///
+/// Scoped to the completion path deliberately: a normal run must keep showing
+/// the plugin's message, because that is how the user learns to re-authenticate.
+#[cfg(unix)]
+#[derive(Debug)]
+struct Hushed {
+    stdin: Option<std::os::fd::OwnedFd>,
+    stderr: Option<std::os::fd::OwnedFd>,
+}
+
+#[cfg(unix)]
+impl Hushed {
+    fn new() -> Self {
+        use std::os::fd::AsFd as _;
+
+        let null = || {
+            std::fs::File::options()
+                .write(true)
+                .read(true)
+                .open("/dev/null")
+        };
+        let stdin = std::io::stdin()
+            .as_fd()
+            .try_clone_to_owned()
+            .ok()
+            .filter(|_| null().is_ok_and(|n| rustix::stdio::dup2_stdin(&n).is_ok()));
+        let stderr = std::io::stderr()
+            .as_fd()
+            .try_clone_to_owned()
+            .ok()
+            .filter(|_| null().is_ok_and(|n| rustix::stdio::dup2_stderr(&n).is_ok()));
+        Self { stdin, stderr }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Hushed {
+    fn drop(&mut self) {
+        if let Some(fd) = self.stdin.take() {
+            let _ = rustix::stdio::dup2_stdin(&fd);
+        }
+        if let Some(fd) = self.stderr.take() {
+            let _ = rustix::stdio::dup2_stderr(&fd);
+        }
+    }
+}
+
+/// Other platforms inherit the noise; only unix can re-point a descriptor.
+#[cfg(not(unix))]
+#[derive(Debug)]
+struct Hushed;
+
+#[cfg(not(unix))]
+impl Hushed {
+    fn new() -> Self {
+        Self
+    }
+}
+
 fn live(context: Option<String>) -> Option<Catalog> {
+    // Held for the whole lookup: the credential plugin runs somewhere inside it.
+    let _hushed = Hushed::new();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -413,6 +490,37 @@ mod tests {
             .get_help()
             .map(ToString::to_string);
         assert_eq!(help.as_deref(), Some("Running · a"));
+    }
+
+    /// Points stderr at a file, checks `Hushed` swallows writes while alive and
+    /// that the descriptor is the original one again after it drops.
+    #[cfg(unix)]
+    #[test]
+    fn hushed_restores_stderr_on_drop() {
+        use std::io::Write as _;
+        use std::os::fd::AsFd as _;
+
+        // Writing to the handle, not `eprint!`: libtest captures the macro
+        // above the descriptor, which is the layer under test.
+        let write = |s: &str| std::io::stderr().write_all(s.as_bytes()).unwrap();
+        let path = std::env::temp_dir().join(format!("nfctl-hushed-{}.log", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        let saved = std::io::stderr().as_fd().try_clone_to_owned().unwrap();
+        rustix::stdio::dup2_stderr(&file).unwrap();
+        {
+            let _hushed = Hushed::new();
+            write("during-the-lookup");
+        }
+        write("after-the-lookup");
+        rustix::stdio::dup2_stderr(&saved).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert!(
+            !text.contains("during-the-lookup"),
+            "stderr was not silenced"
+        );
+        assert!(text.contains("after-the-lookup"), "stderr was not restored");
     }
 
     #[test]

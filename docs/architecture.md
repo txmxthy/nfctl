@@ -74,4 +74,8 @@ a completer in `crates/nfctl-cli/src/complete.rs` that reads the line
 (`--context`, `-n`, `--fixture`, the pipeline already typed) and asks a catalog
 built from the fixture, a cache under `$XDG_CACHE_HOME/nfctl` younger than 30 s,
 or one cluster round-trip bounded to 1.5 s. A completer cannot report errors, so
-every failure degrades to the stale cache or an empty list.
+every failure degrades to the stale cache or an empty list. A context that
+authenticates through a credential plugin can print its own errors from a child
+process, so the lookup runs with this process's stdin and stderr pointed at
+`/dev/null`: a Tab press writes candidates or nothing (ADR 0008). Running a
+command normally still reports the plugin's message.

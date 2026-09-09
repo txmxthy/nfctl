@@ -1865,6 +1865,7 @@ dependencies = [
  "nfctl-k8s",
  "nfctl-tui",
  "predicates",
+ "rustix",
  "serde",
  "serde_json",
  "serde_yaml_ng",
