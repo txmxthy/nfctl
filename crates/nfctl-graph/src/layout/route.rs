@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use super::order::{LNode, Layered};
 use super::rank::Ranked;
+use super::score::score;
 use super::tracks::{Span, pack};
 use super::{
     Badge, CardPos, EdgeColour, EdgeId, GapPlan, Layout, LayoutOptions, MIN_GAP, NodeId, Route,
@@ -13,6 +14,9 @@ use super::{
 
 /// Blank rows between stacked slots in a column.
 const SLOT_GAP: i32 = 1;
+/// Placement sweeps tried after the centred layout: left-to-right, then
+/// right-to-left, alternating.
+const SWEEPS: usize = 4;
 /// Left margin when a back edge targets column 0.
 const BACK_MARGIN: i32 = 3;
 /// Pseudo node keys so back-edge verticals never share a track with forward
@@ -39,59 +43,198 @@ struct Geometry {
     cards_h: i32,
 }
 
-fn geometry(g: &ViewGraph, l: &Layered, opts: LayoutOptions) -> Geometry {
+/// Card top rows per column, in column order.
+type Placement = Vec<Vec<i32>>;
+
+fn cards_per_column(l: &Layered) -> Vec<Vec<NodeId>> {
+    l.columns
+        .iter()
+        .map(|col| {
+            col.iter()
+                .filter_map(|n| match n {
+                    LNode::Real(id) => Some(*id),
+                    LNode::Pass(_) => None,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn tallest(cards: &[Vec<NodeId>], card_h: i32) -> i32 {
+    cards
+        .iter()
+        .map(|c| i(c.len()) * card_h + i(c.len().saturating_sub(1)) * SLOT_GAP)
+        .max()
+        .unwrap_or(0)
+}
+
+fn geometry(g: &ViewGraph, l: &Layered, ys: &Placement, opts: LayoutOptions) -> Geometry {
     let card_h = i32::from(opts.card_h);
     // Cards only: pass slots are placed afterwards, on a row the edge already
     // travels on wherever that row is free. One blank row between stacked
-    // cards keeps every column an odd height, so centring lands on a row and
-    // a source sits exactly between the two targets it fans out to.
-    let cards_in = |col: &Vec<LNode>| col.iter().filter(|n| matches!(n, LNode::Real(_))).count();
-    let heights: Vec<i32> = l
-        .columns
-        .iter()
-        .map(|col| {
-            let n = cards_in(col);
-            i(n) * card_h + i(n.saturating_sub(1)) * SLOT_GAP
-        })
-        .collect();
-    let tallest = heights.iter().copied().max().unwrap_or(0);
+    // cards keeps every column an odd height, so a card placed on the median
+    // of its neighbours sits exactly between two of them.
     let mut geo = Geometry {
         attach: HashMap::new(),
         cards: Vec::new(),
         columns: Vec::new(),
-        cards_h: tallest,
+        cards_h: tallest(&cards_per_column(l), card_h),
     };
     for (c, col) in l.columns.iter().enumerate() {
-        let mut y = (tallest - heights[c]) / 2;
-        let mut slots = Vec::new();
         let mut placed = 0;
-        for &n in col {
-            let LNode::Real(id) = n else {
-                slots.push(match n {
-                    LNode::Pass(e) => Slot::Pass(e),
-                    LNode::Real(id) => Slot::Card(id),
-                });
-                continue;
-            };
-            if placed > 0 {
-                y += SLOT_GAP;
-            }
-            placed += 1;
-            geo.attach.insert(n, (c, y + card_h / 2));
-            geo.cards.push(CardPos {
-                node: id,
-                col: c,
-                x: 0,
-                y,
-                h: opts.card_h,
-            });
-            slots.push(Slot::Card(id));
-            y += card_h;
-        }
+        let slots = col
+            .iter()
+            .map(|&n| match n {
+                LNode::Pass(e) => Slot::Pass(e),
+                LNode::Real(id) => {
+                    let y = ys[c][placed];
+                    placed += 1;
+                    geo.attach.insert(n, (c, y + card_h / 2));
+                    geo.cards.push(CardPos {
+                        node: id,
+                        col: c,
+                        x: 0,
+                        y,
+                        h: opts.card_h,
+                    });
+                    Slot::Card(id)
+                }
+            })
+            .collect();
         geo.columns.push(slots);
     }
     pass_rows(g, l, &mut geo, card_h);
     geo
+}
+
+/// Candidate placements, the plain one first: every column centred on the
+/// tallest; then cards placed by their neighbours. A left-to-right sweep puts
+/// each card on the median row of its sources in the previous column, a
+/// right-to-left sweep on the median of its targets in the next column; a
+/// long edge counts as its real endpoint. Within a column cards stack in
+/// order, the column then shifts as a whole by the median of what its cards
+/// still want, and is pressed into the tallest column's height so the layout
+/// never grows. `build` scores each candidate on the drawn geometry and keeps
+/// the best.
+fn placements(g: &ViewGraph, l: &Layered, card_h: i32) -> (Placement, Vec<Placement>) {
+    let cards = cards_per_column(l);
+    let tallest = tallest(&cards, card_h);
+    let cols = cards.len();
+    let mid = |y: i32| y + card_h / 2;
+    // (column, index in column) per card.
+    let mut at: HashMap<NodeId, (usize, usize)> = HashMap::new();
+    for (c, col) in cards.iter().enumerate() {
+        for (k, &id) in col.iter().enumerate() {
+            at.insert(id, (c, k));
+        }
+    }
+    // Forward edges as `(from, to)`; a long edge pulls on its real endpoints.
+    let mut hops: Vec<(NodeId, NodeId)> = l
+        .segments
+        .iter()
+        .map(|s| {
+            (
+                g.edges[s.edge.0 as usize].from,
+                g.edges[s.edge.0 as usize].to,
+            )
+        })
+        .collect();
+    hops.dedup();
+    let mut ys: Placement = cards
+        .iter()
+        .map(|col| {
+            let height = i(col.len()) * card_h + i(col.len().saturating_sub(1)) * SLOT_GAP;
+            (0..col.len())
+                .map(|k| (tallest - height) / 2 + i(k) * (card_h + SLOT_GAP))
+                .collect()
+        })
+        .collect();
+    let plain = ys.clone();
+    let mut out = Vec::new();
+    let row = |ys: &Placement, id: NodeId| {
+        let (c, k) = at[&id];
+        mid(ys[c][k])
+    };
+    let sweep = |ys: &mut Placement, c: usize, down: bool| {
+        let desired: Vec<Option<i32>> = cards[c]
+            .iter()
+            .map(|&id| {
+                let mut rows: Vec<i32> = hops
+                    .iter()
+                    .filter(|&&(from, to)| if down { to == id } else { from == id })
+                    .map(|&(from, to)| row(ys, if down { from } else { to }))
+                    .collect();
+                rows.sort_unstable();
+                median(&rows)
+            })
+            .collect();
+        let col = &mut ys[c];
+        let mut bottom = -SLOT_GAP;
+        for (k, want) in desired.iter().enumerate() {
+            col[k] = want.map_or(bottom + SLOT_GAP, |w| {
+                (w - card_h / 2).max(bottom + SLOT_GAP)
+            });
+            bottom = col[k] + card_h;
+        }
+        let mut residual: Vec<i32> = desired
+            .iter()
+            .zip(col.iter())
+            .filter_map(|(w, &y)| w.map(|w| w - mid(y)))
+            .collect();
+        residual.sort_unstable();
+        let shift = median(&residual).unwrap_or((tallest - bottom) / 2);
+        for y in col.iter_mut() {
+            *y += shift;
+        }
+        fit(col, card_h, tallest);
+    };
+    for pass in 0..SWEEPS {
+        if pass % 2 == 0 {
+            for c in 0..cols {
+                sweep(&mut ys, c, true);
+            }
+        } else {
+            for c in (0..cols.saturating_sub(1)).rev() {
+                sweep(&mut ys, c, false);
+            }
+        }
+        if ys != plain && !out.contains(&ys) {
+            out.push(ys.clone());
+        }
+    }
+    (plain, out)
+}
+
+/// Middle value of a sorted list; the mean of the two middle ones when even.
+fn median(sorted: &[i32]) -> Option<i32> {
+    let n = sorted.len();
+    if n == 0 {
+        return None;
+    }
+    Some(if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        sorted[n / 2 - 1].midpoint(sorted[n / 2])
+    })
+}
+
+/// Press a stacked column into rows `0..height`, keeping order and moving
+/// each card as little as possible.
+fn fit(col: &mut [i32], card_h: i32, height: i32) {
+    let step = card_h + SLOT_GAP;
+    let n = col.len();
+    for k in (0..n).rev() {
+        let limit = if k + 1 < n {
+            col[k + 1] - step
+        } else {
+            height - card_h
+        };
+        col[k] = col[k].min(limit);
+    }
+    for k in 0..n {
+        let limit = if k > 0 { col[k - 1] + step } else { 0 };
+        col[k] = col[k].max(limit);
+    }
 }
 
 /// Give every pass slot a row. First choice: the row the edge leaves its
@@ -403,9 +546,40 @@ pub(crate) fn build(
     badges: &HashMap<NodeId, Vec<Badge>>,
     opts: LayoutOptions,
 ) -> Layout {
+    let (plain, sweeps) = placements(g, layered, i32::from(opts.card_h));
+    let mut best = build_with(g, ranked, layered, &plain, edge_colour, badges, opts);
+    let base = score(g, &best);
+    let mut best_total = base.total;
+    for ys in sweeps {
+        let layout = build_with(g, ranked, layered, &ys, edge_colour, badges, opts);
+        let s = score(g, &layout);
+        // Never worse than the centred layout on either tier, then lowest total.
+        let no_worse = s
+            .vocabulary()
+            .iter()
+            .zip(base.vocabulary())
+            .all(|(n, o)| *n <= o)
+            && s.soft() <= base.soft();
+        if no_worse && s.total < best_total {
+            best = layout;
+            best_total = s.total;
+        }
+    }
+    best
+}
+
+fn build_with(
+    g: &ViewGraph,
+    ranked: &Ranked,
+    layered: &Layered,
+    ys: &Placement,
+    edge_colour: &[Option<EdgeColour>],
+    badges: &HashMap<NodeId, Vec<Badge>>,
+    opts: LayoutOptions,
+) -> Layout {
     let cols = layered.columns.len();
     let card_w = i32::from(opts.card_w);
-    let geo = geometry(g, layered, opts);
+    let geo = geometry(g, layered, ys, opts);
     let lane = lanes(g, ranked, geo.cards_h);
     let sp = spans(g, ranked, layered, &geo, &lane);
     let margin = if g

@@ -7,4 +7,4 @@ fixture/fanout: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross 
 fixture/linear: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  mixed   0  gap±  0  64x5  total    0
 fixture/partitions: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  mixed   0  gap±  0  64x5  total    0
 fixture/scaling: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  mixed   0  gap±  0  64x5  total    0
-fixture/sharded: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   6  detour   0  mixed   9  gap±  0  110x23  total   12
+fixture/sharded: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  mixed   9  gap±  0  110x23  total    0
