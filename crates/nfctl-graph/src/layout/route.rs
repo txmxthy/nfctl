@@ -39,6 +39,14 @@ const REFINE_PROXY_EDGES: usize = 1600;
 /// before it starts, so the budget is `REFINE_DRAW_EDGES` edges' worth.
 const REFINE_DRAWS: usize = 4;
 const REFINE_DRAW_EDGES: usize = 48;
+/// Sweeps `build` may draw beyond the centred placement, on the same rule:
+/// cards of different heights put every sweep somewhere different, so a big
+/// graph would otherwise raster one for each. `SHIFT_DRAWS` is how many more
+/// column shifts are tried once one is known to clear an overlap, so a big
+/// graph settles for the first shift that works rather than the best.
+const BUILD_DRAWS: usize = 4;
+const BUILD_DRAW_EDGES: usize = 240;
+const SHIFT_DRAWS: usize = 5;
 /// Left margin when a back edge targets column 0.
 const BACK_MARGIN: i32 = 3;
 /// Pseudo node keys so back-edge verticals never share a track with forward
@@ -55,6 +63,8 @@ pub(crate) struct Ctx<'a> {
     pub edge_colour: &'a [Option<EdgeColour>],
     pub badges: &'a HashMap<NodeId, Vec<Badge>>,
     pub opts: LayoutOptions,
+    /// Card height per node.
+    pub heights: &'a [i32],
     /// Give each colour leaving a card its own track, so a bus never carries
     /// two colours. Dropped when the result would give an edge more than one
     /// junction at an end.
@@ -65,6 +75,39 @@ impl Ctx<'_> {
     fn card_h(&self) -> i32 {
         i32::from(self.opts.card_h)
     }
+}
+
+/// How tall each card is. A card gives one interior row to every colour that
+/// leaves it and one to every colour that arrives, so no two colours have to
+/// share an attach row and be drawn as one grey stem; a card with fewer edges
+/// than that stays at `base`. Only under `Ribbon`, which is what gives each
+/// colour a row of its own: nothing else would use the room.
+pub(crate) fn heights(g: &ViewGraph, r: &Ranked, opts: LayoutOptions) -> Vec<i32> {
+    let base = i32::from(opts.card_h);
+    if opts.bundling != Bundling::Ribbon {
+        return vec![base; g.nodes.len()];
+    }
+    let colour = super::colours(g);
+    let mut out: Vec<BTreeSet<Option<EdgeColour>>> = vec![BTreeSet::new(); g.nodes.len()];
+    let mut into: Vec<BTreeSet<Option<EdgeColour>>> = vec![BTreeSet::new(); g.nodes.len()];
+    for (ei, e) in g.edges.iter().enumerate() {
+        if r.back[ei] {
+            continue; // a back edge takes the middle row and its lane
+        }
+        let c = colour.get(ei).copied().flatten();
+        out[e.from.0 as usize].insert(c);
+        into[e.to.0 as usize].insert(c);
+    }
+    (0..g.nodes.len())
+        .map(|n| base.max(i(out[n].len().max(into[n].len())) + 2))
+        .collect()
+}
+
+/// The heights of one column's cards, top to bottom.
+fn col_h(h: &[i32], col: &[NodeId]) -> Vec<i32> {
+    col.iter()
+        .map(|n| h.get(n.0 as usize).copied().unwrap_or(0))
+        .collect()
 }
 
 fn edge_id(index: usize) -> EdgeId {
@@ -211,15 +254,15 @@ fn gaps(columns: &[Vec<LNode>], slots: bool) -> Gaps {
         .collect()
 }
 
-fn height_of(cards: usize, gaps: &[i32], card_h: i32) -> i32 {
-    i(cards) * card_h + gaps.iter().sum::<i32>()
+fn height_of(hs: &[i32], gaps: &[i32]) -> i32 {
+    hs.iter().sum::<i32>() + gaps.iter().sum::<i32>()
 }
 
-fn tallest(cards: &[Vec<NodeId>], gaps: &Gaps, card_h: i32) -> i32 {
+fn tallest(cards: &[Vec<NodeId>], gaps: &Gaps, h: &[i32]) -> i32 {
     cards
         .iter()
         .zip(gaps)
-        .map(|(c, g)| height_of(c.len(), g, card_h))
+        .map(|(c, g)| height_of(&col_h(h, c), g))
         .max()
         .unwrap_or(0)
 }
@@ -230,18 +273,19 @@ fn geometry(
     ys: &Placement,
     gaps: &Gaps,
     opts: LayoutOptions,
+    heights: &[i32],
 ) -> Geometry {
-    let card_h = i32::from(opts.card_h);
+    let cards_in = cards(&l.columns);
     // Cards only: pass slots are placed afterwards, on a row the edge already
     // travels on wherever that row is free, or on the row held open for it
     // between two stacked cards.
     let height = ys
         .iter()
-        .flatten()
-        .map(|&y| y + card_h)
+        .zip(&cards_in)
+        .flat_map(|(col, ids)| col.iter().zip(col_h(heights, ids)).map(|(&y, k)| y + k))
         .max()
         .unwrap_or(0)
-        .max(tallest(&cards(&l.columns), gaps, card_h));
+        .max(tallest(&cards_in, gaps, heights));
     let mut geo = Geometry {
         attach: vec![None; g.nodes.len() + g.edges.len()],
         nodes: g.nodes.len(),
@@ -255,7 +299,7 @@ fn geometry(
     };
     for (c, col) in l.columns.iter().enumerate() {
         let mut placed = 0;
-        let mut prev: Option<i32> = None;
+        let mut prev: Option<(i32, i32)> = None;
         let mut pending: Vec<EdgeId> = Vec::new();
         let slots = col
             .iter()
@@ -266,12 +310,13 @@ fn geometry(
                 }
                 LNode::Real(id) => {
                     let y = ys[c][placed];
-                    if let Some(py) = prev
+                    let card_h = heights.get(id.0 as usize).copied().unwrap_or(0);
+                    if let Some((py, ph)) = prev
                         && gaps[c][placed - 1] > SLOT_GAP
                     {
                         // The middle rows of the gap, past both margins.
                         let n = i(pending.len());
-                        let lo = py + card_h + 1 + (gaps[c][placed - 1] - 2 - n) / 2;
+                        let lo = py + ph + 1 + (gaps[c][placed - 1] - 2 - n) / 2;
                         let hi = lo + n - 1;
                         for r in lo..=hi {
                             if let Some(held) = geo.reserved[c].get_mut(row_index(r)) {
@@ -283,7 +328,7 @@ fn geometry(
                         }
                     }
                     pending.clear();
-                    prev = Some(y);
+                    prev = Some((y, card_h));
                     placed += 1;
                     geo.place(n, (c, y + card_h / 2));
                     geo.cards.push(CardPos {
@@ -291,7 +336,7 @@ fn geometry(
                         col: c,
                         x: 0,
                         y,
-                        h: opts.card_h,
+                        h: u16::try_from(card_h).unwrap_or(0),
                     });
                     Slot::Card(id)
                 }
@@ -300,11 +345,11 @@ fn geometry(
         geo.columns.push(slots);
     }
     if opts.bundling == Bundling::Ribbon {
-        own_rows(g, &mut geo, card_h);
+        own_rows(g, &mut geo);
     }
-    pass_rows(g, l, &mut geo, card_h);
+    pass_rows(g, l, &mut geo);
     if opts.bundling == Bundling::Ribbon {
-        ribbon(g, l, &mut geo, card_h);
+        ribbon(g, l, &mut geo);
     }
     geo
 }
@@ -316,10 +361,9 @@ fn geometry(
 /// symmetric, three take all of them. A card with more edges than rows keeps
 /// the single bus. Rows go to edges in the order of the cards they join, so
 /// the lines do not cross each other on the way out.
-fn own_rows(g: &ViewGraph, geo: &mut Geometry, card_h: i32) {
+fn own_rows(g: &ViewGraph, geo: &mut Geometry) {
     geo.exit = vec![None; g.edges.len()];
     geo.entry = vec![None; g.edges.len()];
-    let rows = card_h - 2;
     let colour = super::colours(g);
     let card_at = |geo: &Geometry, n: NodeId| geo.at(LNode::Real(n));
     // Edges at each card, as (other end, edge), source side then target side.
@@ -339,12 +383,16 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry, card_h: i32) {
     // symmetric, three all of them. Past that the rows are shared out in
     // order, so only the edges on a shared row have a shared stub instead of
     // all of them.
-    let spread = |n: usize| -> Vec<i32> {
+    let spread = |n: usize, rows: i32| -> Vec<i32> {
         match (n, rows) {
             (0, _) => Vec::new(),
             (1, _) => vec![rows / 2 + 1],
             (2, r) if r >= 3 => vec![1, r],
-            (k, r) if i(k) <= r => (1..=i(k)).collect(),
+            // Centred, so the fan stays symmetric about the card's middle.
+            (k, r) if i(k) <= r => {
+                let top = 1 + (r - i(k)) / 2;
+                (top..top + i(k)).collect()
+            }
             // More edges than rows: spread them evenly over the rows, so the
             // pair that has to share sits in the middle and the outer rows
             // stay one edge each.
@@ -379,18 +427,18 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry, card_h: i32) {
             rows.iter().sum::<i32>() * 2 / i(rows.len().max(1))
         };
         groups.sort_by_key(|(_, members)| mid(members));
-        let offsets = spread(groups.len());
-        if offsets.is_empty() {
-            return;
-        }
-        let Some(top) = geo
+        let Some((top, rows)) = geo
             .cards
             .iter()
             .find(|k| k.node.0 as usize == node)
-            .map(|k| k.y)
+            .map(|k| (k.y, i32::from(k.h) - 2))
         else {
             return;
         };
+        let offsets = spread(groups.len(), rows);
+        if offsets.is_empty() {
+            return;
+        }
         for ((_, members), offset) in groups.iter().zip(&offsets) {
             for e in members {
                 let cell = if exit {
@@ -420,14 +468,14 @@ const RIBBON_BUDGET: i32 = 3;
 /// but only while that costs it no more than `RIBBON_BUDGET` rows of detour,
 /// so nothing is dragged far from where it belongs. Rows are taken in order,
 /// so runs keep their order and none crosses another inside the ribbon.
-fn ribbon(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
+fn ribbon(g: &ViewGraph, l: &Layered, geo: &mut Geometry) {
     let cols = l.columns.len();
     if cols == 0 {
         return;
     }
     let mut covered: Vec<Vec<bool>> = vec![vec![false; row_index(geo.cards_h) + 1]; cols];
     for k in &geo.cards {
-        for r in (k.y - 1).max(0)..=(k.y + card_h) {
+        for r in (k.y - 1).max(0)..=(k.y + i32::from(k.h)) {
             if let Some(hit) = covered[k.col].get_mut(row_index(r)) {
                 *hit = true;
             }
@@ -514,14 +562,15 @@ fn placements(
     g: &ViewGraph,
     l: &Layered,
     gaps: &Gaps,
-    card_h: i32,
+    heights: &[i32],
     centres: &[Centre],
     rise: i32,
 ) -> (Placement, Vec<Placement>) {
     let cards = cards(&l.columns);
-    let tallest = tallest(&cards, gaps, card_h) + rise;
+    let tallest = tallest(&cards, gaps, heights) + rise;
     let cols = cards.len();
-    let mid = |y: i32| y + card_h / 2;
+    let hs: Vec<Vec<i32>> = cards.iter().map(|c| col_h(heights, c)).collect();
+    let mid = |y: i32, k: i32| y + k / 2;
     // (column, index in column) per card.
     let mut at: HashMap<NodeId, (usize, usize)> = HashMap::new();
     for (c, col) in cards.iter().enumerate() {
@@ -541,11 +590,11 @@ fn placements(
         })
         .collect();
     hops.dedup();
-    let plain = centred(&cards, gaps, card_h);
+    let plain = centred(&cards, gaps, heights);
     let mut out = Vec::new();
     let row = |ys: &Placement, id: NodeId| {
         let (c, k) = at[&id];
-        mid(ys[c][k])
+        mid(ys[c][k], hs[c][k])
     };
     let sweep = |ys: &mut Placement, c: usize, down: bool, centre: Centre| {
         let desired: Vec<Option<i32>> = cards[c]
@@ -564,20 +613,21 @@ fn placements(
         let mut bottom = 0;
         for (k, want) in desired.iter().enumerate() {
             let floor = if k == 0 { 0 } else { bottom + gaps[c][k - 1] };
-            col[k] = want.map_or(floor, |w| (w - card_h / 2).max(floor));
-            bottom = col[k] + card_h;
+            col[k] = want.map_or(floor, |w| (w - hs[c][k] / 2).max(floor));
+            bottom = col[k] + hs[c][k];
         }
         let mut residual: Vec<i32> = desired
             .iter()
             .zip(col.iter())
-            .filter_map(|(w, &y)| w.map(|w| w - mid(y)))
+            .zip(&hs[c])
+            .filter_map(|((w, &y), &k)| w.map(|w| w - mid(y, k)))
             .collect();
         residual.sort_unstable();
         let shift = centre(&residual).unwrap_or((tallest - bottom) / 2);
         for y in col.iter_mut() {
             *y += shift;
         }
-        fit(col, &gaps[c], card_h, tallest);
+        fit(col, &gaps[c], &hs[c], tallest);
     };
     for &centre in centres {
         let mut ys = plain.clone();
@@ -615,15 +665,17 @@ fn extremes(sorted: &[i32], up: bool) -> Option<i32> {
 const EXTREMES: [Centre; 2] = [|s| extremes(s, false), |s| extremes(s, true)];
 
 /// Every column centred on the tallest.
-fn centred(cards: &[Vec<NodeId>], gaps: &Gaps, card_h: i32) -> Placement {
-    let tallest = tallest(cards, gaps, card_h);
+fn centred(cards: &[Vec<NodeId>], gaps: &Gaps, h: &[i32]) -> Placement {
+    let tallest = tallest(cards, gaps, h);
     cards
         .iter()
         .zip(gaps)
         .map(|(col, g)| {
-            let mut y = (tallest - height_of(col.len(), g, card_h)) / 2;
-            (0..col.len())
-                .map(|k| {
+            let hs = col_h(h, col);
+            let mut y = (tallest - height_of(&hs, g)) / 2;
+            hs.iter()
+                .enumerate()
+                .map(|(k, &card_h)| {
                     let top = y;
                     y += card_h + g.get(k).copied().unwrap_or(0);
                     top
@@ -648,19 +700,19 @@ fn median(sorted: &[i32]) -> Option<i32> {
 
 /// Press a stacked column into rows `0..height`, keeping order and moving
 /// each card as little as possible.
-fn fit(col: &mut [i32], gaps: &[i32], card_h: i32, height: i32) {
+fn fit(col: &mut [i32], gaps: &[i32], hs: &[i32], height: i32) {
     let n = col.len();
     for k in (0..n).rev() {
         let limit = if k + 1 < n {
-            col[k + 1] - card_h - gaps[k]
+            col[k + 1] - hs[k] - gaps[k]
         } else {
-            height - card_h
+            height - hs[k]
         };
         col[k] = col[k].min(limit);
     }
     for k in 0..n {
         let limit = if k > 0 {
-            col[k - 1] + card_h + gaps[k - 1]
+            col[k - 1] + hs[k - 1] + gaps[k - 1]
         } else {
             0
         };
@@ -739,7 +791,7 @@ fn merged_rep(g: &ViewGraph, on: bool) -> Vec<EdgeId> {
 /// another target) in that column has it, and it is not held open for other
 /// edges. Related edges may share a row: the shared run is their fork or
 /// join.
-fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
+fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry) {
     let cols = l.columns.len();
     let merge = if geo.exit.is_empty() {
         vec![None; g.edges.len()]
@@ -753,7 +805,7 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
     // Rows a card covers, margins included, per column and row.
     let mut covered: Vec<Vec<bool>> = vec![vec![false; row_index(geo.cards_h) + 1]; cols];
     for k in &geo.cards {
-        for r in (k.y - 1).max(0)..=(k.y + card_h) {
+        for r in (k.y - 1).max(0)..=(k.y + i32::from(k.h)) {
             if let Some(hit) = covered[k.col].get_mut(row_index(r)) {
                 *hit = true;
             }
@@ -1122,7 +1174,7 @@ fn collapse(pts: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
 /// `build` when comparing column orders, and its first candidate.
 pub(crate) fn preview(ctx: &Ctx, layered: &Layered) -> (Layout, Score) {
     let gaps = gaps(&layered.columns, false);
-    let plain = centred(&cards(&layered.columns), &gaps, ctx.card_h());
+    let plain = centred(&cards(&layered.columns), &gaps, ctx.heights);
     let layout = build_with(ctx, layered, &plain, &gaps);
     let s = score(ctx.g, &layout);
     (layout, s)
@@ -1314,9 +1366,10 @@ pub(crate) fn build(
     let (g, ranked) = (ctx.g, ctx.ranked);
     let gaps = gaps(&layered.columns, slots);
     let card_h = ctx.card_h();
-    let (plain, sweeps) = placements(g, layered, &gaps, card_h, &[median], 0);
+    let (plain, sweeps) = placements(g, layered, &gaps, ctx.heights, &[median], 0);
+    let draws = (BUILD_DRAW_EDGES / g.edges.len().max(1)).clamp(1, BUILD_DRAWS);
     let (mut best, base) = match centred {
-        Some(drawn) if !slots => drawn,
+        Some(built) if !slots => built,
         _ => {
             let l = build_with(ctx, layered, &plain, &gaps);
             let s = score(g, &l);
@@ -1325,7 +1378,7 @@ pub(crate) fn build(
     };
     let mut best_score = base.clone();
     let mut best_ys = plain;
-    for ys in sweeps {
+    for ys in sweeps.into_iter().take(draws) {
         let layout = build_with(ctx, layered, &ys, &gaps);
         let s = score(g, &layout);
         // Never worse than the centred layout on either tier, then lowest
@@ -1343,11 +1396,12 @@ pub(crate) fn build(
     // the lowest layout, wins. Only the columns beside the gap the
     // overlapping edges meet in are tried: every score costs a raster.
     let half = card_h.midpoint(SLOT_GAP);
+    let mut shifts = (SHIFT_DRAWS * REFINE_DRAW_EDGES / g.edges.len().max(1)).max(1);
     while best_score.overlaps > 0 {
         let mut found: Option<(Placement, Layout, Score)> = None;
         let rank = |s: &Score| (s.vocabulary(), s.total, s.height);
         let columns = conflict_columns(g, ranked, &best, &best_score);
-        for d in (1..=half).flat_map(|d| [d, -d]) {
+        'shift: for d in (1..=half).flat_map(|d| [d, -d]) {
             for &c in &columns {
                 if best_ys[c].iter().any(|&y| y + d < 0) {
                     continue;
@@ -1362,6 +1416,10 @@ pub(crate) fn build(
                     && found.as_ref().is_none_or(|(_, _, f)| rank(&s) < rank(f))
                 {
                     found = Some((ys, layout, s));
+                }
+                shifts = shifts.saturating_sub(1);
+                if found.is_some() && shifts == 0 {
+                    break 'shift;
                 }
             }
         }
@@ -1462,7 +1520,7 @@ pub(crate) fn refine(
         g,
         ctx.ranked,
         layered,
-        &geometry(g, layered, &ys, &gaps, ctx.opts),
+        &geometry(g, layered, &ys, &gaps, ctx.opts, ctx.heights),
     );
     let mut search = Search {
         ctx: *ctx,
@@ -1472,6 +1530,10 @@ pub(crate) fn refine(
         ys,
         cur,
         seen: Vec::new(),
+        hs: cards(&layered.columns)
+            .iter()
+            .map(|col| col_h(ctx.heights, col))
+            .collect(),
     };
     // Rows the cards and pass rows reach, without the lanes.
     let reach = i32::from(best_score.height) - i32::from(best.lanes);
@@ -1523,20 +1585,25 @@ struct Search<'a> {
     ys: Placement,
     cur: Proxy,
     seen: Vec<(i32, Placement)>,
+    /// Card heights per column, top to bottom.
+    hs: Vec<Vec<i32>>,
 }
 
 impl Search<'_> {
-    fn card_h(&self) -> i32 {
-        self.ctx.card_h()
-    }
-
     /// The measure of `ys`, or `None` once the budget is spent.
     fn measure(&mut self, ys: &Placement) -> Option<Proxy> {
         if self.left == 0 {
             return None;
         }
         self.left -= 1;
-        let geo = geometry(self.ctx.g, self.layered, ys, self.gaps, self.ctx.opts);
+        let geo = geometry(
+            self.ctx.g,
+            self.layered,
+            ys,
+            self.gaps,
+            self.ctx.opts,
+            self.ctx.heights,
+        );
         Some(proxy(self.ctx.g, self.ctx.ranked, self.layered, &geo))
     }
 
@@ -1559,7 +1626,7 @@ impl Search<'_> {
             self.ctx.g,
             self.layered,
             self.gaps,
-            self.card_h(),
+            self.ctx.heights,
             &EXTREMES,
             rise,
         )
@@ -1587,26 +1654,26 @@ impl Search<'_> {
         rise: i32,
         held: &mut bool,
     ) -> Option<bool> {
-        let card_h = self.card_h();
         let mut moved = false;
         for _ in 0..NUDGE_PASSES {
             let mut improved = false;
             for (node, moves) in self.cur.wants.clone() {
                 let (c, k) = at[&node];
+                let hs = self.hs[c].clone();
                 for d in moves {
                     let mut ys = self.ys.clone();
                     let col = &mut ys[c];
                     col[k] += d;
                     if d > 0 {
                         for j in k + 1..col.len() {
-                            col[j] = col[j].max(col[j - 1] + card_h + self.gaps[c][j - 1]);
+                            col[j] = col[j].max(col[j - 1] + hs[j - 1] + self.gaps[c][j - 1]);
                         }
                     } else {
                         for j in (0..k).rev() {
-                            col[j] = col[j].min(col[j + 1] - card_h - self.gaps[c][j]);
+                            col[j] = col[j].min(col[j + 1] - hs[j] - self.gaps[c][j]);
                         }
                     }
-                    let bottom = col.last().map_or(0, |&y| y + card_h);
+                    let bottom = col.last().map_or(0, |&y| y + hs[col.len() - 1]);
                     if col[0] < 0 {
                         continue;
                     }
@@ -1634,7 +1701,12 @@ impl Search<'_> {
     /// less, for `COLUMN_PASSES`. Whether one was taken; `None` once the
     /// budget is spent.
     fn columns(&mut self, limit: i32) -> Option<bool> {
-        let card_h = self.card_h();
+        // The bottom of each column is its last card's height below its top.
+        let last: Vec<i32> = self
+            .hs
+            .iter()
+            .map(|h| h.last().copied().unwrap_or(0))
+            .collect();
         let mut moved = false;
         for _ in 0..COLUMN_PASSES {
             let cols = self.ys.len();
@@ -1653,7 +1725,7 @@ impl Search<'_> {
             let mut improved = false;
             'shifts: for (_, _, k, suffix, d) in ranked_shifts {
                 for t in [0, 1] {
-                    let Some(ys) = column_shift(&self.ys, k, suffix, d, t, card_h, limit) else {
+                    let Some(ys) = column_shift(&self.ys, k, suffix, d, t, &last, limit) else {
                         continue;
                     };
                     if ys == self.ys {
@@ -1702,7 +1774,7 @@ fn column_shift(
     suffix: bool,
     d: i32,
     t: i32,
-    card_h: i32,
+    last: &[i32],
     limit: i32,
 ) -> Option<Placement> {
     let cols = ys.len();
@@ -1714,7 +1786,11 @@ fn column_shift(
         }
     }
     let top = *shifted.iter().filter_map(|c| c.first()).min()?;
-    let bottom = *shifted.iter().filter_map(|c| c.last()).max()? + card_h;
+    let bottom = shifted
+        .iter()
+        .zip(last)
+        .filter_map(|(c, &h)| c.last().map(|&y| y + h))
+        .max()?;
     let t = t + if top < 0 {
         -top
     } else if bottom > limit {
@@ -1950,7 +2026,7 @@ fn build_with(ctx: &Ctx, layered: &Layered, ys: &Placement, gaps: &Gaps) -> Layo
     let (g, ranked) = (ctx.g, ctx.ranked);
     let cols = layered.columns.len();
     let card_w = i32::from(ctx.opts.card_w);
-    let geo = geometry(g, layered, ys, gaps, ctx.opts);
+    let geo = geometry(g, layered, ys, gaps, ctx.opts, ctx.heights);
     let lane = lanes(g, ranked, geo.cards_h);
     let sp = spans(g, ranked, layered, &geo, &lane, ctx.edge_colour);
     let margin = if g

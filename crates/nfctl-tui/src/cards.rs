@@ -462,5 +462,12 @@ fn card(
         }
         lines.push(Line::from(spans));
     }
+    // A card is as tall as its busiest side needs, which can be taller than
+    // its three lines of text; the text sits in the middle of the box rather
+    // than against the top border.
+    let pad = (usize::from(inner.height).saturating_sub(lines.len())) / 2;
+    for _ in 0..pad {
+        lines.insert(0, Line::default());
+    }
     frame.render_widget(Paragraph::new(lines), inner);
 }

@@ -4,7 +4,7 @@
 //! layout alone by rasterising routes the way the painter does, so a test can
 //! guard the drawing without a terminal.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -149,10 +149,50 @@ struct Cell {
     reach: i32,
 }
 
-fn raster(routes: &[Route]) -> HashMap<(i32, i32), Vec<Cell>> {
-    let mut cells: HashMap<(i32, i32), Vec<Cell>> = HashMap::new();
+/// The drawn cells as a grid: one `Vec` per cell, indexed from the corner the
+/// routes reach. A map keyed on the coordinate is the obvious shape and costs
+/// several times as much, and every layout is scored many times over.
+struct Raster {
+    cells: Vec<Vec<Cell>>,
+    x0: i32,
+    y0: i32,
+    w: usize,
+}
+
+impl Raster {
+    /// Every cell with something drawn in it, in row order.
+    fn drawn(&self) -> impl Iterator<Item = ((i32, i32), &Vec<Cell>)> {
+        self.cells
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !v.is_empty())
+            .map(move |(i, v)| {
+                let (y, x) = (i / self.w, i % self.w);
+                (
+                    (
+                        self.x0 + i32::try_from(x).unwrap_or(0),
+                        self.y0 + i32::try_from(y).unwrap_or(0),
+                    ),
+                    v,
+                )
+            })
+    }
+
+    fn ink(&self) -> usize {
+        self.cells.iter().filter(|v| !v.is_empty()).count()
+    }
+}
+
+fn raster(routes: &[Route]) -> Raster {
+    let pts = || routes.iter().flat_map(|r| r.polyline.iter());
+    let x0 = pts().map(|p| p.0).min().unwrap_or(0);
+    let y0 = pts().map(|p| p.1).min().unwrap_or(0);
+    let w = usize::try_from(pts().map(|p| p.0).max().unwrap_or(0) - x0 + 1).unwrap_or(1);
+    let h = usize::try_from(pts().map(|p| p.1).max().unwrap_or(0) - y0 + 1).unwrap_or(1);
+    let mut cells: Vec<Vec<Cell>> = vec![Vec::new(); w * h];
     let mut put = |edge: usize, x: i32, y: i32, bits: u8, reach: i32| {
-        let v = cells.entry((x, y)).or_default();
+        let at = usize::try_from(y - y0).unwrap_or(0) * w + usize::try_from(x - x0).unwrap_or(0);
+        let Some(v) = cells.get_mut(at) else { return };
         if let Some(c) = v.iter_mut().find(|c| c.edge == edge) {
             c.bits |= bits;
             c.reach = c.reach.max(reach);
@@ -178,7 +218,7 @@ fn raster(routes: &[Route]) -> HashMap<(i32, i32), Vec<Cell>> {
             }
         }
     }
-    cells
+    Raster { cells, x0, y0, w }
 }
 
 fn is_straight_h(bits: u8) -> bool {
@@ -282,9 +322,11 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
     let mut overlaps = vec![0usize; n_edges];
     let mut mixed_cells = 0usize;
     let mut cross_cells = 0usize;
-    let mut sorted: Vec<(&(i32, i32), &Vec<Cell>)> = cells.iter().collect();
-    sorted.sort_by_key(|(k, _)| **k);
-    for (&pos, v) in sorted {
+    // Which edges in the cell being looked at fork or join there. A run
+    // shared by a fan of n edges has n(n-1)/2 pairs but only n cells to
+    // record, so the pairs mark the flags and the cells are recorded once.
+    let (mut fork, mut join) = (Vec::new(), Vec::new());
+    for (pos, v) in cells.drawn() {
         if v.len() < 2 {
             continue;
         }
@@ -292,6 +334,10 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
         if colours.len() > 1 {
             mixed_cells += 1;
         }
+        fork.clear();
+        fork.resize(v.len(), false);
+        join.clear();
+        join.resize(v.len(), false);
         let mut crossed = false;
         for i in 0..v.len() {
             for j in (i + 1)..v.len() {
@@ -306,15 +352,23 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
                     crossings[a.edge] += 1;
                     crossings[b.edge] += 1;
                 } else if same_src(a.edge, b.edge) {
-                    fork_cells[a.edge].insert(pos);
-                    fork_cells[b.edge].insert(pos);
+                    fork[i] = true;
+                    fork[j] = true;
                 } else if same_dst(a.edge, b.edge) {
-                    join_cells[a.edge].insert(pos);
-                    join_cells[b.edge].insert(pos);
+                    join[i] = true;
+                    join[j] = true;
                 } else {
                     overlaps[a.edge] += 1;
                     overlaps[b.edge] += 1;
                 }
+            }
+        }
+        for (k, c) in v.iter().enumerate() {
+            if fork[k] {
+                fork_cells[c.edge].insert(pos);
+            }
+            if join[k] {
+                join_cells[c.edge].insert(pos);
             }
         }
     }
@@ -444,7 +498,7 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
         jogs,
         detour,
         mixed_cells,
-        ink: cells.len(),
+        ink: cells.ink(),
         cross_cells,
         gap_spread,
         scatter: 0,

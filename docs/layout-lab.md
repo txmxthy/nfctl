@@ -21,6 +21,11 @@ A drawn pipeline may use only these shapes:
 - Fan-outs and fan-ins are **symmetric** around the bus row; spacing is even;
   colour follows the tag combination.
 
+Under `Bundling::Ribbon` a card is as tall as it needs to be: one interior
+row for every colour that leaves it and one for every colour that arrives,
+whichever is more, so no two colours share an attach row. The default
+bundling has no use for the room and keeps every card at five rows.
+
 `docs/rendering.md` explains how cells become glyphs.
 
 ## The scorer

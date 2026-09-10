@@ -182,9 +182,11 @@ fn layout_with(g: &ViewGraph, opts: LayoutOptions, by_colour: bool) -> Layout {
     let edge_colour = colours(g);
     let ranked = rank::rank(g);
     let badges = badges_for(g, &edge_colour);
+    let heights = route::heights(g, &ranked, opts);
     let ctx = Ctx {
         g,
         ranked: &ranked,
+        heights: &heights,
         edge_colour: &edge_colour,
         badges: &badges,
         opts,

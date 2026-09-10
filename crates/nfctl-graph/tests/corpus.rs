@@ -31,6 +31,26 @@ fn corpus_imports_and_renders() {
                 "determinism"
             );
             for g in [ViewGraph::collapsed(&t), ViewGraph::expanded(&t)] {
+                // Ribbon gives a card a row for every colour at it, so its
+                // cards are taller, its drawings bigger and its search wider.
+                // Timed apart from the default, at what it costs today, so a
+                // change that makes it worse is visible.
+                let ribbon = LayoutOptions {
+                    bundling: Bundling::Ribbon,
+                    card_w: 18,
+                    card_h: 5,
+                };
+                let mut best = std::time::Duration::MAX;
+                for _ in 0..3 {
+                    let start = std::time::Instant::now();
+                    let l = layout(&g, ribbon);
+                    best = best.min(start.elapsed());
+                    assert!(
+                        l.cards.iter().all(|c| c.h >= 5),
+                        "{name}/{pl}: a card shrank"
+                    );
+                }
+                assert!(best.as_millis() < 100, "{name}/{pl}: ribbon took {best:?}");
                 let opts = LayoutOptions {
                     bundling: Bundling::Spread,
                     card_w: 18,
