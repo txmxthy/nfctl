@@ -176,23 +176,25 @@ impl Model for DetailPanel {
             return;
         };
         let p = &v.pipeline;
-        let cards = CardView::new(
-            &p.spec.topology,
-            inner.width,
-            self.expand_shards,
-            self.bundling,
-        );
-        let scroll = self.scroll_for(&cards, inner.width);
+        // The flow and the edges each sit in a box of their own, so the width
+        // available to the drawing is the panel's less those borders.
+        let room = inner.width.saturating_sub(2);
+        let cards = CardView::new(&p.spec.topology, room, self.expand_shards, self.bundling);
+        let scroll = self.scroll_for(&cards, room);
         let cards_h = cards.height();
-        // The edge table sits at the bottom, at most half the panel; the cards
-        // take whatever is left above it.
+        // The edge table sits at the bottom, at most half the panel; the flow
+        // takes whatever is left above it. Both counting their borders.
         let rows = u16::try_from(v.edges.len())
             .unwrap_or(u16::MAX)
-            .saturating_add(1);
-        let table_h = rows.min(inner.height / 2).max(4);
+            .saturating_add(3);
+        let table_h = rows.min(inner.height / 2).max(6);
         let [head, dag, edges, warn] = Layout::vertical([
             Constraint::Length(2),
-            Constraint::Min(cards_h.min(inner.height.saturating_sub(table_h + 2))),
+            Constraint::Min(
+                cards_h
+                    .saturating_add(2)
+                    .min(inner.height.saturating_sub(table_h)),
+            ),
             Constraint::Length(table_h),
             Constraint::Length(u16::try_from(v.warnings.len()).unwrap_or(0)),
         ])
@@ -222,9 +224,10 @@ impl Model for DetailPanel {
         );
         frame.render_widget(Paragraph::new(vec![line1, line2]), head);
 
+        let flow = section(frame, dag, " flow ");
         cards::render(
             frame,
-            dag,
+            centre(flow, cards.layout.width, cards_h),
             v,
             &cards,
             scroll,
@@ -232,7 +235,8 @@ impl Model for DetailPanel {
             self.palette,
         );
 
-        frame.render_widget(edge_table(v, edges.width, self.palette), edges);
+        let table = section(frame, edges, " edges ");
+        frame.render_widget(edge_table(v, table.width, self.palette), table);
 
         let warnings: Vec<Line> = v
             .warnings
@@ -245,6 +249,30 @@ impl Model for DetailPanel {
             })
             .collect();
         frame.render_widget(Paragraph::new(warnings), warn);
+    }
+}
+
+/// Draw a titled box over `area` and return the room left inside it.
+fn section(frame: &mut Frame, area: Rect, title: &'static str) -> Rect {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(style::dim())
+        .title(Span::styled(title, style::dim()));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    inner
+}
+
+/// A `w` by `h` drawing placed in the middle of `area`, or as much of it as
+/// fits: a drawing narrower or shorter than its box sits in the middle of the
+/// room rather than in a corner of it.
+fn centre(area: Rect, w: u16, h: u16) -> Rect {
+    let (w, h) = (w.min(area.width), h.min(area.height));
+    Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
     }
 }
 

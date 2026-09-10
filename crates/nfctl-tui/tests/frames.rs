@@ -340,8 +340,10 @@ async fn edge_table_is_coloured_like_the_edges() {
             .collect();
         if let Some(col) = line.find("audit") {
             if line.contains("router -> audit") {
-                let tag_x = line.rfind("audit").unwrap();
-                let arrow_x = line.find("->").unwrap();
+                // Cells, not bytes: the panel's borders are three bytes each.
+                let cell = |byte: usize| line[..byte].chars().count();
+                let tag_x = cell(line.rfind("audit").unwrap());
+                let arrow_x = cell(line.find("->").unwrap());
                 let tag_fg = buf[(u16::try_from(tag_x).unwrap(), y)].fg;
                 let arrow_fg = buf[(u16::try_from(arrow_x).unwrap(), y)].fg;
                 assert_ne!(tag_fg, ratatui::style::Color::Reset, "tag coloured");
