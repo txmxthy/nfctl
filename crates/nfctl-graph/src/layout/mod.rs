@@ -138,10 +138,22 @@ pub(crate) fn i(x: usize) -> i32 {
     i32::try_from(x).unwrap_or(i32::MAX)
 }
 
-/// Colour per edge: sorted tag combination, first-encounter order.
+/// Colour per edge: sorted tag combination, first-encounter order. The
+/// palette wraps, so two combinations can share a hue.
 #[must_use]
 pub fn colours(g: &ViewGraph) -> Vec<Option<EdgeColour>> {
-    let mut combos: HashMap<String, u8> = HashMap::new();
+    lines(g)
+        .into_iter()
+        .map(|n| n.map(|n| EdgeColour(u8::try_from(n % u32::from(PALETTE_SIZE)).unwrap_or(0))))
+        .collect()
+}
+
+/// The line each edge belongs to: its sorted tag combination, in
+/// first-encounter order, and `None` when it carries no tags. Unlike
+/// [`colours`] this never puts two combinations together, so a fan can be
+/// ordered by it without two unrelated branches being treated as one.
+pub(crate) fn lines(g: &ViewGraph) -> Vec<Option<u32>> {
+    let mut combos: HashMap<String, u32> = HashMap::new();
     g.edges
         .iter()
         .map(|e| {
@@ -150,12 +162,8 @@ pub fn colours(g: &ViewGraph) -> Vec<Option<EdgeColour>> {
             }
             let mut key: Vec<&str> = e.tags.iter().map(String::as_str).collect();
             key.sort_unstable();
-            let key = key.join(",");
-            let n = combos.len();
-            let idx = *combos
-                .entry(key)
-                .or_insert_with(|| u8::try_from(n % usize::from(PALETTE_SIZE)).unwrap_or(0));
-            Some(EdgeColour(idx))
+            let n = u32::try_from(combos.len()).unwrap_or(u32::MAX);
+            Some(*combos.entry(key.join(",")).or_insert(n))
         })
         .collect()
 }

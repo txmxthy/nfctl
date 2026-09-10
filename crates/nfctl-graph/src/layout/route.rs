@@ -87,14 +87,14 @@ pub(crate) fn heights(g: &ViewGraph, r: &Ranked, opts: LayoutOptions) -> Vec<i32
     if opts.bundling != Bundling::Ribbon {
         return vec![base; g.nodes.len()];
     }
-    let colour = super::colours(g);
-    let mut out: Vec<BTreeSet<Option<EdgeColour>>> = vec![BTreeSet::new(); g.nodes.len()];
-    let mut into: Vec<BTreeSet<Option<EdgeColour>>> = vec![BTreeSet::new(); g.nodes.len()];
+    let line = super::lines(g);
+    let mut out: Vec<BTreeSet<Option<u32>>> = vec![BTreeSet::new(); g.nodes.len()];
+    let mut into: Vec<BTreeSet<Option<u32>>> = vec![BTreeSet::new(); g.nodes.len()];
     for (ei, e) in g.edges.iter().enumerate() {
         if r.back[ei] {
             continue; // a back edge takes the middle row and its lane
         }
-        let c = colour.get(ei).copied().flatten();
+        let c = line.get(ei).copied().flatten();
         out[e.from.0 as usize].insert(c);
         into[e.to.0 as usize].insert(c);
     }
@@ -345,7 +345,18 @@ fn geometry(
         geo.columns.push(slots);
     }
     if opts.bundling == Bundling::Ribbon {
-        own_rows(g, &mut geo);
+        // Twice: the first pass has to order each fan by where its branches
+        // end, the second by the row they actually leave on, which is only
+        // known once the pass rows are out.
+        own_rows(g, &mut geo, None);
+        pass_rows(g, l, &mut geo);
+        let aim: Vec<Option<i32>> = (0..g.edges.len())
+            .map(|ei| {
+                let e = edge_id(ei);
+                geo.attach[g.nodes.len() + ei].map(|_| geo.at(LNode::Pass(e)).1)
+            })
+            .collect();
+        own_rows(g, &mut geo, Some(&aim));
     }
     pass_rows(g, l, &mut geo);
     if opts.bundling == Bundling::Ribbon {
@@ -361,10 +372,10 @@ fn geometry(
 /// symmetric, three take all of them. A card with more edges than rows keeps
 /// the single bus. Rows go to edges in the order of the cards they join, so
 /// the lines do not cross each other on the way out.
-fn own_rows(g: &ViewGraph, geo: &mut Geometry) {
+fn own_rows(g: &ViewGraph, geo: &mut Geometry, aim: Option<&[Option<i32>]>) {
     geo.exit = vec![None; g.edges.len()];
     geo.entry = vec![None; g.edges.len()];
-    let colour = super::colours(g);
+    let line = super::lines(g);
     let card_at = |geo: &Geometry, n: NodeId| geo.at(LNode::Real(n));
     // Edges at each card, as (other end, edge), source side then target side.
     let mut out: Vec<Vec<(i32, EdgeId)>> = vec![Vec::new(); g.nodes.len()];
@@ -376,7 +387,14 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry) {
         if to_col <= from_col {
             continue; // back edges keep the middle row and their lane
         }
-        out[e.from.0 as usize].push((to_row, id));
+        // The row the edge turns towards on leaving, which for a long edge is
+        // the row it runs across on, not its far card: ordering the branches
+        // of a fan by where their cards are, when they head somewhere else
+        // first, is what makes a fan cross itself.
+        let turn = aim
+            .and_then(|a| a.get(ei).copied().flatten())
+            .unwrap_or(to_row);
+        out[e.from.0 as usize].push((turn, id));
         into[e.to.0 as usize].push((from_row, id));
     }
     // One edge takes the middle row, two the outer two so the pair stays
@@ -407,9 +425,9 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry) {
     // drawn grey. Groups take rows in the order of the cards they join.
     let assign = |ends: &mut Vec<(i32, EdgeId)>, node: usize, exit: bool, geo: &mut Geometry| {
         ends.sort_unstable();
-        let mut groups: Vec<(Option<EdgeColour>, Vec<EdgeId>)> = Vec::new();
+        let mut groups: Vec<(Option<u32>, Vec<EdgeId>)> = Vec::new();
         for &(_, e) in ends.iter() {
-            let c = colour.get(e.0 as usize).copied().flatten();
+            let c = line.get(e.0 as usize).copied().flatten();
             match groups.iter_mut().find(|(g, _)| *g == c) {
                 Some((_, members)) => members.push(e),
                 None => groups.push((c, vec![e])),
