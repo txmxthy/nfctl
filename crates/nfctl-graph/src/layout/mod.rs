@@ -275,7 +275,12 @@ fn polish(
 ) -> Layout {
     let (s, layout, cols) = best;
     layered.columns.clone_from(&cols);
-    let reslotted = route::reslot(ctx.g, layered, &layout);
+    let reslotted = route::reslot(
+        ctx.g,
+        layered,
+        &layout,
+        ctx.opts.bundling == Bundling::Ribbon,
+    );
     let mut best = (s, layout, cols, false);
     let mut tried: Vec<Vec<Vec<order::LNode>>> = Vec::new();
     for cols in [layered.columns.clone(), reslotted] {

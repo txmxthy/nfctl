@@ -653,11 +653,14 @@ fn fit(col: &mut [i32], gaps: &[i32], card_h: i32, height: i32) {
     }
 }
 
-/// The row an edge's pass slots want: the target's when the edge leaves a
-/// fork for a target with one in-edge, else the source's (which is also the
-/// row of a card with one out-edge feeding a join).
-fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32) -> i32 {
-    if outs >= 2 && ins == 1 {
+/// The row an edge's pass slots want. Staying on the row it left its card on
+/// keeps the line where the eye picked it up and puts its one turn at the far
+/// end; the alternative, taking the target's row, turns immediately and runs
+/// the length of the drawing somewhere else. Only when the branches of a fan
+/// still share their exit row is the early turn worth it, because then they
+/// have to separate before they can be told apart.
+fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32, own_row: bool) -> i32 {
+    if outs >= 2 && ins == 1 && !own_row {
         dst_row
     } else {
         src_row
@@ -688,13 +691,17 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
     let mut taken: Vec<Vec<Vec<EdgeId>>> = vec![Vec::new(); cols];
     for (e, cols) in &l.passes {
         let (e, edge) = (*e, &g.edges[e.0 as usize]);
-        let (_, src_row) = geo.at(LNode::Real(edge.from));
-        let (_, dst_row) = geo.at(LNode::Real(edge.to));
+        // The rows this edge actually leaves and meets its cards on, which
+        // are its own when each edge at a card has one. Aiming at the card's
+        // middle instead would turn the edge off its row and back again.
+        let (_, src_row) = geo.exit_at(e, LNode::Real(edge.from));
+        let (_, dst_row) = geo.entry_at(e, LNode::Real(edge.to));
         let want = wanted(
             l.out_deg[edge.from.0 as usize],
             l.in_deg[edge.to.0 as usize],
             src_row,
             dst_row,
+            !geo.exit.is_empty(),
         );
         // The rows held open for this edge's slot, per pass column.
         let held_rows: Vec<Option<(i32, i32)>> = cols
@@ -1069,7 +1076,12 @@ pub(crate) fn has_slots(columns: &[Vec<LNode>]) -> bool {
 /// stack goes above or below it. Each gap widens by a row per pass, so a
 /// column takes them in that order only while it stays within `SLOT_RISE`
 /// of the tallest column; the rest go above or below, whichever is nearer.
-pub(crate) fn reslot(g: &ViewGraph, l: &Layered, layout: &Layout) -> Vec<Vec<LNode>> {
+pub(crate) fn reslot(
+    g: &ViewGraph,
+    l: &Layered,
+    layout: &Layout,
+    own_row: bool,
+) -> Vec<Vec<LNode>> {
     let card = |id: NodeId| layout.card(id).map_or((0, 0), |k| (k.y, i32::from(k.h)));
     let row = |id: NodeId| {
         let (y, h) = card(id);
@@ -1132,6 +1144,7 @@ pub(crate) fn reslot(g: &ViewGraph, l: &Layered, layout: &Layout) -> Vec<Vec<LNo
                     l.in_deg[edge.to.0 as usize],
                     src,
                     dst,
+                    own_row,
                 );
                 let (lo, hi) = (src.min(dst), src.max(dst));
                 let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
@@ -1694,7 +1707,7 @@ impl Paths {
                     let (ct, yt) = geo.at(LNode::Real(e.to));
                     let outs = l.out_deg[e.from.0 as usize];
                     let ins = l.in_deg[e.to.0 as usize];
-                    if wanted(outs, ins, ys, yt) == yt && ys != yt {
+                    if wanted(outs, ins, ys, yt, !geo.exit.is_empty()) == yt && ys != yt {
                         ct
                     } else {
                         cs

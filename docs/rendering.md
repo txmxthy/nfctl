@@ -217,8 +217,11 @@ line per colour running side by side. Where splitting a bus would leave an edge
 with a junction at each end of it, the shared bus is kept instead, since one
 lost colour reads better than two junctions. A fan-out therefore leaves as
 that many coloured lines side by side instead of one shared stub, and a fan-in
-arrives as that many arrows. Long runs crossing the same columns are then
-pulled against each other, while that costs a run no more than three rows, so
+arrives as that many arrows. A long edge then keeps the row it left its
+card on for as long as it can, so its one turn falls at the far end rather
+than immediately outside the card; it moves off that row only where a card or
+another run occupies it further along. Long runs crossing the same columns are
+then pulled against each other, while that costs a run no more than three rows, so
 they read as a ribbon rather than scattered lines.
 
 The default stays `Spread`, where each edge takes the row that costs it least.
