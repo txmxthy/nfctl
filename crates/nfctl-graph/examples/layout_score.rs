@@ -42,7 +42,7 @@ fn main() {
     let sum = |f: &dyn Fn(&Score) -> i64| rows.iter().map(|(_, s)| f(s)).sum::<i64>();
     let n = |x: usize| i64::try_from(x).unwrap_or(i64::MAX);
     println!(
-        "{} pipelines  bends>2 {}  skip>4 {}  back>4 {}  junc>1 {}  overlap {}  cross {}  asym {}  detour {}  total {}",
+        "{} pipelines  bends>2 {}  skip>4 {}  back>4 {}  junc>1 {}  overlap {}  cross {}  asym {}  detour {}  mixed {}  ink {}  xcell {}  total {}",
         rows.len(),
         sum(&|s| n(s.bends_over_fwd)),
         sum(&|s| n(s.bends_over_skip)),
@@ -52,6 +52,9 @@ fn main() {
         sum(&|s| n(s.crossings)),
         sum(&|s| i64::from(s.asymmetry)),
         sum(&|s| i64::from(s.detour)),
+        sum(&|s| n(s.mixed_cells)),
+        sum(&|s| n(s.ink)),
+        sum(&|s| n(s.cross_cells)),
         sum(&|s| s.total),
     );
 }

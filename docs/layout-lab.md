@@ -35,10 +35,17 @@ Per layout it sums them into two tiers:
 | tier | fields | rule |
 |---|---|---|
 | vocabulary | `bends_over_fwd`, `bends_over_skip`, `bends_over_back`, `junction_over`, `overlaps` | must reach 0 and stay there |
-| soft | `crossings`, `asymmetry`, `detour` | pushed down, never up |
+| soft | `cross_cells`, `asymmetry`, `detour` | pushed down, never up |
 
-`mixed_cells`, `gap_spread`, `width`, `height` are informational. `total` is
-`10·bends_over + 10·junction_over + 5·overlaps + 3·crossings + 2·asymmetry + detour`.
+`mixed_cells`, `ink`, `crossings`, `gap_spread`, `width`, `height` are
+informational. `total` is `10·bends_over + 10·junction_over + 5·overlaps +
+3·cross_cells + 2·asymmetry + detour`.
+
+Two of those need care. `crossings` and the other per-edge counts charge every
+edge for its whole path, so two edges drawn as one line pay twice: they see a
+merge as a regression. `ink`, the number of cells with an edge glyph in them,
+and `cross_cells`, the number of cells where edges actually cross, count what
+a reader sees, and are the only metrics that do. Judge a merge by those.
 
 Cell crossings are counted on the drawn geometry. Column order is judged the
 same way: `layout` draws every distinct card order the barycenter sweeps

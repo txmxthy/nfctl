@@ -444,6 +444,11 @@ fn ribbon(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
     let mut taken: Vec<Vec<Vec<EdgeId>>> = vec![Vec::new(); cols];
     // The lowest row used so far in each column.
     let mut last: Vec<Option<i32>> = vec![None; cols];
+    // Runs that are the same line: packing puts every run on a row of its
+    // own, which would draw a merge group as a stack of parallel lines all
+    // saying the same thing. They take their group's row instead.
+    let merge = merging(g);
+    let mut group_row: HashMap<u32, i32> = HashMap::new();
     for (e, row, pass_cols) in placed {
         let edge = &g.edges[e.0 as usize];
         let (_, src_row) = geo.at(LNode::Real(edge.from));
@@ -471,9 +476,18 @@ fn ribbon(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
             .max()
             .unwrap_or(0)
             .max(0);
-        let row = (against..row)
-            .find(|&r| free(&taken, r) && detour(r) <= detour(row) + RIBBON_BUDGET)
-            .unwrap_or(row);
+        let group = merge.get(e.0 as usize).copied().flatten();
+        let joined = group
+            .and_then(|gid| group_row.get(&gid).copied())
+            .filter(|&r| free(&taken, r) && detour(r) <= detour(row) + RIBBON_BUDGET);
+        let row = joined.unwrap_or_else(|| {
+            (against..row)
+                .find(|&r| free(&taken, r) && detour(r) <= detour(row) + RIBBON_BUDGET)
+                .unwrap_or(row)
+        });
+        if let Some(gid) = group {
+            group_row.entry(gid).or_insert(row);
+        }
         for &col in pass_cols {
             geo.place(LNode::Pass(e), (col, row));
             let at = row_index(row);
@@ -677,15 +691,23 @@ fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32, own_row: bool, me
 /// not the colour they are drawn in: the palette has fewer hues than a
 /// pipeline can have tag sets, so two unrelated ones can share a hue and must
 /// not be drawn as one line.
-fn merging(g: &ViewGraph) -> Vec<bool> {
+fn merging(g: &ViewGraph) -> Vec<Option<u32>> {
     let key = |e: &ViewEdge| (e.to, e.tags.join("\u{1f}"));
     let mut count: HashMap<(NodeId, String), usize> = HashMap::new();
     for e in &g.edges {
         *count.entry(key(e)).or_default() += 1;
     }
+    let mut group: HashMap<(NodeId, String), u32> = HashMap::new();
     g.edges
         .iter()
-        .map(|e| count.get(&key(e)).is_some_and(|&n| n >= 2))
+        .map(|e| {
+            let k = key(e);
+            if count.get(&k).copied().unwrap_or(0) < 2 {
+                return None;
+            }
+            let next = u32::try_from(group.len()).unwrap_or(u32::MAX);
+            Some(*group.entry(k).or_insert(next))
+        })
         .collect()
 }
 
@@ -701,10 +723,14 @@ fn merging(g: &ViewGraph) -> Vec<bool> {
 fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
     let cols = l.columns.len();
     let merge = if geo.exit.is_empty() {
-        vec![false; g.edges.len()]
+        vec![None; g.edges.len()]
     } else {
         merging(g)
     };
+    // The row the first edge of each merge group settled on: its fellows join
+    // it there rather than each picking the row that suits it alone, which is
+    // what left them drawn as a stack of parallel lines saying one thing.
+    let mut group_row: HashMap<u32, i32> = HashMap::new();
     // Rows a card covers, margins included, per column and row.
     let mut covered: Vec<Vec<bool>> = vec![vec![false; row_index(geo.cards_h) + 1]; cols];
     for k in &geo.cards {
@@ -729,7 +755,7 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
             src_row,
             dst_row,
             !geo.exit.is_empty(),
-            merge.get(e.0 as usize).copied().unwrap_or(false),
+            merge.get(e.0 as usize).copied().flatten().is_some(),
         );
         // The rows held open for this edge's slot, per pass column.
         let held_rows: Vec<Option<(i32, i32)>> = cols
@@ -755,8 +781,14 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
         };
         // An edge with company wants the row its fellows are on, so it takes
         // one already given out; alone it wants a row to itself.
-        let with_company = merge.get(e.0 as usize).copied().unwrap_or(false);
-        let row = if free(&taken, want, with_company) {
+        let group = merge.get(e.0 as usize).copied().flatten();
+        let with_company = group.is_some();
+        let joined = group
+            .and_then(|gid| group_row.get(&gid).copied())
+            .filter(|&r| free(&taken, r, true));
+        let row = if let Some(r) = joined {
+            r
+        } else if free(&taken, want, with_company) {
             want
         } else {
             // Any row between the two ends adds no detour; among those (or
@@ -781,6 +813,9 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
                 })
                 .unwrap_or(want)
         };
+        if let Some(gid) = group {
+            group_row.entry(gid).or_insert(row);
+        }
         for &col in cols {
             geo.place(LNode::Pass(e), (col, row));
             let at = row_index(row);
@@ -1117,7 +1152,7 @@ pub(crate) fn reslot(
     let merge = if own_row {
         merging(g)
     } else {
-        vec![false; g.edges.len()]
+        vec![None; g.edges.len()]
     };
     let card = |id: NodeId| layout.card(id).map_or((0, 0), |k| (k.y, i32::from(k.h)));
     let row = |id: NodeId| {
@@ -1182,7 +1217,7 @@ pub(crate) fn reslot(
                     src,
                     dst,
                     own_row,
-                    merge.get(e.0 as usize).copied().unwrap_or(false),
+                    merge.get(e.0 as usize).copied().flatten().is_some(),
                 );
                 let (lo, hi) = (src.min(dst), src.max(dst));
                 let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
@@ -1726,7 +1761,7 @@ impl Measure {
 impl Paths {
     fn from_geometry(g: &ViewGraph, ranked: &Ranked, l: &Layered, geo: &Geometry) -> Self {
         let merge = if geo.exit.is_empty() {
-            vec![false; g.edges.len()]
+            vec![None; g.edges.len()]
         } else {
             merging(g)
         };
@@ -1750,7 +1785,8 @@ impl Paths {
                     let (ct, yt) = geo.at(LNode::Real(e.to));
                     let outs = l.out_deg[e.from.0 as usize];
                     let ins = l.in_deg[e.to.0 as usize];
-                    if wanted(outs, ins, ys, yt, !geo.exit.is_empty(), merge[ei]) == yt && ys != yt
+                    if wanted(outs, ins, ys, yt, !geo.exit.is_empty(), merge[ei].is_some()) == yt
+                        && ys != yt
                     {
                         ct
                     } else {

@@ -3,8 +3,8 @@ source: crates/nfctl-graph/tests/layout_quality.rs
 assertion_line: 35
 expression: "lines.join(\"\\n\")"
 ---
-fixture/fanout: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   3  gap±  0  scatter   0  64x17  total    0
-fixture/linear: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   0  gap±  0  scatter   0  64x5  total    0
-fixture/partitions: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   0  gap±  0  scatter   0  64x5  total    0
-fixture/scaling: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   0  gap±  0  scatter   0  64x5  total    0
-fixture/sharded: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   9  gap±  0  scatter   0  110x23  total    0
+fixture/fanout: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   3  ink   26  xcell   0  gap±  0  scatter   0  64x17  total    0
+fixture/linear: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   0  ink   10  xcell   0  gap±  0  scatter   0  64x5  total    0
+fixture/partitions: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   0  ink   10  xcell   0  gap±  0  scatter   0  64x5  total    0
+fixture/scaling: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   0  ink   10  xcell   0  gap±  0  scatter   0  64x5  total    0
+fixture/sharded: bends>2  0  skip>4  0  back>4  0  junc>1  0  overlap   0  cross   0  asym   0  detour   0  jogs   0  mixed   9  ink   60  xcell   0  gap±  0  scatter   0  110x23  total    0

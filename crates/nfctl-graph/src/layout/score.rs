@@ -70,6 +70,17 @@ pub struct Score {
     pub detour: i32,
     /// Cells where two colours meet and the painter has to pick one.
     pub mixed_cells: usize,
+    /// Cells with any edge glyph in them: what the drawing actually costs the
+    /// eye. Two edges drawn on one line count once, so it is the only metric
+    /// that sees a merge; the per-edge metrics charge each edge for its whole
+    /// path whether or not it shares it. Reported only.
+    #[serde(default)]
+    pub ink: usize,
+    /// Cells where two edges actually cross. `crossings` charges every pair of
+    /// edges sharing the cell, so lines drawn as one are charged twice; this
+    /// counts what a reader sees. Reported only.
+    #[serde(default)]
+    pub cross_cells: usize,
     /// Widest gap minus narrowest gap.
     pub gap_spread: u16,
     /// Blank rows left between the runs that cross a column, summed over the
@@ -97,7 +108,7 @@ impl Score {
     /// The soft tier: pushed down, never locked.
     #[must_use]
     pub fn soft(&self) -> i64 {
-        i64::try_from(self.crossings).unwrap_or(i64::MAX / 4)
+        i64::try_from(self.cross_cells).unwrap_or(i64::MAX / 4)
             + i64::from(self.asymmetry)
             + i64::from(self.detour)
     }
@@ -107,7 +118,7 @@ impl std::fmt::Display for Score {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "bends>2 {:>2}  skip>4 {:>2}  back>4 {:>2}  junc>1 {:>2}  overlap {:>3}  cross {:>3}  asym {:>3}  detour {:>3}  jogs {:>3}  mixed {:>3}  gap± {:>2}  scatter {:>3}  {}x{}  total {:>4}",
+            "bends>2 {:>2}  skip>4 {:>2}  back>4 {:>2}  junc>1 {:>2}  overlap {:>3}  cross {:>3}  asym {:>3}  detour {:>3}  jogs {:>3}  mixed {:>3}  ink {:>4}  xcell {:>3}  gap± {:>2}  scatter {:>3}  {}x{}  total {:>4}",
             self.bends_over_fwd,
             self.bends_over_skip,
             self.bends_over_back,
@@ -118,6 +129,8 @@ impl std::fmt::Display for Score {
             self.detour,
             self.jogs,
             self.mixed_cells,
+            self.ink,
+            self.cross_cells,
             self.gap_spread,
             self.scatter,
             self.width,
@@ -268,6 +281,7 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
     let mut crossings = vec![0usize; n_edges];
     let mut overlaps = vec![0usize; n_edges];
     let mut mixed_cells = 0usize;
+    let mut cross_cells = 0usize;
     let mut sorted: Vec<(&(i32, i32), &Vec<Cell>)> = cells.iter().collect();
     sorted.sort_by_key(|(k, _)| **k);
     for (&pos, v) in sorted {
@@ -278,12 +292,17 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
         if colours.len() > 1 {
             mixed_cells += 1;
         }
+        let mut crossed = false;
         for i in 0..v.len() {
             for j in (i + 1)..v.len() {
                 let (a, b) = (v[i], v[j]);
                 let crossing = (is_straight_h(a.bits) && is_straight_v(b.bits))
                     || (is_straight_v(a.bits) && is_straight_h(b.bits));
                 if crossing {
+                    if !crossed {
+                        crossed = true;
+                        cross_cells += 1;
+                    }
                     crossings[a.edge] += 1;
                     crossings[b.edge] += 1;
                 } else if same_src(a.edge, b.edge) {
@@ -410,7 +429,7 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
     let total = 10 * i64::try_from(bends_over_fwd + bends_over_skip + bends_over_back).unwrap_or(0)
         + 10 * i64::try_from(junction_over).unwrap_or(0)
         + 5 * i64::try_from(overlaps).unwrap_or(0)
-        + 3 * i64::try_from(crossings).unwrap_or(0)
+        + 3 * i64::try_from(cross_cells).unwrap_or(0)
         + 2 * i64::from(asymmetry)
         + i64::from(detour);
     Score {
@@ -425,6 +444,8 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
         jogs,
         detour,
         mixed_cells,
+        ink: cells.len(),
+        cross_cells,
         gap_spread,
         scatter: 0,
         height: l.height,
