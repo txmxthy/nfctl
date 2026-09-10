@@ -38,6 +38,11 @@ pub struct EdgeScore {
     pub overlaps: usize,
     /// Vertical cells travelled beyond the row difference (forward edges).
     pub detour: i32,
+    /// Bends beyond the fewest the edge could have: none when its ends share
+    /// a row, two for a change of row, four for a back edge. An edge that
+    /// turns early and has to turn again pays for the extra corners.
+    #[serde(default)]
+    pub jogs: usize,
 }
 
 /// The layout's score. Lower is better everywhere; `total` is the weighted sum
@@ -57,6 +62,11 @@ pub struct Score {
     pub crossings: usize,
     /// Σ over fan-outs and fan-ins of |rows above − rows below| the bus row.
     pub asymmetry: i32,
+    /// Σ of the edges' bends beyond the fewest they could have. Reported
+    /// only: chasing it raised asymmetry and crossings without reducing it,
+    /// so the search does not weigh it.
+    #[serde(default)]
+    pub jogs: usize,
     pub detour: i32,
     /// Cells where two colours meet and the painter has to pick one.
     pub mixed_cells: usize,
@@ -97,7 +107,7 @@ impl std::fmt::Display for Score {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "bends>2 {:>2}  skip>4 {:>2}  back>4 {:>2}  junc>1 {:>2}  overlap {:>3}  cross {:>3}  asym {:>3}  detour {:>3}  mixed {:>3}  gap± {:>2}  scatter {:>3}  {}x{}  total {:>4}",
+            "bends>2 {:>2}  skip>4 {:>2}  back>4 {:>2}  junc>1 {:>2}  overlap {:>3}  cross {:>3}  asym {:>3}  detour {:>3}  jogs {:>3}  mixed {:>3}  gap± {:>2}  scatter {:>3}  {}x{}  total {:>4}",
             self.bends_over_fwd,
             self.bends_over_skip,
             self.bends_over_back,
@@ -106,6 +116,7 @@ impl std::fmt::Display for Score {
             self.crossings,
             self.asymmetry,
             self.detour,
+            self.jogs,
             self.mixed_cells,
             self.gap_spread,
             self.scatter,
@@ -305,6 +316,16 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
             r.polyline.last().map_or(0, |p| p.1),
         );
         let detour = if back { 0 } else { travelled - (y1 - y0).abs() };
+        // The fewest corners this edge could have: none if its ends share a
+        // row, a Z for a change of row, a lane's four for a back edge.
+        let fewest = if back {
+            4
+        } else if y0 == y1 {
+            0
+        } else {
+            2
+        };
+        let jogs = bends.saturating_sub(fewest);
         edges.push(EdgeScore {
             edge: EdgeId(u32::try_from(ei).unwrap_or(u32::MAX)),
             back,
@@ -316,6 +337,7 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
             crossings: crossings[ei],
             overlaps: overlaps[ei],
             detour,
+            jogs,
         });
     }
 
@@ -377,6 +399,7 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
     let overlaps: usize = edges.iter().map(|e| e.overlaps).sum::<usize>() / 2;
     let crossings: usize = edges.iter().map(|e| e.crossings).sum::<usize>() / 2;
     let detour: i32 = edges.iter().map(|e| e.detour).sum();
+    let jogs: usize = edges.iter().map(|e| e.jogs).sum();
     let gap_spread = l
         .gaps
         .iter()
@@ -399,6 +422,7 @@ pub fn score(g: &ViewGraph, l: &Layout) -> Score {
         overlaps,
         crossings,
         asymmetry,
+        jogs,
         detour,
         mixed_cells,
         gap_spread,

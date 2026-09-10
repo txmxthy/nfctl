@@ -6,7 +6,7 @@
 use nfctl_core::model::Topology;
 use nfctl_core::service::{PipelineView, VertexView};
 use nfctl_graph::layout::{
-    self, Bundling, EdgeColour, EdgeId, Layout, LayoutOptions, ViewGraph, ViewNode,
+    self, Bundling, EdgeColour, EdgeId, Layout, LayoutOptions, Route, ViewGraph, ViewNode,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -207,14 +207,23 @@ impl Canvas {
         }
     }
 
-    /// Bridge every true crossing: a cell where one edge runs straight
-    /// through horizontally and another, sharing neither end, straight
-    /// through vertically. The cell takes the vertical's glyph and colour and
-    /// the horizontal is cut one cell either side, where it is a plain run.
-    fn bridge(&mut self, graph: &ViewGraph) {
+    /// Bridge a cell where one edge runs straight through horizontally and
+    /// another straight through vertically. A junction glyph says the two are
+    /// one line, which is true only when they meet at a shared end and carry
+    /// the same colour; anything else is bridged, so the cell takes the
+    /// vertical's glyph and colour and the horizontal is cut one cell either
+    /// side, where it is a plain run.
+    fn bridge(&mut self, graph: &ViewGraph, routes: &[Route]) {
         let ends = |e: EdgeId| {
             let e = &graph.edges[e.0 as usize];
             (e.from, e.to)
+        };
+        let colour = |e: EdgeId| {
+            routes
+                .get(e.0 as usize)
+                .filter(|r| r.edge == e)
+                .or_else(|| routes.iter().find(|r| r.edge == e))
+                .and_then(|r| r.colour)
         };
         for i in 0..self.cells.len() {
             let runs = &self.runs[i];
@@ -226,7 +235,10 @@ impl Canvas {
             };
             let (hs, ht) = ends(h);
             let (vs, vt) = ends(v);
-            if hs == vs || ht == vt {
+            // Unrelated lines are never one line; related ones are only when
+            // they carry the same colour.
+            let related = hs == vs || ht == vt;
+            if related && colour(h) == colour(v) {
                 continue;
             }
             self.over[i] = Some(('│', self.turn[i].0));
@@ -315,7 +327,7 @@ pub fn render(
         canvas.head(r.head.0, r.head.1, r.colour);
     }
     if palette.crossing() == CrossingStyle::Bridge {
-        canvas.bridge(&cards.graph);
+        canvas.bridge(&cards.graph, &cards.layout.routes);
     }
     frame.render_widget(Paragraph::new(canvas.lines(palette)), area);
 
