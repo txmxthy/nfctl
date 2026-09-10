@@ -711,6 +711,25 @@ fn merging(g: &ViewGraph) -> Vec<Option<u32>> {
         .collect()
 }
 
+/// The edge every merge group answers to: the lowest id in the group, or the
+/// edge itself when it has no company. Empty when rows were not shared out by
+/// group, so nothing is treated as merged.
+fn merged_rep(g: &ViewGraph, on: bool) -> Vec<EdgeId> {
+    let ids: Vec<EdgeId> = (0..g.edges.len()).map(edge_id).collect();
+    if !on {
+        return ids;
+    }
+    let mut first: HashMap<u32, EdgeId> = HashMap::new();
+    let merge = merging(g);
+    ids.iter()
+        .enumerate()
+        .map(|(i, &id)| match merge[i] {
+            Some(gid) => *first.entry(gid).or_insert(id),
+            None => id,
+        })
+        .collect()
+}
+
 /// Give every pass slot a row, one row per edge across all the columns it
 /// passes so a long edge runs straight. The row wanted is `wanted`. It must
 /// be free in every pass column, otherwise the free row nearest the wanted
@@ -877,6 +896,15 @@ fn spans(
         per_gap[gap].push(s);
         (gap, per_gap[gap].len() - 1)
     };
+    // The pass slots of a merge group are one line, so they answer to one
+    // key: the tracks then hold them as a single trunk with a junction per
+    // branch, instead of a bundle of parallel verticals a row apart. Only
+    // when the rows were shared out that way in the first place.
+    let rep = merged_rep(g, !geo.exit.is_empty());
+    let node_key = |n: LNode| match n {
+        LNode::Pass(e) => key(LNode::Pass(rep[e.0 as usize])),
+        LNode::Real(_) => key(n),
+    };
     let forward = l
         .segments
         .iter()
@@ -891,8 +919,8 @@ fn spans(
                     hi: y0.max(y1),
                     y_in: y0,
                     y_out: y1,
-                    src: key(s.from),
-                    dst: key(s.to),
+                    src: node_key(s.from),
+                    dst: node_key(s.to),
                     colour: colour.get(s.edge.0 as usize).copied().flatten(),
                 },
             )
