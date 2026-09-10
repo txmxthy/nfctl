@@ -21,7 +21,10 @@ A drawn pipeline may use only these shapes:
 - Fan-outs and fan-ins are **symmetric** around the bus row; spacing is even;
   colour follows the tag combination.
 
-Under `Bundling::Ribbon` a card is as tall as it needs to be: one interior
+Under `Bundling::Ribbon` a cell is never asked to hold two colours except
+where two edges cross: a row is shared only by edges that meet at an end and
+carry the same colour, and so is a track. What is left of `mixed_cells` is
+then exactly `cross_cells`. A card is as tall as it needs to be: one interior
 row for every colour that leaves it and one for every colour that arrives,
 whichever is more, so no two colours share an attach row. The default
 bundling has no use for the room and keeps every card at five rows.

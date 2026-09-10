@@ -469,6 +469,7 @@ const RIBBON_BUDGET: i32 = 3;
 /// so nothing is dragged far from where it belongs. Rows are taken in order,
 /// so runs keep their order and none crosses another inside the ribbon.
 fn ribbon(g: &ViewGraph, l: &Layered, geo: &mut Geometry) {
+    let one_line = same_line(g, true);
     let cols = l.columns.len();
     if cols == 0 {
         return;
@@ -508,12 +509,9 @@ fn ribbon(g: &ViewGraph, l: &Layered, geo: &mut Geometry) {
                 && pass_cols.iter().all(|&col| {
                     let at = row_index(r);
                     !covered[col].get(at).copied().unwrap_or(false)
-                        && taken[col].get(at).is_none_or(|v| {
-                            v.iter().all(|other| {
-                                let other = &g.edges[other.0 as usize];
-                                other.from == edge.from || other.to == edge.to
-                            })
-                        })
+                        && taken[col]
+                            .get(at)
+                            .is_none_or(|v| v.iter().all(|&o| one_line(o, e)))
                         && !geo.reserved[col].get(at).copied().unwrap_or(false)
                 })
         };
@@ -763,6 +761,22 @@ fn merging(g: &ViewGraph) -> Vec<Option<u32>> {
         .collect()
 }
 
+/// Whether two edges may be drawn on one row: they must meet at an end, and
+/// under `by_colour` they must be the same colour, since a cell holds one
+/// colour and the other would simply be lost.
+fn same_line(g: &ViewGraph, by_colour: bool) -> impl Fn(EdgeId, EdgeId) -> bool {
+    let colour = super::colours(g);
+    let ends: Vec<(NodeId, NodeId)> = g.edges.iter().map(|e| (e.from, e.to)).collect();
+    move |a: EdgeId, b: EdgeId| {
+        let (i, j) = (a.0 as usize, b.0 as usize);
+        let (Some(&(af, at)), Some(&(bf, bt))) = (ends.get(i), ends.get(j)) else {
+            return false;
+        };
+        (af == bf || at == bt)
+            && (!by_colour || colour.get(i).copied().flatten() == colour.get(j).copied().flatten())
+    }
+}
+
 /// The edge every merge group answers to: the lowest id in the group, or the
 /// edge itself when it has no company. Empty when rows were not shared out by
 /// group, so nothing is treated as merged.
@@ -793,11 +807,13 @@ fn merged_rep(g: &ViewGraph, on: bool) -> Vec<EdgeId> {
 /// join.
 fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry) {
     let cols = l.columns.len();
-    let merge = if geo.exit.is_empty() {
-        vec![None; g.edges.len()]
-    } else {
+    let own_row = !geo.exit.is_empty();
+    let merge = if own_row {
         merging(g)
+    } else {
+        vec![None; g.edges.len()]
     };
+    let one_line = same_line(g, own_row);
     // The row the first edge of each merge group settled on: its fellows join
     // it there rather than each picking the row that suits it alone, which is
     // what left them drawn as a stack of parallel lines saying one thing.
@@ -839,12 +855,9 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry) {
             let (col, at) = (cols[k], row_index(row));
             row < 0
                 || covered[col].get(at).copied().unwrap_or(false)
-                || taken[col].get(at).is_some_and(|v| {
-                    v.iter().any(|other| {
-                        let other = &g.edges[other.0 as usize];
-                        !share || (other.from != edge.from && other.to != edge.to)
-                    })
-                })
+                || taken[col]
+                    .get(at)
+                    .is_some_and(|v| v.iter().any(|&o| !share || !one_line(o, e)))
                 || (geo.reserved[col].get(at).copied().unwrap_or(false) && !held_in(k, row))
         };
         let free = |taken: &[Vec<Vec<EdgeId>>], row: i32, share: bool| {
