@@ -168,6 +168,17 @@ pub fn colours(g: &ViewGraph) -> Vec<Option<EdgeColour>> {
 /// built in full, placement search included, and the lowest full score wins.
 #[must_use]
 pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
+    let drawn = layout_with(g, opts, opts.bundling == Bundling::Ribbon);
+    // Giving each colour its own track can leave an edge with a junction at
+    // each end of a split bus. Where it does, the shared bus is the better
+    // drawing even though it loses a colour.
+    if score::score(g, &drawn).junction_over > 0 {
+        return layout_with(g, opts, false);
+    }
+    drawn
+}
+
+fn layout_with(g: &ViewGraph, opts: LayoutOptions, by_colour: bool) -> Layout {
     let edge_colour = colours(g);
     let ranked = rank::rank(g);
     let badges = badges_for(g, &edge_colour);
@@ -177,6 +188,7 @@ pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
         edge_colour: &edge_colour,
         badges: &badges,
         opts,
+        by_colour,
     };
     let mut layered = order::layer(g, &ranked);
     let orderings = order::orderings(&mut layered);

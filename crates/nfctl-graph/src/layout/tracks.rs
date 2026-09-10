@@ -4,7 +4,7 @@
 //! tracks left to right so no horizontal lands on another run's corner and
 //! horizontals cross as few verticals as possible.
 
-use super::EdgeId;
+use super::{EdgeColour, EdgeId};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Span {
@@ -17,11 +17,13 @@ pub(crate) struct Span {
     pub y_out: i32,
     pub src: u32,
     pub dst: u32,
+    /// The edge's colour, so a bus can be split by colour when asked.
+    pub colour: Option<EdgeColour>,
 }
 
 /// Returns, per span (same order as input), the track index; and the track
 /// count. A straight span (no vertical run) takes no track and reports 0.
-pub(crate) fn pack(spans: &[Span]) -> (Vec<usize>, usize) {
+pub(crate) fn pack(spans: &[Span], by_colour: bool) -> (Vec<usize>, usize) {
     let mut order: Vec<usize> = (0..spans.len())
         .filter(|&i| spans[i].lo != spans[i].hi)
         .collect();
@@ -32,9 +34,12 @@ pub(crate) fn pack(spans: &[Span]) -> (Vec<usize>, usize) {
         let s = spans[i];
         let compatible = |t: &Vec<Span>| {
             t.iter().all(|o| {
-                // One bus per source (and per target): every branch leaves the
-                // same column through its own junction, whatever its colour.
-                let related = o.src == s.src || o.dst == s.dst;
+                // One bus per source (and per target): every branch leaves
+                // the same column through its own junction. With `by_colour`
+                // a bus is split so each colour runs on its own, since a cell
+                // can only hold one colour and a shared bus would lose them.
+                let related =
+                    (o.src == s.src || o.dst == s.dst) && (!by_colour || o.colour == s.colour);
                 let disjoint = s.hi + 1 < o.lo || o.hi + 1 < s.lo;
                 related || disjoint
             })

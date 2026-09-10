@@ -209,7 +209,13 @@ one arrowhead, while a different colour always gets a row, and an arrowhead, of
 its own. A card with more colours than rows spreads them evenly, so the pair
 that has to share sits in the middle; the bus also moves against the card,
 leaving one shared cell rather than a stub. Groups take rows in the order of
-the middle of the cards they join. A fan-out therefore leaves as
+the middle of the cards they join.
+
+Each colour also gets its own track in the gap, so a bus never carries two
+colours: what looked like one line changing colour along its length is now one
+line per colour running side by side. Where splitting a bus would leave an edge
+with a junction at each end of it, the shared bus is kept instead, since one
+lost colour reads better than two junctions. A fan-out therefore leaves as
 that many coloured lines side by side instead of one shared stub, and a fan-in
 arrives as that many arrows. Long runs crossing the same columns are then
 pulled against each other, while that costs a run no more than three rows, so

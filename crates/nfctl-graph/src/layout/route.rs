@@ -54,6 +54,10 @@ pub(crate) struct Ctx<'a> {
     pub edge_colour: &'a [Option<EdgeColour>],
     pub badges: &'a HashMap<NodeId, Vec<Badge>>,
     pub opts: LayoutOptions,
+    /// Give each colour leaving a card its own track, so a bus never carries
+    /// two colours. Dropped when the result would give an edge more than one
+    /// junction at an end.
+    pub by_colour: bool,
 }
 
 impl Ctx<'_> {
@@ -791,6 +795,7 @@ fn spans(
     l: &Layered,
     geo: &Geometry,
     lane: &HashMap<NodeId, i32>,
+    colour: &[Option<EdgeColour>],
 ) -> Spans {
     let cols = l.columns.len();
     let mut per_gap: Vec<Vec<Span>> = vec![Vec::new(); cols.saturating_sub(1)];
@@ -814,6 +819,7 @@ fn spans(
                     y_out: y1,
                     src: key(s.from),
                     dst: key(s.to),
+                    colour: colour.get(s.edge.0 as usize).copied().flatten(),
                 },
             )
         })
@@ -837,6 +843,7 @@ fn spans(
                     y_out: ly,
                     src: LANE_OUT,
                     dst: e.from.0,
+                    colour: colour.get(ei).copied().flatten(),
                 },
             )
         });
@@ -851,6 +858,7 @@ fn spans(
                     y_out: yv,
                     src: e.to.0,
                     dst: LANE_IN,
+                    colour: colour.get(ei).copied().flatten(),
                 },
             )
         });
@@ -875,7 +883,14 @@ struct Columns {
 /// a couple of cells between a card and the bus its edges share; those cells
 /// carry every branch at once so they have to be drawn grey. `hug` puts the
 /// tracks against the card instead, so the shared part is the junction alone.
-fn columns(sp: &Spans, cols: usize, card_w: i32, margin: i32, hug: bool) -> Columns {
+fn columns(
+    sp: &Spans,
+    cols: usize,
+    card_w: i32,
+    margin: i32,
+    hug: bool,
+    by_colour: bool,
+) -> Columns {
     let mut out = Columns {
         col_x: vec![0; cols],
         gaps: Vec::new(),
@@ -886,7 +901,7 @@ fn columns(sp: &Spans, cols: usize, card_w: i32, margin: i32, hug: bool) -> Colu
         out.col_x[c] = out.width;
         out.width += card_w;
         if c + 1 < cols {
-            let (assign, n) = pack(&sp.per_gap[c]);
+            let (assign, n) = pack(&sp.per_gap[c], by_colour);
             let width = u16::try_from(n)
                 .unwrap_or(u16::MAX)
                 .saturating_add(2)
@@ -1816,7 +1831,7 @@ fn build_with(ctx: &Ctx, layered: &Layered, ys: &Placement, gaps: &Gaps) -> Layo
     let card_w = i32::from(ctx.opts.card_w);
     let geo = geometry(g, layered, ys, gaps, ctx.opts);
     let lane = lanes(g, ranked, geo.cards_h);
-    let sp = spans(g, ranked, layered, &geo, &lane);
+    let sp = spans(g, ranked, layered, &geo, &lane, ctx.edge_colour);
     let margin = if g
         .edges
         .iter()
@@ -1833,6 +1848,7 @@ fn build_with(ctx: &Ctx, layered: &Layered, ys: &Placement, gaps: &Gaps) -> Layo
         card_w,
         margin,
         ctx.opts.bundling == Bundling::Ribbon,
+        ctx.by_colour,
     );
     let routes: Vec<Route> = (0..g.edges.len())
         .map(|ei| {
