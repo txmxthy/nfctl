@@ -27,7 +27,21 @@ pub(crate) fn pack(spans: &[Span], by_colour: bool) -> (Vec<usize>, usize) {
     let mut order: Vec<usize> = (0..spans.len())
         .filter(|&i| spans[i].lo != spans[i].hi)
         .collect();
-    order.sort_by_key(|&i| (spans[i].lo, spans[i].hi, spans[i].edge));
+    // Longest run first, where each colour has its own track anyway. Packing
+    // by the topmost row fills the first track with whatever starts highest,
+    // which pairs a long run with a short one and leaves the other long run
+    // to turn later than the short one it then has to cross. The outermost
+    // branch of a fan wants the earliest turn. Packing by row is the fewest
+    // tracks, so the default, which shares a track between colours, keeps it.
+    order.sort_by_key(|&i| {
+        let s = &spans[i];
+        (
+            std::cmp::Reverse(by_colour.then_some(s.hi - s.lo)),
+            s.lo,
+            s.hi,
+            s.edge,
+        )
+    });
     let mut tracks: Vec<Vec<Span>> = Vec::new();
     let mut assign = vec![0usize; spans.len()];
     for i in order {
