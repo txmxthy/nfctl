@@ -315,6 +315,7 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry, card_h: i32) {
     geo.exit = vec![None; g.edges.len()];
     geo.entry = vec![None; g.edges.len()];
     let rows = card_h - 2;
+    let colour = super::colours(g);
     let card_at = |geo: &Geometry, n: NodeId| geo.at(LNode::Real(n));
     // Edges at each card, as (other end, edge), source side then target side.
     let mut out: Vec<Vec<(i32, EdgeId)>> = vec![Vec::new(); g.nodes.len()];
@@ -347,37 +348,60 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry, card_h: i32) {
                 .collect(),
         }
     };
-    for (node, ends) in out.iter_mut().enumerate() {
+    // Edges of one colour share a row, so they leave through one line and
+    // arrive on one arrowhead; a different colour always gets a row of its
+    // own while there are rows left, so nothing that shares a cell has to be
+    // drawn grey. Groups take rows in the order of the cards they join.
+    let assign = |ends: &mut Vec<(i32, EdgeId)>, node: usize, exit: bool, geo: &mut Geometry| {
         ends.sort_unstable();
-        let offsets = spread(ends.len());
-        if offsets.is_empty() {
-            continue;
+        let mut groups: Vec<(Option<EdgeColour>, Vec<EdgeId>)> = Vec::new();
+        for &(_, e) in ends.iter() {
+            let c = colour.get(e.0 as usize).copied().flatten();
+            match groups.iter_mut().find(|(g, _)| *g == c) {
+                Some((_, members)) => members.push(e),
+                None => groups.push((c, vec![e])),
+            }
         }
-        let top = geo
+        // Groups take rows in the order of the middle of the cards they
+        // join, so the lines cross each other as little as leaving together
+        // allows.
+        let mid = |members: &Vec<EdgeId>| {
+            let rows: Vec<i32> = ends
+                .iter()
+                .filter(|(_, e)| members.contains(e))
+                .map(|(r, _)| *r)
+                .collect();
+            rows.iter().sum::<i32>() * 2 / i(rows.len().max(1))
+        };
+        groups.sort_by_key(|(_, members)| mid(members));
+        let offsets = spread(groups.len());
+        if offsets.is_empty() {
+            return;
+        }
+        let Some(top) = geo
             .cards
             .iter()
             .find(|k| k.node.0 as usize == node)
-            .map(|k| k.y);
-        let Some(top) = top else { continue };
-        for ((_, e), offset) in ends.iter().zip(&offsets) {
-            geo.exit[e.0 as usize] = Some(top + offset);
+            .map(|k| k.y)
+        else {
+            return;
+        };
+        for ((_, members), offset) in groups.iter().zip(&offsets) {
+            for e in members {
+                let cell = if exit {
+                    &mut geo.exit[e.0 as usize]
+                } else {
+                    &mut geo.entry[e.0 as usize]
+                };
+                *cell = Some(top + offset);
+            }
         }
-    }
-    for (node, ends) in into.iter_mut().enumerate() {
-        ends.sort_unstable();
-        let offsets = spread(ends.len());
-        if offsets.is_empty() {
-            continue;
-        }
-        let top = geo
-            .cards
-            .iter()
-            .find(|k| k.node.0 as usize == node)
-            .map(|k| k.y);
-        let Some(top) = top else { continue };
-        for ((_, e), offset) in ends.iter().zip(&offsets) {
-            geo.entry[e.0 as usize] = Some(top + offset);
-        }
+    };
+    for node in 0..g.nodes.len() {
+        let mut ends = std::mem::take(&mut out[node]);
+        assign(&mut ends, node, true, geo);
+        let mut ends = std::mem::take(&mut into[node]);
+        assign(&mut ends, node, false, geo);
     }
 }
 
