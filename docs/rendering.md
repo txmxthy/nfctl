@@ -203,8 +203,10 @@ the row they both want, whatever the gap between them.
 
 `Bundling::Ribbon` draws the same graph for readers who follow an edge by its
 colour. Every edge at a card takes a row of its own: one edge the middle row,
-two the outer two so the pair stays symmetric, three all of them, and a card
-with more edges than rows keeps the single bus. A fan-out therefore leaves as
+two the outer two so the pair stays symmetric, three all of them. A card with more
+edges than rows spreads them evenly over the rows, so the pair that has to
+share sits in the middle and the outer rows stay one edge each; the bus also
+moves against the card, leaving one shared cell rather than a stub. A fan-out therefore leaves as
 that many coloured lines side by side instead of one shared stub, and a fan-in
 arrives as that many arrows. Long runs crossing the same columns are then
 pulled against each other, while that costs a run no more than three rows, so

@@ -329,12 +329,22 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry, card_h: i32) {
         out[e.from.0 as usize].push((to_row, id));
         into[e.to.0 as usize].push((from_row, id));
     }
+    // One edge takes the middle row, two the outer two so the pair stays
+    // symmetric, three all of them. Past that the rows are shared out in
+    // order, so only the edges on a shared row have a shared stub instead of
+    // all of them.
     let spread = |n: usize| -> Vec<i32> {
         match (n, rows) {
+            (0, _) => Vec::new(),
             (1, _) => vec![rows / 2 + 1],
             (2, r) if r >= 3 => vec![1, r],
-            (k, r) if i32::try_from(k).unwrap_or(i32::MAX) <= r => (1..=i(k)).collect(),
-            _ => Vec::new(),
+            (k, r) if i(k) <= r => (1..=i(k)).collect(),
+            // More edges than rows: spread them evenly over the rows, so the
+            // pair that has to share sits in the middle and the outer rows
+            // stay one edge each.
+            (k, r) => (0..k)
+                .map(|x| 1 + (i(x) * (r - 1) * 2 + i(k) - 1) / (2 * (i(k) - 1)))
+                .collect(),
         }
     };
     for (node, ends) in out.iter_mut().enumerate() {
@@ -837,7 +847,11 @@ struct Columns {
     width: i32,
 }
 
-fn columns(sp: &Spans, cols: usize, card_w: i32, margin: i32) -> Columns {
+/// Where the tracks of each gap sit. Normally they are centred, which leaves
+/// a couple of cells between a card and the bus its edges share; those cells
+/// carry every branch at once so they have to be drawn grey. `hug` puts the
+/// tracks against the card instead, so the shared part is the junction alone.
+fn columns(sp: &Spans, cols: usize, card_w: i32, margin: i32, hug: bool) -> Columns {
     let mut out = Columns {
         col_x: vec![0; cols],
         gaps: Vec::new(),
@@ -853,7 +867,11 @@ fn columns(sp: &Spans, cols: usize, card_w: i32, margin: i32) -> Columns {
                 .unwrap_or(u16::MAX)
                 .saturating_add(2)
                 .max(MIN_GAP);
-            let pad = (i32::from(width) - 2 - i(n)) / 2;
+            let pad = if hug {
+                0
+            } else {
+                (i32::from(width) - 2 - i(n)) / 2
+            };
             let x0 = out.width;
             let tracks = (0..n)
                 .map(|t| Track {
@@ -1785,7 +1803,13 @@ fn build_with(ctx: &Ctx, layered: &Layered, ys: &Placement, gaps: &Gaps) -> Layo
     } else {
         0
     };
-    let cx = columns(&sp, cols, card_w, margin);
+    let cx = columns(
+        &sp,
+        cols,
+        card_w,
+        margin,
+        ctx.opts.bundling == Bundling::Ribbon,
+    );
     let routes: Vec<Route> = (0..g.edges.len())
         .map(|ei| {
             let pts = if ranked.back[ei] {
