@@ -7,6 +7,7 @@ use super::order::{LNode, Layered, cards};
 use super::rank::Ranked;
 use super::score::{Score, score};
 use super::tracks::{Span, pack};
+use super::view::ViewEdge;
 use super::{
     Badge, Bundling, CardPos, EdgeColour, EdgeId, GapPlan, Layout, LayoutOptions, MIN_GAP, NodeId,
     Route, Slot, Track, ViewGraph, i,
@@ -659,12 +660,33 @@ fn fit(col: &mut [i32], gaps: &[i32], card_h: i32, height: i32) {
 /// the length of the drawing somewhere else. Only when the branches of a fan
 /// still share their exit row is the early turn worth it, because then they
 /// have to separate before they can be told apart.
-fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32, own_row: bool) -> i32 {
-    if outs >= 2 && ins == 1 && !own_row {
+fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32, own_row: bool, merge: bool) -> i32 {
+    // An edge with company takes the row it will arrive on, which its
+    // fellows also take, so they run as one line from as early as they can
+    // and only the branches into it show how many there are. Alone, it keeps
+    // the row it left on and turns once at the end.
+    if merge || (outs >= 2 && ins == 1 && !own_row) {
         dst_row
     } else {
         src_row
     }
+}
+
+/// Edges that end at the same card carrying the same tags: they can share one
+/// line, so they are given the row they arrive on and merge on to it. Tags,
+/// not the colour they are drawn in: the palette has fewer hues than a
+/// pipeline can have tag sets, so two unrelated ones can share a hue and must
+/// not be drawn as one line.
+fn merging(g: &ViewGraph) -> Vec<bool> {
+    let key = |e: &ViewEdge| (e.to, e.tags.join("\u{1f}"));
+    let mut count: HashMap<(NodeId, String), usize> = HashMap::new();
+    for e in &g.edges {
+        *count.entry(key(e)).or_default() += 1;
+    }
+    g.edges
+        .iter()
+        .map(|e| count.get(&key(e)).is_some_and(|&n| n >= 2))
+        .collect()
 }
 
 /// Give every pass slot a row, one row per edge across all the columns it
@@ -678,6 +700,11 @@ fn wanted(outs: usize, ins: usize, src_row: i32, dst_row: i32, own_row: bool) ->
 /// join.
 fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
     let cols = l.columns.len();
+    let merge = if geo.exit.is_empty() {
+        vec![false; g.edges.len()]
+    } else {
+        merging(g)
+    };
     // Rows a card covers, margins included, per column and row.
     let mut covered: Vec<Vec<bool>> = vec![vec![false; row_index(geo.cards_h) + 1]; cols];
     for k in &geo.cards {
@@ -702,6 +729,7 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
             src_row,
             dst_row,
             !geo.exit.is_empty(),
+            merge.get(e.0 as usize).copied().unwrap_or(false),
         );
         // The rows held open for this edge's slot, per pass column.
         let held_rows: Vec<Option<(i32, i32)>> = cols
@@ -725,7 +753,10 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
         let free = |taken: &[Vec<Vec<EdgeId>>], row: i32, share: bool| {
             (0..cols.len()).all(|k| !blocked(taken, k, row, share))
         };
-        let row = if free(&taken, want, false) {
+        // An edge with company wants the row its fellows are on, so it takes
+        // one already given out; alone it wants a row to itself.
+        let with_company = merge.get(e.0 as usize).copied().unwrap_or(false);
+        let row = if free(&taken, want, with_company) {
             want
         } else {
             // Any row between the two ends adds no detour; among those (or
@@ -741,7 +772,8 @@ fn pass_rows(g: &ViewGraph, l: &Layered, geo: &mut Geometry, card_h: i32) {
                 .min_by_key(|&r| {
                     (
                         detour(r),
-                        !free(&taken, r, false),
+                        // Shared where it has company to join, private otherwise.
+                        free(&taken, r, false) == with_company,
                         !held(r),
                         (r - want).abs(),
                         r,
@@ -1082,6 +1114,11 @@ pub(crate) fn reslot(
     layout: &Layout,
     own_row: bool,
 ) -> Vec<Vec<LNode>> {
+    let merge = if own_row {
+        merging(g)
+    } else {
+        vec![false; g.edges.len()]
+    };
     let card = |id: NodeId| layout.card(id).map_or((0, 0), |k| (k.y, i32::from(k.h)));
     let row = |id: NodeId| {
         let (y, h) = card(id);
@@ -1145,6 +1182,7 @@ pub(crate) fn reslot(
                     src,
                     dst,
                     own_row,
+                    merge.get(e.0 as usize).copied().unwrap_or(false),
                 );
                 let (lo, hi) = (src.min(dst), src.max(dst));
                 let detour = |r: i32| (lo - r).max(0) + (r - hi).max(0);
@@ -1687,6 +1725,11 @@ impl Measure {
 
 impl Paths {
     fn from_geometry(g: &ViewGraph, ranked: &Ranked, l: &Layered, geo: &Geometry) -> Self {
+        let merge = if geo.exit.is_empty() {
+            vec![false; g.edges.len()]
+        } else {
+            merging(g)
+        };
         // Rows each forward edge travels, column by column: its source's, each
         // pass row, its target's. Segments come in column order per edge.
         let mut rows: Vec<Path> = vec![Vec::new(); g.edges.len()];
@@ -1707,7 +1750,8 @@ impl Paths {
                     let (ct, yt) = geo.at(LNode::Real(e.to));
                     let outs = l.out_deg[e.from.0 as usize];
                     let ins = l.in_deg[e.to.0 as usize];
-                    if wanted(outs, ins, ys, yt, !geo.exit.is_empty()) == yt && ys != yt {
+                    if wanted(outs, ins, ys, yt, !geo.exit.is_empty(), merge[ei]) == yt && ys != yt
+                    {
                         ct
                     } else {
                         cs
