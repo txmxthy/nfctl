@@ -44,10 +44,23 @@ pub(crate) fn pack(spans: &[Span], by_colour: bool) -> (Vec<usize>, usize) {
                 related || disjoint
             })
         };
-        let slot = tracks.iter().position(compatible).unwrap_or_else(|| {
-            tracks.push(Vec::new());
-            tracks.len() - 1
-        });
+        // A track already carrying this run's bus before any other: first fit
+        // alone would open a new track for a long run and then drop a short
+        // one of the same colour and target into an older track, drawing one
+        // line as two a column apart.
+        let joins = |t: &Vec<Span>| {
+            compatible(t)
+                && t.iter()
+                    .any(|o| (o.src == s.src || o.dst == s.dst) && o.colour == s.colour)
+        };
+        let slot = tracks
+            .iter()
+            .position(joins)
+            .or_else(|| tracks.iter().position(compatible))
+            .unwrap_or_else(|| {
+                tracks.push(Vec::new());
+                tracks.len() - 1
+            });
         tracks[slot].push(s);
         assign[i] = slot;
     }
