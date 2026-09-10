@@ -92,6 +92,11 @@ struct Geometry {
     /// The held rows (`lo..=hi`) of the gap an edge's pass slot sits in, per
     /// column it passes.
     slot: HashMap<(usize, EdgeId), (i32, i32)>,
+    /// The row an edge leaves its source on, when the style gives each edge a
+    /// row of its own instead of one shared bus. Empty otherwise.
+    exit: Vec<Option<i32>>,
+    /// The row an edge meets its target on, likewise.
+    entry: Vec<Option<i32>>,
 }
 
 impl Geometry {
@@ -109,6 +114,43 @@ impl Geometry {
             .copied()
             .flatten()
             .unwrap_or_default()
+    }
+
+    /// Where an edge leaves its source: its own row when the style gives it
+    /// one, else the card's middle row.
+    fn exit_at(&self, e: EdgeId, from: LNode) -> (usize, i32) {
+        let (col, row) = self.at(from);
+        (
+            col,
+            self.exit
+                .get(e.0 as usize)
+                .copied()
+                .flatten()
+                .unwrap_or(row),
+        )
+    }
+
+    /// Where an edge meets its target, likewise.
+    fn entry_at(&self, e: EdgeId, to: LNode) -> (usize, i32) {
+        let (col, row) = self.at(to);
+        (
+            col,
+            self.entry
+                .get(e.0 as usize)
+                .copied()
+                .flatten()
+                .unwrap_or(row),
+        )
+    }
+
+    /// The row a segment end sits on: a card end takes the edge's own row
+    /// when it has one, a pass slot its own.
+    fn seg_at(&self, e: EdgeId, n: LNode, is_source: bool) -> (usize, i32) {
+        match n {
+            LNode::Real(_) if is_source => self.exit_at(e, n),
+            LNode::Real(_) => self.entry_at(e, n),
+            LNode::Pass(_) => self.at(n),
+        }
     }
 
     fn place(&mut self, n: LNode, at: (usize, i32)) {
@@ -203,6 +245,8 @@ fn geometry(
         cards_h: height,
         reserved: vec![vec![false; row_index(height) + 1]; l.columns.len()],
         slot: HashMap::new(),
+        exit: Vec::new(),
+        entry: Vec::new(),
     };
     for (c, col) in l.columns.iter().enumerate() {
         let mut placed = 0;
@@ -250,11 +294,81 @@ fn geometry(
             .collect();
         geo.columns.push(slots);
     }
+    if opts.bundling == Bundling::Ribbon {
+        own_rows(g, &mut geo, card_h);
+    }
     pass_rows(g, l, &mut geo, card_h);
     if opts.bundling == Bundling::Ribbon {
         ribbon(g, l, &mut geo, card_h);
     }
     geo
+}
+
+/// Give every edge at a card its own row, so a fan-out leaves as that many
+/// coloured lines side by side instead of one shared stub into a bus, and a
+/// fan-in arrives as that many arrows. A card has `card_h - 2` rows to give:
+/// one edge takes the middle, two take the outer two so the pair stays
+/// symmetric, three take all of them. A card with more edges than rows keeps
+/// the single bus. Rows go to edges in the order of the cards they join, so
+/// the lines do not cross each other on the way out.
+fn own_rows(g: &ViewGraph, geo: &mut Geometry, card_h: i32) {
+    geo.exit = vec![None; g.edges.len()];
+    geo.entry = vec![None; g.edges.len()];
+    let rows = card_h - 2;
+    let card_at = |geo: &Geometry, n: NodeId| geo.at(LNode::Real(n));
+    // Edges at each card, as (other end, edge), source side then target side.
+    let mut out: Vec<Vec<(i32, EdgeId)>> = vec![Vec::new(); g.nodes.len()];
+    let mut into: Vec<Vec<(i32, EdgeId)>> = vec![Vec::new(); g.nodes.len()];
+    for (ei, e) in g.edges.iter().enumerate() {
+        let id = EdgeId(u32::try_from(ei).unwrap_or(u32::MAX));
+        let (from_col, from_row) = card_at(geo, e.from);
+        let (to_col, to_row) = card_at(geo, e.to);
+        if to_col <= from_col {
+            continue; // back edges keep the middle row and their lane
+        }
+        out[e.from.0 as usize].push((to_row, id));
+        into[e.to.0 as usize].push((from_row, id));
+    }
+    let spread = |n: usize| -> Vec<i32> {
+        match (n, rows) {
+            (1, _) => vec![rows / 2 + 1],
+            (2, r) if r >= 3 => vec![1, r],
+            (k, r) if i32::try_from(k).unwrap_or(i32::MAX) <= r => (1..=i(k)).collect(),
+            _ => Vec::new(),
+        }
+    };
+    for (node, ends) in out.iter_mut().enumerate() {
+        ends.sort_unstable();
+        let offsets = spread(ends.len());
+        if offsets.is_empty() {
+            continue;
+        }
+        let top = geo
+            .cards
+            .iter()
+            .find(|k| k.node.0 as usize == node)
+            .map(|k| k.y);
+        let Some(top) = top else { continue };
+        for ((_, e), offset) in ends.iter().zip(&offsets) {
+            geo.exit[e.0 as usize] = Some(top + offset);
+        }
+    }
+    for (node, ends) in into.iter_mut().enumerate() {
+        ends.sort_unstable();
+        let offsets = spread(ends.len());
+        if offsets.is_empty() {
+            continue;
+        }
+        let top = geo
+            .cards
+            .iter()
+            .find(|k| k.node.0 as usize == node)
+            .map(|k| k.y);
+        let Some(top) = top else { continue };
+        for ((_, e), offset) in ends.iter().zip(&offsets) {
+            geo.entry[e.0 as usize] = Some(top + offset);
+        }
+    }
 }
 
 /// How far a long edge may be pulled off the row that costs it least, to sit
@@ -654,8 +768,8 @@ fn spans(
         .segments
         .iter()
         .map(|s| {
-            let (_, y0) = geo.at(s.from);
-            let (_, y1) = geo.at(s.to);
+            let (_, y0) = geo.seg_at(s.edge, s.from, true);
+            let (_, y1) = geo.seg_at(s.edge, s.to, false);
             push(
                 s.col,
                 Span {
@@ -781,8 +895,8 @@ fn forward_route(
     let mut pts = Vec::new();
     for (k, &si) in segs.iter().enumerate() {
         let s = &l.segments[si];
-        let (c, y0) = geo.at(s.from);
-        let (_, y1) = geo.at(s.to);
+        let (c, y0) = geo.seg_at(id, s.from, true);
+        let (_, y1) = geo.seg_at(id, s.to, false);
         if k == 0 {
             pts.push((cx.col_x[c] + card_w, y0));
         }
@@ -1510,8 +1624,8 @@ impl Paths {
         let mut anchor: Vec<Option<usize>> = vec![None; g.edges.len()];
         for s in &l.segments {
             let ei = s.edge.0 as usize;
-            let (c0, y0) = geo.at(s.from);
-            let (c1, y1) = geo.at(s.to);
+            let (c0, y0) = geo.seg_at(s.edge, s.from, true);
+            let (c1, y1) = geo.seg_at(s.edge, s.to, false);
             if rows[ei].is_empty() {
                 rows[ei].push((y0, c0));
             }

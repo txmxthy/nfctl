@@ -199,6 +199,19 @@ cards want the same row the fans stay as they are: two cards fanning to the
 same pair, or fanned into from the same pair, each sit a card's step from
 the row they both want, whatever the gap between them.
 
+## Ribbon style
+
+`Bundling::Ribbon` draws the same graph for readers who follow an edge by its
+colour. Every edge at a card takes a row of its own: one edge the middle row,
+two the outer two so the pair stays symmetric, three all of them, and a card
+with more edges than rows keeps the single bus. A fan-out therefore leaves as
+that many coloured lines side by side instead of one shared stub, and a fan-in
+arrives as that many arrows. Long runs crossing the same columns are then
+pulled against each other, while that costs a run no more than three rows, so
+they read as a ribbon rather than scattered lines.
+
+The default stays `Spread`, where each edge takes the row that costs it least.
+
 ## What this cannot draw
 
 A cell has one colour. A bus carrying several tag combinations shows the
