@@ -93,6 +93,30 @@ impl DetailPanel {
         scroll
     }
 
+    /// Rows the panel needs at `width` to show everything: the border, the
+    /// two header rows, the flow box round the drawing, the edge table and
+    /// the warnings. A shorter panel clips the drawing and the table.
+    #[must_use]
+    pub fn height_for(&self, width: u16) -> u16 {
+        let Some(v) = &self.view else { return 5 };
+        let cards = CardView::new(
+            &v.pipeline.spec.topology,
+            width.saturating_sub(4),
+            self.expand_shards,
+            self.bundling,
+        );
+        let table = table_rows(v.edges.len());
+        let warn = u16::try_from(v.warnings.len()).unwrap_or(0);
+        let inner = 2u16
+            .saturating_add(cards.height().saturating_add(2))
+            .saturating_add(table)
+            .saturating_add(warn)
+            // The table takes at most half the panel, so a graph with far more
+            // edges than vertices needs the room to show them all.
+            .max(table.saturating_mul(2));
+        inner.saturating_add(2)
+    }
+
     fn columns(&self) -> usize {
         self.view
             .as_ref()
@@ -184,10 +208,7 @@ impl Model for DetailPanel {
         let cards_h = cards.height();
         // The edge table sits at the bottom, at most half the panel; the flow
         // takes whatever is left above it. Both counting their borders.
-        let rows = u16::try_from(v.edges.len())
-            .unwrap_or(u16::MAX)
-            .saturating_add(3);
-        let table_h = rows.min(inner.height / 2).max(6);
+        let table_h = table_rows(v.edges.len()).min(inner.height / 2).max(6);
         let [head, dag, edges, warn] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Min(
@@ -250,6 +271,14 @@ impl Model for DetailPanel {
             .collect();
         frame.render_widget(Paragraph::new(warnings), warn);
     }
+}
+
+/// Rows the edge table wants: a row an edge, a header and its own border.
+fn table_rows(edges: usize) -> u16 {
+    u16::try_from(edges)
+        .unwrap_or(u16::MAX)
+        .saturating_add(3)
+        .max(6)
 }
 
 /// Draw a titled box over `area` and return the room left inside it.

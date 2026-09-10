@@ -27,7 +27,9 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
 
-const WIDTHS: [u16; 3] = [110, 160, 220];
+/// The widths worth looking at: the one the layout is judged at, and a narrow
+/// terminal to check it still reads when the columns have to shrink.
+const WIDTHS: [u16; 2] = [220, 110];
 
 struct Item {
     name: String,
@@ -197,21 +199,25 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
         }
         panel
     };
-    let draw = |panel: &DetailPanel, expand: bool, w: u16| {
-        let nodes = if expand {
-            ViewGraph::expanded(&item.topology).nodes.len()
-        } else {
-            ViewGraph::collapsed(&item.topology).nodes.len()
-        };
-        let h = u16::try_from(nodes * 6 + 14).unwrap_or(u16::MAX).min(240);
+    // As tall as the panel needs and no taller: sized by guess, the frame was
+    // mostly empty box.
+    let draw = |panel: &DetailPanel, _expand: bool, w: u16| {
+        let h = panel.height_for(w).min(240);
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| panel.view(f, f.area())).unwrap();
         buffer_html(term.backend().buffer())
     };
+    // One drawing style, the one the card view uses: a row per colour, and a
+    // crossing drawn as a bridge. Comparing the alternatives is what the
+    // scorer is for.
+    let bridge = Palette::default().with_crossing(CrossingStyle::Bridge);
     let mut frames = Vec::new();
-    for expand in [false, true] {
-        let panel = panel(expand, Palette::default(), Bundling::Spread);
+    for expand in [true, false] {
+        let panel = panel(expand, bridge, Bundling::Ribbon);
         for w in WIDTHS {
+            if !expand && w != 220 {
+                continue; // the narrow check is worth one frame, not two
+            }
             let label = format!(
                 "cards {w} {}",
                 if expand { "expanded" } else { "collapsed" }
@@ -219,41 +225,19 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
             frames.push((label, draw(&panel, expand, w)));
         }
     }
-    // The variants, on the widest expanded frame only: crossings drawn as
-    // bridges, long edges bundled into a ribbon, and both together.
-    let bridge = Palette::default().with_crossing(CrossingStyle::Bridge);
-    for (label, palette, bundling) in [
-        ("cards 220 expanded · bridge", bridge, Bundling::Spread),
-        (
-            "cards 220 expanded · ribbon",
-            Palette::default(),
-            Bundling::Ribbon,
-        ),
-        (
-            "cards 220 expanded · ribbon+bridge",
-            bridge,
-            Bundling::Ribbon,
-        ),
-    ] {
-        let variant = panel(true, palette, bundling);
-        frames.push((label.to_owned(), draw(&variant, true, 220)));
-    }
     frames
 }
 
 fn dag_frames(item: &Item) -> Vec<(String, String)> {
-    let mut frames = Vec::new();
-    for (label, collapse) in [("dag collapsed", true), ("dag expanded", false)] {
-        let opts = RenderOptions {
-            width: Some(200),
-            collapse_shards: collapse,
-            colour: true,
-        };
-        frames.push((
-            label.to_owned(),
-            ansi_html(&render_with(&item.topology, Format::Ascii, opts)),
-        ));
-    }
+    let opts = RenderOptions {
+        width: Some(200),
+        collapse_shards: false,
+        colour: true,
+    };
+    let mut frames = vec![(
+        "dag expanded".to_owned(),
+        ansi_html(&render_with(&item.topology, Format::Ascii, opts)),
+    )];
     frames.push((
         "mermaid".to_owned(),
         format!(
@@ -278,7 +262,7 @@ nav a{display:block;color:var(--muted);text-decoration:none;padding:2px 6px;bord
 nav a.on,nav a:hover{color:var(--fg);background:var(--line)}
 nav a .sc{float:right;color:var(--dim);font-size:11px}
 nav .sort{margin:0 4px 8px;color:var(--muted);font-size:12px}nav .sort button{font:inherit;background:var(--line);color:var(--fg);border:0;padding:1px 6px;border-radius:3px;cursor:pointer}nav .sort button.on{background:var(--accent);color:var(--bg)}
-.score{margin:0 0 8px;color:var(--muted);font-size:12px;white-space:pre}
+.score{margin:0 0 8px;color:var(--muted);font-size:12px;white-space:pre;max-width:100%;overflow-x:auto}
 nav a:focus-visible,.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 main{flex:1;overflow:auto;padding:14px 16px}
 h2{font-size:14px;margin:0 0 10px;font-weight:600}
@@ -295,7 +279,10 @@ h2 small{color:var(--muted);font-weight:400;margin-left:8px}
 .tools textarea{font:inherit;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:4px 6px;min-height:38px;resize:vertical;margin-top:6px}
 .tools .hint{margin-left:auto}
 .frame textarea{display:block;width:min(900px,100%);box-sizing:border-box}
-pre{margin:0;white-space:pre;line-height:1.2;font-variant-numeric:tabular-nums}
+pre{margin:0;white-space:pre;line-height:1.2;font-variant-numeric:tabular-nums;
+ /* A 220-column frame fits the pane: this face advances 0.6em a cell, and
+    the pane is the window less the sidebar and the padding either side. */
+ font-size:clamp(7px,calc((100vw - 320px)/134),13px)}
 .c-cyan{color:var(--cyan)}.c-magenta{color:var(--magenta)}.c-yellow{color:var(--yellow)}.c-green{color:var(--green)}.c-blue{color:var(--blue)}.c-red{color:var(--red)}.c-dim{color:var(--dim)}.c-fg{color:var(--fg)}
 .bold{font-weight:700}.rev{background:var(--fg);color:var(--bg)}
 @media (prefers-reduced-motion:no-preference){nav a,.tabs button{transition:background .12s}}
@@ -303,7 +290,11 @@ pre{margin:0;white-space:pre;line-height:1.2;font-variant-numeric:tabular-nums}
 
 const SCRIPT: &str = r"
 const items=[...document.querySelectorAll('nav a')];
-let tab=localStorage.getItem('tab')||'cards 160 collapsed';
+// The stored tab may name one this build no longer has, so fall back to the
+// first rather than showing nothing.
+const tabs=[...new Set([...document.querySelectorAll('.tabs button')].map(b=>b.dataset.tab))];
+let tab=localStorage.getItem('tab');
+if(!tabs.includes(tab))tab=tabs[0]||'';
 let colour='#f38ba8';
 // Annotations: one store, keyed by pipeline name and tab. Saved to the notes
 // server started by `just gallery` (target/gallery/notes.json) so they reach
@@ -407,7 +398,7 @@ async fn main() {
         .map_or(0, |d| d.as_secs());
     let _ = write!(
         html,
-        "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>nfctl Layout Gallery</title><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap\"><style>{STYLE}</style><nav><h1>nfctl layout gallery</h1><p>{} pipelines from the test suite, drawn as the terminal would: the card view at 110, 160 and 220 columns with shard groups collapsed or expanded, and the box-drawing <code>dag</code> output. Tabs stick across pipelines.</p>",
+        "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>nfctl Layout Gallery</title><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap\"><style>{STYLE}</style><nav><h1>nfctl layout gallery</h1><p>{} pipelines from the test suite, drawn as the terminal would: the card view at 220 columns with shard groups expanded, the same collapsed, a narrow 110-column terminal, and the box-drawing <code>dag</code> output. Tabs stick across pipelines.</p>",
         items.len()
     );
     html.push_str("<p class=\"sort\">sort: <button data-sort=\"name\" class=\"on\">name</button> <button data-sort=\"score\">score</button></p>");
