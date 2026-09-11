@@ -47,7 +47,7 @@ impl Panel {
         match self {
             Panel::Pipelines(_) => "j/k move  enter detail  l logs  r refresh  q quit",
             Panel::Detail(_) => {
-                "j/k vertex  ←/→ scroll  x shards  enter vertex logs  l pipeline logs  esc back  q quit"
+                "j/k vertex  ←/→ ⇞/⇟ scroll  +/- split  x shards  enter logs  l pipeline logs  esc back  q quit"
             }
             Panel::Logs(_) => "j/k scroll  G follow  esc back  q quit",
         }

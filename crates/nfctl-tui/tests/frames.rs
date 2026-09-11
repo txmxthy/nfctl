@@ -359,3 +359,85 @@ async fn edge_table_is_coloured_like_the_edges() {
     }
     assert!(found, "edge row present");
 }
+
+/// A source fanning into `n` sinks: tall, and one edge a sink.
+fn wide_topology(n: usize) -> nfctl_core::model::Topology {
+    use nfctl_core::model::{Edge, OnFull, ScaleSpec, Topology, Vertex, VertexKind};
+    let v = |name: String, k: VertexKind| Vertex {
+        name: VertexName::new(name).unwrap(),
+        kind: k,
+        partitions: 1,
+        scale: ScaleSpec::default(),
+        image: None,
+    };
+    let mut vs = vec![v("src".to_owned(), VertexKind::Source)];
+    let mut es = Vec::new();
+    for i in 0..n {
+        vs.push(v(format!("sink-{i}"), VertexKind::Sink));
+        es.push(Edge {
+            from: VertexName::new("src").unwrap(),
+            to: VertexName::new(format!("sink-{i}")).unwrap(),
+            conditions: None,
+            on_full: OnFull::default(),
+        });
+    }
+    Topology::new(vs, es).unwrap()
+}
+
+/// A drawing taller than its box starts at the top, says how much is out of
+/// sight, and scrolls.
+#[tokio::test]
+async fn detail_scrolls_a_tall_flow() {
+    let mut panel = topology_panel(wide_topology(10)).await;
+    panel.update(&AppEvent::Key(crossterm_key('x')));
+    let short = frame(&panel, 120, 26);
+    assert!(short.contains('▼'), "{short}");
+    assert!(!short.contains('▲'), "{short}");
+    panel.update(&AppEvent::Key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::PageDown,
+        crossterm::event::KeyModifiers::NONE,
+    )));
+    let down = frame(&panel, 120, 26);
+    assert!(down.contains('▲'), "{down}");
+    assert_ne!(down, short);
+    // Tall enough for the whole drawing: no markers, nothing cut off.
+    let tall = frame(&panel, 120, 110);
+    assert!(!tall.contains('▼') && !tall.contains('▲'), "{tall}");
+}
+
+/// More edges than the table has rows: they are dealt into blocks across the
+/// width instead of being cut off.
+#[tokio::test]
+async fn detail_lays_edges_in_blocks() {
+    let mut panel = topology_panel(wide_topology(10)).await;
+    panel.update(&AppEvent::Key(crossterm_key('x')));
+    let wide = frame(&panel, 200, 30);
+    assert!(wide.matches("EDGE").count() >= 2, "{wide}");
+    for i in 0..10 {
+        assert!(
+            wide.contains(&format!("sink-{i}")),
+            "sink-{i} missing\n{wide}"
+        );
+    }
+    // One block when the width only holds one.
+    let narrow = frame(&panel, 90, 40);
+    assert_eq!(narrow.matches("EDGE").count(), 1, "{narrow}");
+}
+
+/// `+` and `-` move the line between the flow and the edge table.
+#[tokio::test]
+async fn detail_split_is_adjustable() {
+    let mut panel = topology_panel(wide_topology(6)).await;
+    panel.update(&AppEvent::Key(crossterm_key('x')));
+    let before = frame(&panel, 120, 40);
+    for _ in 0..4 {
+        panel.update(&AppEvent::Key(crossterm_key('+')));
+    }
+    let taller = frame(&panel, 120, 40);
+    assert_ne!(taller, before);
+    for _ in 0..8 {
+        panel.update(&AppEvent::Key(crossterm_key('-')));
+    }
+    let shorter = frame(&panel, 120, 40);
+    assert_ne!(shorter, taller);
+}

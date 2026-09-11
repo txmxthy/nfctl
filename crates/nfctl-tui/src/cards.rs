@@ -113,6 +113,7 @@ struct Canvas {
     w: usize,
     h: usize,
     dx: i32,
+    dy: i32,
     cells: Vec<u8>,
     ink: Vec<Ink>,
     /// Colour of the longest vertical run through a cell, with its length:
@@ -129,12 +130,13 @@ struct Canvas {
 }
 
 impl Canvas {
-    fn new(w: u16, h: u16, dx: i32) -> Self {
+    fn new(w: u16, h: u16, dx: i32, dy: i32) -> Self {
         let (w, h) = (usize::from(w), usize::from(h));
         Self {
             w,
             h,
             dx,
+            dy,
             cells: vec![0; w * h],
             ink: vec![Ink::None; w * h],
             turn: vec![(Ink::None, 0); w * h],
@@ -146,7 +148,10 @@ impl Canvas {
     }
 
     fn idx(&self, x: i32, y: i32) -> Option<usize> {
-        let (x, y) = (usize::try_from(x - self.dx).ok()?, usize::try_from(y).ok()?);
+        let (x, y) = (
+            usize::try_from(x - self.dx).ok()?,
+            usize::try_from(y - self.dy).ok()?,
+        );
         (x < self.w && y < self.h).then_some(y * self.w + x)
     }
 
@@ -315,14 +320,23 @@ impl Canvas {
     }
 }
 
-/// Draw cards and edges with column `scroll` at the left edge. `selected`
-/// highlights the card holding one vertex.
+/// Where a drawing bigger than its box is scrolled to.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Scroll {
+    /// Leftmost visible card column.
+    pub column: usize,
+    /// Topmost visible row, in cells.
+    pub row: i32,
+}
+
+/// Draw cards and edges from `scroll`. `selected` highlights the card holding
+/// one vertex.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     view: &PipelineView,
     cards: &CardView,
-    scroll: usize,
+    scroll: Scroll,
     selected: Option<&str>,
     palette: Palette,
 ) {
@@ -330,8 +344,11 @@ pub fn render(
         return;
     }
     let lay = &cards.layout;
-    let dx = lay.col_x.get(scroll).copied().unwrap_or(0);
-    let mut canvas = Canvas::new(area.width, area.height, dx);
+    let (dx, dy) = (
+        lay.col_x.get(scroll.column).copied().unwrap_or(0),
+        scroll.row,
+    );
+    let mut canvas = Canvas::new(area.width, area.height, dx, dy);
     for r in &lay.routes {
         canvas.path(r.edge, &r.polyline, r.colour);
         canvas.head(r.head.0, r.head.1, r.colour);
@@ -345,13 +362,13 @@ pub fn render(
         .and_then(|s| nfctl_core::model::VertexName::new(s).ok())
         .and_then(|n| cards.graph.node_of(&n));
     for c in &lay.cards {
-        let x = c.x - dx;
-        if x < 0 || c.y < 0 {
+        let (x, y) = (c.x - dx, c.y - dy);
+        if x < 0 || y < 0 {
             continue;
         }
         let rect = Rect {
             x: area.x + u16::try_from(x).unwrap_or(u16::MAX),
-            y: area.y + u16::try_from(c.y).unwrap_or(u16::MAX),
+            y: area.y + u16::try_from(y).unwrap_or(u16::MAX),
             width: cards.card_w,
             height: c.h,
         };
@@ -376,11 +393,11 @@ pub fn render(
     }
 
     // Overflow markers.
-    let hidden_left = scroll;
+    let hidden_left = scroll.column;
     let hidden_right = lay
         .col_x
         .len()
-        .saturating_sub(cards.last_visible(scroll, area.width) + 1);
+        .saturating_sub(cards.last_visible(scroll.column, area.width) + 1);
     if hidden_left > 0 {
         let s = format!("◀ {hidden_left} more");
         frame.render_widget(

@@ -12,6 +12,16 @@ use crate::panels::pressed;
 use crate::style::Palette;
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, cards, style};
+use unicode_width::UnicodeWidthStr as _;
+
+/// Rows a page of the flow scrolls by.
+const SCROLL_ROWS: u16 = 5;
+/// Blank columns between two blocks of the edge table.
+const BLOCK_GAP: u16 = 3;
+/// A block of the edge table narrower than this is not worth splitting into.
+const MIN_BLOCK: u16 = 44;
+/// The edge table never shrinks below its border and a row of edges.
+const MIN_TABLE: u16 = 4;
 
 #[derive(Debug)]
 pub struct DetailPanel {
@@ -22,8 +32,12 @@ pub struct DetailPanel {
     expand_shards: bool,
     /// Leftmost visible card column. A `Cell` so drawing can pull it to the selection.
     scroll: std::cell::Cell<usize>,
+    /// Topmost visible row of the drawing, for a flow taller than its box.
+    vscroll: std::cell::Cell<u16>,
     /// Scroll so the selected card is visible on the next draw.
     follow: bool,
+    /// Rows the edge table is given beyond what it would take by itself.
+    split: i16,
     palette: Palette,
     bundling: nfctl_graph::layout::Bundling,
 }
@@ -37,7 +51,9 @@ impl DetailPanel {
             selected: 0,
             expand_shards: false,
             scroll: std::cell::Cell::new(0),
+            vscroll: std::cell::Cell::new(0),
             follow: false,
+            split: 0,
             palette: Palette::default(),
             // A row per colour, so a line can be followed by its colour.
             bundling: nfctl_graph::layout::Bundling::Ribbon,
@@ -118,6 +134,25 @@ impl DetailPanel {
         inner.saturating_add(2)
     }
 
+    /// The row to draw the flow from: the stored one, clamped to the drawing
+    /// and pulled so the selected card is in view.
+    fn vscroll_for(&self, cards: &CardView, room: u16, selected: Option<&str>) -> u16 {
+        let over = cards.height().saturating_sub(room);
+        let mut top = self.vscroll.get().min(over);
+        if self.follow
+            && let Some(card) = selected
+                .and_then(|s| nfctl_core::model::VertexName::new(s).ok())
+                .and_then(|n| cards.graph.node_of(&n))
+                .and_then(|n| cards.layout.card(n))
+        {
+            let (y, h) = (u16::try_from(card.y.max(0)).unwrap_or(0), card.h);
+            top = top.min(y).max((y + h).saturating_sub(room));
+        }
+        let top = top.min(over);
+        self.vscroll.set(top);
+        top
+    }
+
     fn columns(&self) -> usize {
         self.view
             .as_ref()
@@ -168,6 +203,26 @@ impl Model for DetailPanel {
                     self.follow = false;
                     (None, vec![])
                 }
+                Some(KeyCode::PageDown) => {
+                    self.vscroll
+                        .set(self.vscroll.get().saturating_add(SCROLL_ROWS));
+                    self.follow = false;
+                    (None, vec![])
+                }
+                Some(KeyCode::PageUp) => {
+                    self.vscroll
+                        .set(self.vscroll.get().saturating_sub(SCROLL_ROWS));
+                    self.follow = false;
+                    (None, vec![])
+                }
+                Some(KeyCode::Char('+' | '=')) => {
+                    self.split = self.split.saturating_add(1);
+                    (None, vec![])
+                }
+                Some(KeyCode::Char('-')) => {
+                    self.split = self.split.saturating_sub(1);
+                    (None, vec![])
+                }
                 Some(KeyCode::Char('x')) => {
                     self.expand_shards = !self.expand_shards;
                     (None, vec![])
@@ -207,18 +262,20 @@ impl Model for DetailPanel {
         let cards = CardView::new(&p.spec.topology, room, self.expand_shards, self.bundling);
         let scroll = self.scroll_for(&cards, room);
         let cards_h = cards.height();
-        // The edge table sits at the bottom, at most half the panel; the flow
-        // takes whatever is left above it. Both counting their borders.
-        let table_h = table_rows(v.edges.len()).min(inner.height / 2).max(6);
+        // The edge table sits at the bottom and the flow takes what is left
+        // above it. The table asks for a row an edge, capped at half the
+        // panel, and `+` and `-` move the line between the two.
+        let warnings = u16::try_from(v.warnings.len()).unwrap_or(0);
+        let spare = inner.height.saturating_sub(warnings + 2);
+        let table_h = table_rows(v.edges.len())
+            .min(spare / 2)
+            .saturating_add_signed(self.split)
+            .clamp(MIN_TABLE.min(spare), spare.saturating_sub(3));
         let [head, dag, edges, warn] = Layout::vertical([
             Constraint::Length(2),
-            Constraint::Min(
-                cards_h
-                    .saturating_add(2)
-                    .min(inner.height.saturating_sub(table_h)),
-            ),
+            Constraint::Min(3),
             Constraint::Length(table_h),
-            Constraint::Length(u16::try_from(v.warnings.len()).unwrap_or(0)),
+            Constraint::Length(warnings),
         ])
         .areas(inner);
 
@@ -247,18 +304,27 @@ impl Model for DetailPanel {
         frame.render_widget(Paragraph::new(vec![line1, line2]), head);
 
         let flow = section(frame, dag, " flow ");
-        cards::render(
-            frame,
-            centre(flow, cards.layout.width, cards_h),
-            v,
-            &cards,
-            scroll,
-            self.selected_vertex().map(|x| x.name.as_str()),
-            self.palette,
-        );
+        let selected = self.selected_vertex().map(|x| x.name.as_str());
+        let dy = self.vscroll_for(&cards, flow.height, selected);
+        // A drawing that fits sits in the middle of the box; one that does
+        // not starts at the top and scrolls.
+        let area = if cards_h <= flow.height {
+            centre(flow, cards.layout.width, cards_h)
+        } else {
+            centre(flow, cards.layout.width, flow.height)
+        };
+        let at = cards::Scroll {
+            column: scroll,
+            row: i32::from(dy),
+        };
+        cards::render(frame, area, v, &cards, at, selected, self.palette);
+        if cards_h > flow.height {
+            let below = cards_h - flow.height - dy;
+            more(frame, flow, dy, below);
+        }
 
         let table = section(frame, edges, " edges ");
-        frame.render_widget(edge_table(v, table.width, self.palette), table);
+        frame.render_widget(edge_table(v, table, self.palette), table);
 
         let warnings: Vec<Line> = v
             .warnings
@@ -280,6 +346,24 @@ fn table_rows(edges: usize) -> u16 {
         .unwrap_or(u16::MAX)
         .saturating_add(3)
         .max(6)
+}
+
+/// How much of a drawing is out of sight above and below its box.
+fn more(frame: &mut Frame, area: Rect, above: u16, below: u16) {
+    for (rows, mark, y) in [(above, '▲', area.y), (below, '▼', area.bottom() - 1)] {
+        if rows == 0 || area.height == 0 {
+            continue;
+        }
+        let s = format!("{mark} {rows} more");
+        let w = u16::try_from(s.width()).unwrap_or(0).min(area.width);
+        let r = Rect {
+            x: area.right() - w,
+            y,
+            width: w,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(Line::styled(s, style::key())), r);
+    }
 }
 
 /// Draw a titled box over `area` and return the room left inside it.
@@ -306,11 +390,15 @@ fn centre(area: Rect, w: u16, h: u16) -> Rect {
     }
 }
 
+/// One row of a table laid out in `blocks` side by side.
+fn spread<'a>(blocks: usize, make: impl FnMut(usize) -> Vec<Cell<'a>>) -> Vec<Cell<'a>> {
+    (0..blocks).flat_map(make).collect()
+}
+
 /// Tags and the arrow between the two names take the edge's colour, the same
 /// one it is drawn in above.
-fn edge_table(v: &PipelineView, width: u16, palette: Palette) -> Table<'_> {
+fn edge_cells(v: &PipelineView, palette: Palette) -> (Vec<Vec<String>>, Vec<Vec<Cell<'static>>>) {
     use nfctl_graph::layout::{EdgeColour, ViewGraph, colours};
-    const HEADER: [&str; 6] = ["EDGE", "TAGS", "PENDING", "USAGE", "", "WATERMARK"];
     let topology = &v.pipeline.spec.topology;
     // Expanded view: one view edge per topology edge, in the same order.
     let colour_of: std::collections::HashMap<(&VertexName, &VertexName), Option<EdgeColour>> =
@@ -364,27 +452,69 @@ fn edge_table(v: &PipelineView, width: u16, palette: Palette) -> Table<'_> {
             ]
         })
         .collect();
-    let widths = crate::table::fill(&HEADER, &cells, width, 2, &[0, 1]);
-    let rows = v.edges.iter().zip(cells).map(|(e, mut c)| {
-        let colour = colour_of.get(&(&e.from, &e.to)).copied().flatten();
-        let ink = palette.edge(colour);
-        let edge = Line::from(vec![
-            Span::raw(e.from.to_string()),
-            Span::styled(" -> ", ink),
-            Span::raw(e.to.to_string()),
-        ]);
-        let tags = Line::styled(std::mem::take(&mut c[1]), ink);
-        let rest: Vec<Cell> = c.into_iter().skip(2).map(Cell::from).collect();
-        Row::new(
+    // The styled cells, in the same order.
+    let styled = v
+        .edges
+        .iter()
+        .zip(&mut cells.clone())
+        .map(|(e, c)| {
+            let ink = palette.edge(colour_of.get(&(&e.from, &e.to)).copied().flatten());
+            let edge = Line::from(vec![
+                Span::raw(e.from.to_string()),
+                Span::styled(" -> ", ink),
+                Span::raw(e.to.to_string()),
+            ]);
+            let tags = Line::styled(std::mem::take(&mut c[1]), ink);
             [Cell::from(edge), Cell::from(tags)]
                 .into_iter()
-                .chain(rest)
-                .collect::<Vec<_>>(),
-        )
-    });
-    Table::new(rows, widths)
-        .column_spacing(2)
-        .header(Row::new(HEADER).style(style::title()))
+                .chain(c.iter().skip(2).map(|x| Cell::from(x.clone())))
+                .collect()
+        })
+        .collect();
+    (cells, styled)
+}
+
+/// The edge table, dealt into as many blocks side by side as the width holds
+/// when one block an edge would want more rows than the table has.
+fn edge_table(v: &PipelineView, area: Rect, palette: Palette) -> Table<'static> {
+    const HEADER: [&str; 6] = ["EDGE", "TAGS", "PENDING", "USAGE", "", "WATERMARK"];
+    let (cells, mut built) = edge_cells(v, palette);
+    let deep = usize::from(area.height.saturating_sub(1)).max(1);
+    let across = usize::from((area.width + BLOCK_GAP) / (MIN_BLOCK + BLOCK_GAP)).max(1);
+    let blocks = cells.len().div_ceil(deep).clamp(1, across);
+    let per = cells.len().div_ceil(blocks).max(1);
+    // Every column is spaced from the next, so the room a block's own columns
+    // have is what is left once all of that is taken out and shared. The gap
+    // between blocks rides on a block's last column, which is easier to keep
+    // straight than a column of its own.
+    let wide = u16::try_from(blocks).unwrap_or(1);
+    let spacing = 2 * u16::try_from(HEADER.len() - 1).unwrap_or(0);
+    let cols = u16::try_from(blocks * HEADER.len()).unwrap_or(1);
+    let room = area
+        .width
+        .saturating_sub(2 * (cols - 1) + BLOCK_GAP * (wide - 1));
+    let one = crate::table::fill(&HEADER, &cells, room / wide + spacing, 2, &[0, 1]);
+    built.resize(per * blocks, vec![Cell::default(); HEADER.len()]);
+
+    let rows: Vec<Row> = (0..per)
+        .map(|i| Row::new(spread(blocks, |b| built[b * per + i].clone())))
+        .collect();
+    let header = Row::new(spread(blocks, |_| {
+        HEADER.iter().map(|h| Cell::from(*h)).collect()
+    }))
+    .style(style::title());
+    let widths: Vec<Constraint> = (0..blocks)
+        .flat_map(|b| {
+            one.iter().enumerate().map(move |(i, &c)| {
+                let last = i + 1 == HEADER.len() && b + 1 < blocks;
+                match (c, last) {
+                    (Constraint::Length(w), true) => Constraint::Length(w + BLOCK_GAP),
+                    _ => c,
+                }
+            })
+        })
+        .collect();
+    Table::new(rows, widths).column_spacing(2).header(header)
 }
 
 fn tag_label(c: &TagCondition) -> String {
