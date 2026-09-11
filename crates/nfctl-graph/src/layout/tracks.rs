@@ -54,7 +54,12 @@ pub(crate) fn pack(spans: &[Span], by_colour: bool) -> (Vec<usize>, usize) {
                 // can only hold one colour and a shared bus would lose them.
                 let related =
                     (o.src == s.src || o.dst == s.dst) && (!by_colour || o.colour == s.colour);
-                let disjoint = s.hi + 1 < o.lo || o.hi + 1 < s.lo;
+                // Ends may touch: one run's lower end directly above
+                // another's upper end draws `┘` over `┐`, two corners that
+                // point away from each other and read as two. Keeping a blank
+                // row between them costs a track, and with it the symmetry of
+                // a fan whose inner pair leave on neighbouring rows.
+                let disjoint = s.hi < o.lo || o.hi < s.lo;
                 related || disjoint
             })
         };

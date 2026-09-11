@@ -186,13 +186,14 @@ pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
     if split.junction_over == 0 {
         return drawn;
     }
-    // Then the shared bus, which loses a colour where two meet, and then the
-    // fan-in ordered by the cards its branches come from rather than the rows
-    // they come in on. Whichever is cleanest wins; the split bus is first
-    // among equals because it is the better drawing when it works.
+    // Then the other three: the shared bus, which loses a colour where two
+    // meet, and the fan-in ordered by the cards its branches come from rather
+    // than the rows they come in on, each way round. Whichever is cleanest
+    // wins; the split bus with the fan-in aimed is first among equals because
+    // it is the better drawing when it works.
     let mut best = (split.vocabulary(), split.total, drawn);
-    for by_colour in [false, ribbon] {
-        let other = layout_with(g, opts, by_colour, false);
+    for (by_colour, aim_in) in [(false, true), (ribbon, false), (false, false)] {
+        let other = layout_with(g, opts, by_colour, aim_in);
         let s = score::score(g, &other);
         if (s.vocabulary(), s.total) < (best.0, best.1) {
             best = (s.vocabulary(), s.total, other);
