@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
 use crate::cards::CardView;
 use crate::event::{Action, AppEvent};
-use crate::panels::pressed;
+use crate::panels::{centre, pressed};
 use crate::style::Palette;
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, cards, style};
@@ -375,19 +375,6 @@ fn section(frame: &mut Frame, area: Rect, title: &'static str) -> Rect {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     inner
-}
-
-/// A `w` by `h` drawing placed in the middle of `area`, or as much of it as
-/// fits: a drawing narrower or shorter than its box sits in the middle of the
-/// room rather than in a corner of it.
-fn centre(area: Rect, w: u16, h: u16) -> Rect {
-    let (w, h) = (w.min(area.width), h.min(area.height));
-    Rect {
-        x: area.x + (area.width - w) / 2,
-        y: area.y + (area.height - h) / 2,
-        width: w,
-        height: h,
-    }
 }
 
 /// One row of a table laid out in `blocks` side by side.

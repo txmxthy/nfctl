@@ -35,6 +35,16 @@ async fn pipelines_panel() {
         .pipelines
         .clone()))));
     insta::assert_snapshot!(frame(&panel, 100, 12));
+
+    // A panel bigger than the terminal fills it instead of floating: every
+    // row starts at the left edge with a border, none is indented.
+    let tight = frame(&panel, 60, 7);
+    assert!(
+        tight.lines().filter(|l| !l.trim().is_empty()).all(|l| l
+            .trim_matches('"')
+            .starts_with(['\u{2502}', '\u{250c}', '\u{2514}'])),
+        "{tight}"
+    );
 }
 
 #[tokio::test]

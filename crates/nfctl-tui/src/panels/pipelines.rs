@@ -6,9 +6,15 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Row, Table, TableState};
 
 use crate::event::{Action, AppEvent};
-use crate::panels::pressed;
+use crate::panels::{centre, pressed};
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, style};
+use unicode_width::UnicodeWidthStr as _;
+
+/// Blank columns between two columns of the table.
+const SPACING: u16 = 2;
+/// The panel is never narrower than its own title.
+const TITLE_ROOM: u16 = 30;
 
 #[derive(Debug)]
 pub struct PipelinesPanel {
@@ -115,16 +121,17 @@ impl Model for PipelinesPanel {
         };
         let block = Block::default().borders(Borders::ALL).title(title);
         if let Some(e) = &self.error {
-            frame.render_widget(
-                ratatui::widgets::Paragraph::new(format!("error: {e}")).block(block),
-                area,
-            );
+            let msg = format!("error: {e}");
+            let w = u16::try_from(msg.width()).unwrap_or(0) + 2;
+            let at = centre(area, w.max(TITLE_ROOM), 3);
+            frame.render_widget(ratatui::widgets::Paragraph::new(msg).block(block), at);
             return;
         }
         if self.loading {
+            let at = centre(area, TITLE_ROOM, 3);
             frame.render_widget(
                 ratatui::widgets::Paragraph::new("loading...").block(block),
-                area,
+                at,
             );
             return;
         }
@@ -144,6 +151,16 @@ impl Model for PipelinesPanel {
             })
             .collect();
         let widths = crate::table::fit(&HEADER, &cells);
+        // The panel is as big as the table it holds and floats in the middle
+        // of the terminal; the last column is `Min`, so it is measured at the
+        // width its content wants rather than stretched to the screen.
+        let at = centre(
+            area,
+            crate::table::width(&widths, SPACING) + 2,
+            u16::try_from(self.items.len())
+                .unwrap_or(u16::MAX)
+                .saturating_add(3),
+        );
         let rows = self.items.iter().zip(cells).map(|(p, c)| {
             let mut c = c.into_iter();
             Row::new(vec![
@@ -156,11 +173,11 @@ impl Model for PipelinesPanel {
             ])
         });
         let table = Table::new(rows, widths)
-            .column_spacing(2)
+            .column_spacing(SPACING)
             .header(header)
             .block(block)
             .row_highlight_style(style::selected());
         let mut state = self.state;
-        frame.render_stateful_widget(table, area, &mut state);
+        frame.render_stateful_widget(table, at, &mut state);
     }
 }

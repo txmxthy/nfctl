@@ -60,3 +60,16 @@ pub fn fill(
     }
     w.into_iter().map(Constraint::Length).collect()
 }
+
+/// How wide a table of these columns is, spacing between them included.
+#[must_use]
+pub fn width(cols: &[Constraint], spacing: u16) -> u16 {
+    let sum: u16 = cols
+        .iter()
+        .map(|c| match c {
+            Constraint::Length(x) | Constraint::Min(x) => *x,
+            _ => 0,
+        })
+        .sum();
+    sum + spacing * u16::try_from(cols.len().saturating_sub(1)).unwrap_or(0)
+}
