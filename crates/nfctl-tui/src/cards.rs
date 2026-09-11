@@ -23,6 +23,8 @@ pub const CARD_HEIGHT: u16 = 5;
 const MIN_CARD: u16 = 17;
 /// Fits `999.9/s  pending 9999`.
 const FULL_CARD: u16 = 24;
+/// However long the tags, a card stops growing here and wraps them instead.
+const WIDEST_CARD: u16 = 34;
 const GAP: u16 = 5;
 
 /// A laid-out pipeline: the view graph plus cell coordinates for one width.
@@ -39,16 +41,20 @@ impl CardView {
         } else {
             ViewGraph::collapsed(t)
         };
-        // Card width: the label row, or enough for the numbers row, whichever
-        // is wider. Cards shrink to `MIN_CARD` when the columns would not fit;
+        // Card width: the widest of the label row, the numbers row and the
+        // tags a card carries. Tags were left out and were the thing that got
+        // cut. Cards shrink to `MIN_CARD` when the columns would not fit;
         // past that the panel scrolls instead of squeezing further.
         let want = graph
             .nodes
             .iter()
             .map(|n| n.label.width() + n.kind.as_str().len() + 6)
+            .chain(tag_widths(&graph))
             .max()
             .unwrap_or(0);
-        let want = u16::try_from(want).unwrap_or(u16::MAX).max(FULL_CARD);
+        let want = u16::try_from(want)
+            .unwrap_or(u16::MAX)
+            .clamp(FULL_CARD, WIDEST_CARD);
         let n = u16::try_from(t.ranks().len().max(1)).unwrap_or(1);
         let fits = width.saturating_sub(GAP * (n - 1)) / n;
         let card_w = if fits >= want {
@@ -92,6 +98,27 @@ impl CardView {
             .unwrap_or(first)
             .max(first)
     }
+}
+
+/// How wide each card's tag row wants to be, borders included. The layout
+/// works these out too, but not until it has been given a card width, so they
+/// are counted here from the same edges it counts them from.
+fn tag_widths(graph: &ViewGraph) -> impl Iterator<Item = usize> {
+    let mut per: std::collections::HashMap<usize, Vec<String>> = std::collections::HashMap::new();
+    for e in &graph.edges {
+        if e.tags.is_empty() {
+            continue;
+        }
+        let label = e.tags.join(", ");
+        let at = per.entry(e.to.0 as usize).or_default();
+        if !at.contains(&label) {
+            at.push(label);
+        }
+    }
+    per.into_values()
+        .map(|labels| labels.join(" ").width() + 2)
+        .collect::<Vec<_>>()
+        .into_iter()
 }
 
 // ---- edge canvas ---------------------------------------------------------
@@ -320,6 +347,16 @@ impl Canvas {
     }
 }
 
+/// How the card view is drawn right now: where it is scrolled to, in what
+/// colours, and how far through the animation anything that moves is.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Paint {
+    pub scroll: Scroll,
+    pub palette: Palette,
+    /// Frame counter; a ticker moves on it.
+    pub spin: usize,
+}
+
 /// Where a drawing bigger than its box is scrolled to.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Scroll {
@@ -329,21 +366,21 @@ pub struct Scroll {
     pub row: i32,
 }
 
-/// Draw cards and edges from `scroll`. `selected` highlights the card holding
+/// Draw cards and edges as `at` says. `selected` highlights the card holding
 /// one vertex.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     view: &PipelineView,
     cards: &CardView,
-    scroll: Scroll,
+    at: Paint,
     selected: Option<&str>,
-    palette: Palette,
 ) {
     if cards.layout.cards.is_empty() || area.height == 0 {
         return;
     }
     let lay = &cards.layout;
+    let (scroll, palette) = (at.scroll, at.palette);
     let (dx, dy) = (
         lay.col_x.get(scroll.column).copied().unwrap_or(0),
         scroll.row,
@@ -388,7 +425,7 @@ pub fn render(
             &numbers(view, node),
             badges,
             selected_node == Some(c.node),
-            palette,
+            at,
         );
     }
 
@@ -445,6 +482,39 @@ fn fmt_i64(v: Option<i64>) -> String {
     v.map_or_else(|| "-".to_owned(), |n| n.to_string())
 }
 
+/// Columns a ticker holds a line still for before moving it on. At the frame
+/// rate this is about a third of a second a column, which is readable.
+const TICK_HOLD: usize = 3;
+/// Blank columns between the end of a ticker's text and its start coming round.
+const TICK_GAP: usize = 4;
+
+/// Text wider than the room it has, moved along a column at a time so all of
+/// it can be read, like a ticker. Colours travel with the characters. Text
+/// that fits is left alone.
+fn ticker(spans: Vec<Span<'static>>, width: usize, frame: usize) -> Vec<Span<'static>> {
+    let total: usize = spans.iter().map(|s| s.content.width()).sum();
+    if total <= width || width == 0 {
+        return spans;
+    }
+    // One long line of (character, style), plus a gap, read from an offset
+    // that walks it and comes round.
+    let cells: Vec<(char, Style)> = spans
+        .iter()
+        .flat_map(|s| s.content.chars().map(move |c| (c, s.style)))
+        .chain((0..TICK_GAP).map(|_| (' ', Style::default())))
+        .collect();
+    let at = (frame / TICK_HOLD) % cells.len();
+    let mut out: Vec<Span<'static>> = Vec::new();
+    for i in 0..width {
+        let (c, style) = cells[(at + i) % cells.len()];
+        match out.last_mut() {
+            Some(last) if last.style == style => last.content.to_mut().push(c),
+            _ => out.push(Span::styled(c.to_string(), style)),
+        }
+    }
+    out
+}
+
 fn card(
     frame: &mut Frame,
     area: Rect,
@@ -452,22 +522,27 @@ fn card(
     (rate, pending): &(Option<f64>, Option<i64>),
     badges: &[layout::Badge],
     selected: bool,
-    palette: Palette,
+    at: Paint,
 ) {
+    let (palette, spin) = (at.palette, at.spin);
     let border = if selected { style::key() } else { style::dim() };
     let block = Block::default().borders(Borders::ALL).border_style(border);
     let inner = block.inner(area);
     frame.render_widget(ratatui::widgets::Clear, area);
     frame.render_widget(block, area);
-    let head = Line::from(vec![
-        Span::styled(node.label.clone(), style::title()),
-        Span::styled(format!("  {}", node.kind.as_str()), style::dim()),
-        if node.partitions > 1 {
-            Span::styled(format!(" x{}", node.partitions), style::dim())
-        } else {
-            Span::raw("")
-        },
-    ]);
+    let head = Line::from(ticker(
+        vec![
+            Span::styled(node.label.clone(), style::title()),
+            Span::styled(format!("  {}", node.kind.as_str()), style::dim()),
+            if node.partitions > 1 {
+                Span::styled(format!(" x{}", node.partitions), style::dim())
+            } else {
+                Span::raw("")
+            },
+        ],
+        usize::from(inner.width),
+        spin,
+    ));
     let word = if inner.width >= FULL_CARD - 2 {
         "  pending "
     } else {
@@ -480,14 +555,14 @@ fn card(
     ]);
     let mut lines = vec![head, nums];
     if !badges.is_empty() {
-        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut tags: Vec<Span<'static>> = Vec::new();
         for (i, b) in badges.iter().enumerate() {
             if i > 0 {
-                spans.push(Span::styled(" ", Style::default()));
+                tags.push(Span::raw(" "));
             }
-            spans.push(Span::styled(b.label.clone(), palette.edge(b.colour)));
+            tags.push(Span::styled(b.label.clone(), palette.edge(b.colour)));
         }
-        lines.push(Line::from(spans));
+        lines.push(Line::from(ticker(tags, usize::from(inner.width), spin)));
     }
     // A card is as tall as its busiest side needs, which can be taller than
     // its three lines of text; the text sits in the middle of the box rather

@@ -6,5 +6,5 @@ mod client;
 mod cluster;
 pub mod dto;
 
-pub use client::{ClientOptions, connect};
+pub use client::{ClientOptions, connect, current_context};
 pub use cluster::KubeCluster;

@@ -24,12 +24,10 @@ pub enum Focus {
     Flow,
     Edges,
 }
-/// Blank columns between two blocks of the edge table.
-const BLOCK_GAP: u16 = 3;
-/// A block of the edge table narrower than this is not worth splitting into.
-const MIN_BLOCK: u16 = 44;
 /// The edge table never shrinks below its border and a row of edges.
 const MIN_TABLE: u16 = 4;
+/// Nor the flow below its border and one card.
+const MIN_FLOW: u16 = 7;
 
 #[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -57,6 +55,8 @@ pub struct DetailPanel {
     focus: Focus,
     /// Topmost visible row of the edge table.
     rows: usize,
+    /// What that was clamped to when last drawn, so scrolling stops at the end.
+    rows_at: std::cell::Cell<usize>,
     /// Where each box was drawn last, so a click knows what it hit.
     hit: std::cell::Cell<(Rect, Rect)>,
     /// The line between the boxes is being dragged.
@@ -80,6 +80,7 @@ impl DetailPanel {
             spin: std::cell::Cell::new(0),
             focus: Focus::default(),
             rows: 0,
+            rows_at: std::cell::Cell::new(0),
             hit: std::cell::Cell::new((Rect::ZERO, Rect::ZERO)),
             dragging: false,
             // A row per colour, so a line can be followed by its colour.
@@ -267,7 +268,9 @@ impl DetailPanel {
                 self.follow = false;
             }
             Focus::Edges => {
-                let at = i64::try_from(self.rows).unwrap_or(0) + i64::from(delta);
+                // From where it actually stopped, so holding a key at the
+                // end does not build up a number it has to unwind.
+                let at = i64::try_from(self.rows_at.get()).unwrap_or(0) + i64::from(delta);
                 self.rows = usize::try_from(at.max(0)).unwrap_or(0);
             }
         }
@@ -408,18 +411,25 @@ impl Model for DetailPanel {
         let cards = CardView::new(&p.spec.topology, room, self.expand_shards, self.bundling);
         let scroll = self.scroll_for(&cards, room);
         let cards_h = cards.height();
-        // The edge table sits at the bottom and the flow takes what is left
-        // above it. The table asks for a row an edge, capped at half the
-        // panel, and `+` and `-` move the line between the two.
         let warnings = u16::try_from(v.warnings.len()).unwrap_or(0);
         // One line: phase, health and what health says. Two only with
         // `--timings`, which adds what the load cost underneath.
         let head_h = if self.timings { 2 } else { 1 };
-        let spare = inner.height.saturating_sub(warnings + 2);
-        let table_h = table_rows(v.edges.len())
-            .min(spare / 2)
+        let spare = inner.height.saturating_sub(warnings + head_h);
+        // The flow asks for enough to hold the whole drawing, the table for a
+        // row an edge, and neither goes below its floor. What is left over
+        // when both fit goes to the table, which is the one that grows with
+        // the pipeline. `+` and `-` move the line between them.
+        let wants = cards_h.saturating_add(2);
+        let table_h = spare
+            .saturating_sub(wants.max(MIN_FLOW))
+            .max(MIN_TABLE)
+            .min(table_rows(v.edges.len()).max(MIN_TABLE))
             .saturating_add_signed(self.split)
-            .clamp(MIN_TABLE.min(spare), spare.saturating_sub(3));
+            .clamp(
+                MIN_TABLE.min(spare),
+                spare.saturating_sub(MIN_FLOW).max(MIN_TABLE),
+            );
         let [head, dag, edges, warn] = Layout::vertical([
             Constraint::Length(head_h),
             Constraint::Min(3),
@@ -454,18 +464,33 @@ impl Model for DetailPanel {
         } else {
             centre(flow, cards.layout.width, flow.height)
         };
-        let at = cards::Scroll {
-            column: scroll,
-            row: i32::from(dy),
+        let at = cards::Paint {
+            scroll: cards::Scroll {
+                column: scroll,
+                row: i32::from(dy),
+            },
+            palette: self.palette,
+            spin: self.spin.get(),
         };
-        cards::render(frame, area, v, &cards, at, selected, self.palette);
+        cards::render(frame, area, v, &cards, at, selected);
         if cards_h > flow.height {
             let below = cards_h - flow.height - dy;
             more(frame, flow, dy, below);
         }
 
         let table = section(frame, edges, " edges ", self.focus == Focus::Edges);
-        frame.render_widget(edge_table(v, table, self.palette, self.rows), table);
+        // Rows above and below what the table has room for, so a list longer
+        // than the box says so rather than just ending.
+        let fits = usize::from(table.height.saturating_sub(1));
+        let rows = self.rows.min(v.edges.len().saturating_sub(1));
+        self.rows_at.set(rows);
+        frame.render_widget(edge_table(v, table, self.palette, rows), table);
+        more(
+            frame,
+            table,
+            u16::try_from(rows).unwrap_or(u16::MAX),
+            u16::try_from(v.edges.len().saturating_sub(rows + fits)).unwrap_or(u16::MAX),
+        );
         self.hit.set((flow, table));
 
         let warnings: Vec<Line> = v
@@ -523,11 +548,6 @@ fn section(frame: &mut Frame, area: Rect, title: &'static str, focused: bool) ->
     let inner = block.inner(area);
     frame.render_widget(block, area);
     inner
-}
-
-/// One row of a table laid out in `blocks` side by side.
-fn spread<'a>(blocks: usize, make: impl FnMut(usize) -> Vec<Cell<'a>>) -> Vec<Cell<'a>> {
-    (0..blocks).flat_map(make).collect()
 }
 
 /// Tags and the arrow between the two names take the edge's colour, the same
@@ -609,51 +629,21 @@ fn edge_cells(v: &PipelineView, palette: Palette) -> (Vec<Vec<String>>, Vec<Vec<
     (cells, styled)
 }
 
-/// The edge table, dealt into as many blocks side by side as the width holds
-/// when one block an edge would want more rows than the table has.
+/// The edge table: one edge a row, from `from`, as many as fit.
 fn edge_table(v: &PipelineView, area: Rect, palette: Palette, from: usize) -> Table<'static> {
     const HEADER: [&str; 6] = ["EDGE", "TAGS", "PENDING", "USAGE", "", "WATERMARK"];
     let (mut cells, mut built) = edge_cells(v, palette);
-    // Scrolled: whole edges are dropped off the top, so the blocks repack
-    // round what is left rather than leaving a gap where they were.
+    // Scrolled: whole edges are dropped off the top.
     let from = from.min(cells.len().saturating_sub(1));
     cells.drain(..from);
     built.drain(..from);
     let deep = usize::from(area.height.saturating_sub(1)).max(1);
-    let across = usize::from((area.width + BLOCK_GAP) / (MIN_BLOCK + BLOCK_GAP)).max(1);
-    let blocks = cells.len().div_ceil(deep).clamp(1, across);
-    let per = cells.len().div_ceil(blocks).max(1);
-    // Every column is spaced from the next, so the room a block's own columns
-    // have is what is left once all of that is taken out and shared. The gap
-    // between blocks rides on a block's last column, which is easier to keep
-    // straight than a column of its own.
-    let wide = u16::try_from(blocks).unwrap_or(1);
-    let spacing = 2 * u16::try_from(HEADER.len() - 1).unwrap_or(0);
-    let cols = u16::try_from(blocks * HEADER.len()).unwrap_or(1);
-    let room = area
-        .width
-        .saturating_sub(2 * (cols - 1) + BLOCK_GAP * (wide - 1));
-    let one = crate::table::fill(&HEADER, &cells, room / wide + spacing, 2, &[0, 1]);
-    built.resize(per * blocks, vec![Cell::default(); HEADER.len()]);
-
-    let rows: Vec<Row> = (0..per)
-        .map(|i| Row::new(spread(blocks, |b| built[b * per + i].clone())))
-        .collect();
-    let header = Row::new(spread(blocks, |_| {
-        HEADER.iter().map(|h| Cell::from(*h)).collect()
-    }))
-    .style(style::title());
-    let widths: Vec<Constraint> = (0..blocks)
-        .flat_map(|b| {
-            one.iter().enumerate().map(move |(i, &c)| {
-                let last = i + 1 == HEADER.len() && b + 1 < blocks;
-                match (c, last) {
-                    (Constraint::Length(w), true) => Constraint::Length(w + BLOCK_GAP),
-                    _ => c,
-                }
-            })
-        })
-        .collect();
+    built.truncate(deep);
+    // Every column is spaced from the next, so what the columns themselves
+    // have is the width less all of that; `fill` adds it back.
+    let widths = crate::table::fill(&HEADER, &cells, area.width, 2, &[0, 1]);
+    let rows: Vec<Row> = built.into_iter().map(Row::new).collect();
+    let header = Row::new(HEADER.map(Cell::from).to_vec()).style(style::title());
     Table::new(rows, widths).column_spacing(2).header(header)
 }
 

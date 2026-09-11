@@ -13,7 +13,7 @@ mod style;
 mod table;
 mod worker;
 
-pub use app::run;
+pub use app::{Options, run};
 pub use event::{Action, AppEvent};
 pub use style::{CrossingStyle, Palette};
 pub use worker::{WorkerMessage, WorkerReply};

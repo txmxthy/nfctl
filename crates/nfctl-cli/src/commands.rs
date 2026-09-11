@@ -206,6 +206,22 @@ fn format_line(l: &TaggedLine, timestamps: bool) -> String {
     format!("{}{}/{} {}", stamp, l.pod, l.container, l.line.text)
 }
 
+/// What the TUI is reading from, for its title: the fixture when there is
+/// one, else the context named or the one the kubeconfig would use.
+fn source_label(cli: &Cli) -> String {
+    if let Some(f) = &cli.globals.fixture {
+        let name = std::path::Path::new(f)
+            .file_name()
+            .map_or_else(|| f.clone(), |n| n.to_string_lossy().into_owned());
+        return format!("fixture {name}");
+    }
+    cli.globals
+        .context
+        .clone()
+        .or_else(nfctl_k8s::current_context)
+        .unwrap_or_default()
+}
+
 /// Execute a parsed command against a cluster.
 pub async fn run(cli: &Cli, ctx: &Context) -> Result<Output> {
     if let Some(offline) = run_offline(cli) {
@@ -646,10 +662,13 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
         nfctl_tui::run(
             Arc::clone(&ctx.cluster),
             ctx.service.clone(),
-            ns,
-            Duration::from_secs((*interval).max(1)),
-            nfctl_tui::Palette::detect(cli.globals.no_color),
-            cli.globals.timings,
+            nfctl_tui::Options {
+                ns,
+                tick: Duration::from_secs((*interval).max(1)),
+                palette: nfctl_tui::Palette::detect(cli.globals.no_color),
+                timings: cli.globals.timings,
+                source: source_label(cli),
+            },
         )
         .await
         .map_err(|e| Error::Cluster(Box::new(e)))?;

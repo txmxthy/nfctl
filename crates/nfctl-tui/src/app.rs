@@ -138,6 +138,20 @@ impl App {
     }
 }
 
+/// How the UI is set up for a run.
+#[derive(Debug, Clone)]
+pub struct Options {
+    /// The namespace to list, or every one.
+    pub ns: Option<Namespace>,
+    /// How often the cluster is asked again.
+    pub tick: Duration,
+    pub palette: Palette,
+    /// Say how long each load took, from `--timings`.
+    pub timings: bool,
+    /// Where the pipelines are being read from: a context, or a fixture.
+    pub source: String,
+}
+
 /// How often the screen is repainted for something that is moving.
 const FRAME: Duration = Duration::from_millis(120);
 
@@ -145,11 +159,15 @@ const FRAME: Duration = Duration::from_millis(120);
 pub async fn run(
     cluster: Arc<dyn ClusterPort>,
     service: PipelineService,
-    ns: Option<Namespace>,
-    tick: Duration,
-    palette: Palette,
-    timings: bool,
+    opts: Options,
 ) -> std::io::Result<()> {
+    let Options {
+        ns,
+        tick,
+        palette,
+        timings,
+        source,
+    } = opts;
     let (tx, mut replies) = Worker::spawn(cluster, service);
     let mut app = App {
         stack: Vec::new(),
@@ -159,7 +177,7 @@ pub async fn run(
         tx,
     };
     app.push(Panel::Pipelines(Box::new(
-        PipelinesPanel::new(ns).with_timings(timings),
+        PipelinesPanel::new(ns).with_timings(timings).from(source),
     )))
     .await;
 

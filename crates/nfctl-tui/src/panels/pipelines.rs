@@ -27,6 +27,8 @@ pub struct PipelinesPanel {
     timings: bool,
     /// Frame of the spinner.
     spin: usize,
+    /// Where these are being read from: a context, or a fixture.
+    source: String,
     took: Option<std::time::Duration>,
 }
 
@@ -49,6 +51,7 @@ impl PipelinesPanel {
             loading: true,
             timings: false,
             spin: 0,
+            source: String::new(),
             took: None,
         }
     }
@@ -57,6 +60,14 @@ impl PipelinesPanel {
     #[must_use]
     pub fn with_timings(mut self, on: bool) -> Self {
         self.timings = on;
+        self
+    }
+
+    /// Name what the list is being read from, so a screenshot says which
+    /// cluster it came from.
+    #[must_use]
+    pub fn from(mut self, source: String) -> Self {
+        self.source = source;
         self
     }
 
@@ -137,9 +148,11 @@ impl Model for PipelinesPanel {
     fn view(&self, frame: &mut Frame, area: Rect) {
         // The terminal keeps a border of its own, dim, with the title on it;
         // what the panel holds sits in a brighter box floating inside.
-        let mut title = match &self.ns {
-            Some(ns) => format!(" pipelines in {ns} "),
-            None => " pipelines (all namespaces) ".to_owned(),
+        let mut title = match (&self.ns, self.source.as_str()) {
+            (Some(ns), "") => format!(" pipelines in {ns} "),
+            (Some(ns), from) => format!(" {from} · pipelines in {ns} "),
+            (None, "") => " pipelines (all namespaces) ".to_owned(),
+            (None, from) => format!(" {from} · pipelines (all namespaces) "),
         };
         if let (true, Some(took)) = (self.timings, self.took) {
             title = format!("{title}· listed in {:.2}s ", took.as_secs_f32());

@@ -60,3 +60,11 @@ pub async fn connect(opts: &ClientOptions) -> Result<Connected> {
         default_namespace,
     })
 }
+
+/// The context the kubeconfig would use when none is named, for saying which
+/// cluster is on screen. `None` when there is no kubeconfig to read, which is
+/// the in-cluster case.
+#[must_use]
+pub fn current_context() -> Option<String> {
+    kube::config::Kubeconfig::read().ok()?.current_context
+}
