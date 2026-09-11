@@ -43,6 +43,25 @@ impl PipelineService {
         super::pipeline_view(self.cluster.as_ref(), self.daemons.as_ref(), key, now).await
     }
 
+    /// The shape alone, from one call to the cluster: something to draw while
+    /// the daemon is still being asked.
+    pub async fn shape(
+        &self,
+        key: &PipelineKey,
+        now: crate::model::Timestamp,
+    ) -> Result<super::PipelineView> {
+        super::pipeline_shape(self.cluster.as_ref(), key, now).await
+    }
+
+    /// The numbers, on a shape already read.
+    pub async fn numbers(
+        &self,
+        shape: super::PipelineView,
+        now: crate::model::Timestamp,
+    ) -> super::PipelineView {
+        super::pipeline_numbers(self.daemons.as_ref(), shape, now).await
+    }
+
     /// The daemon factory, for procedures that need runtime data.
     #[must_use]
     pub fn daemons(&self) -> &dyn DaemonConnector {

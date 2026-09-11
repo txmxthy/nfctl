@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
 use crate::cards::CardView;
 use crate::event::{Action, AppEvent};
-use crate::panels::{centre, pressed};
+use crate::panels::{centre, pressed, spiral, waiting};
 use crate::style::Palette;
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, cards, style};
@@ -42,6 +42,8 @@ pub struct DetailPanel {
     bundling: nfctl_graph::layout::Bundling,
     /// Show how long the last load took, from `--timings`.
     timings: bool,
+    /// Frame of the spinner, moved on by every tick.
+    spin: std::cell::Cell<usize>,
 }
 
 impl DetailPanel {
@@ -58,6 +60,7 @@ impl DetailPanel {
             split: 0,
             palette: Palette::default(),
             timings: false,
+            spin: std::cell::Cell::new(0),
             // A row per colour, so a line can be followed by its colour.
             bundling: nfctl_graph::layout::Bundling::Ribbon,
         }
@@ -120,6 +123,34 @@ impl DetailPanel {
         scroll
     }
 
+    /// Phase, health and where the pipeline sits, with a spiral while the
+    /// numbers are still on their way: the shape arrives before they do, so
+    /// nothing has been asked of a daemon yet when neither step took time.
+    fn header(&self, v: &PipelineView) -> Line<'static> {
+        let p = &v.pipeline;
+        let health = v.health.as_ref().map(|h| h.status);
+        let mut line = Line::from(vec![
+            Span::styled("phase ", style::dim()),
+            Span::styled(p.status.phase.as_str(), style::phase(p.status.phase)),
+            Span::styled("   health ", style::dim()),
+            Span::styled(
+                health.map_or("unknown", |h| h.as_str()),
+                style::health(health),
+            ),
+            Span::styled("   desired ", style::dim()),
+            Span::raw(p.spec.lifecycle.desired.as_str()),
+            Span::styled("   isb ", style::dim()),
+            Span::raw(p.spec.isb.to_string()),
+        ]);
+        if v.timings.connect.is_zero() && v.timings.numbers.is_zero() {
+            line.push_span(Span::styled(
+                format!("   {} numbers", spiral(self.spin.get())),
+                style::key(),
+            ));
+        }
+        line
+    }
+
     /// Rows the panel needs at `width` to show everything: the border, the
     /// two header rows, the flow box round the drawing, the edge table and
     /// the warnings. A shorter panel clips the drawing and the table.
@@ -178,6 +209,18 @@ impl Model for DetailPanel {
     fn update(&mut self, ev: &AppEvent) -> (Option<Action>, Vec<WorkerMessage>) {
         match ev {
             AppEvent::Tick => (None, self.on_enter()),
+            AppEvent::Frame => {
+                self.spin.set(self.spin.get().wrapping_add(1));
+                (None, vec![])
+            }
+            AppEvent::Worker(WorkerReply::Shape(v)) => {
+                // Draw the graph now; the numbers replace it when they land.
+                if v.pipeline.key == self.key && self.view.is_none() {
+                    self.view = Some(*v.clone());
+                    self.error = None;
+                }
+                (None, vec![])
+            }
             AppEvent::Worker(WorkerReply::View(r)) => {
                 match r.as_ref() {
                     Ok(v) if v.pipeline.key == self.key => {
@@ -258,11 +301,14 @@ impl Model for DetailPanel {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let Some(v) = &self.view else {
-            let msg = self
-                .error
-                .clone()
-                .map_or_else(|| "loading...".to_owned(), |e| format!("error: {e}"));
-            frame.render_widget(Paragraph::new(msg), inner);
+            match &self.error {
+                Some(e) => {
+                    let msg = format!("error: {e}");
+                    let w = u16::try_from(msg.width()).unwrap_or(0);
+                    frame.render_widget(Paragraph::new(msg), centre(inner, w, 1));
+                }
+                None => waiting(frame, inner, self.spin.get(), "reading the pipeline"),
+            }
             return;
         };
         let p = &v.pipeline;
@@ -289,20 +335,7 @@ impl Model for DetailPanel {
         ])
         .areas(inner);
 
-        let health = v.health.as_ref().map(|h| h.status);
-        let line1 = Line::from(vec![
-            Span::styled("phase ", style::dim()),
-            Span::styled(p.status.phase.as_str(), style::phase(p.status.phase)),
-            Span::styled("   health ", style::dim()),
-            Span::styled(
-                health.map_or("unknown", |h| h.as_str()),
-                style::health(health),
-            ),
-            Span::styled("   desired ", style::dim()),
-            Span::raw(p.spec.lifecycle.desired.as_str()),
-            Span::styled("   isb ", style::dim()),
-            Span::raw(p.spec.isb.to_string()),
-        ]);
+        let line1 = self.header(v);
         // With `--timings`, what the load cost replaces the health message,
         // which is the line a reader is comparing against anyway.
         let line2 = if self.timings {

@@ -23,6 +23,8 @@ pub enum WorkerMessage {
 pub enum WorkerReply {
     /// The list, and how long the cluster took to answer.
     Pipelines(Result<Vec<Pipeline>, String>, std::time::Duration),
+    /// A pipeline's shape, before its numbers are in.
+    Shape(Box<PipelineView>),
     View(Box<Result<PipelineView, String>>),
     Log(TaggedLine),
     LogsFailed(String),
@@ -72,12 +74,27 @@ impl Worker {
                     .await;
             }
             WorkerMessage::LoadView(key) => {
-                let r = self
-                    .service
-                    .view(&key, Timestamp::now())
-                    .await
-                    .map_err(|e| e.to_string());
-                let _ = self.tx.send(WorkerReply::View(Box::new(r))).await;
+                // The shape is one call to the cluster and the numbers are
+                // several to a daemon that may be far away, so the shape is
+                // sent as soon as it lands and the panel has a graph to draw
+                // while the rest is still coming.
+                let now = Timestamp::now();
+                let shape = match self.service.shape(&key, now).await {
+                    Ok(shape) => shape,
+                    Err(e) => {
+                        let _ = self
+                            .tx
+                            .send(WorkerReply::View(Box::new(Err(e.to_string()))))
+                            .await;
+                        return;
+                    }
+                };
+                let _ = self
+                    .tx
+                    .send(WorkerReply::Shape(Box::new(shape.clone())))
+                    .await;
+                let full = self.service.numbers(shape, now).await;
+                let _ = self.tx.send(WorkerReply::View(Box::new(Ok(full)))).await;
             }
             WorkerMessage::StartLogs(key, vertex) => {
                 self.stop_logs();

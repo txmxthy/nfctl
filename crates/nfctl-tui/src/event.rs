@@ -7,7 +7,11 @@ use crate::worker::WorkerReply;
 #[derive(Debug)]
 pub enum AppEvent {
     Key(KeyEvent),
+    /// Time to ask the cluster again.
     Tick,
+    /// Time to redraw, for anything that moves while waiting. Nothing is
+    /// fetched on one of these.
+    Frame,
     Worker(WorkerReply),
 }
 

@@ -23,3 +23,27 @@ pub fn centre(area: Rect, w: u16, h: u16) -> Rect {
         height: h,
     }
 }
+
+/// A spiral that turns: eight braille cells whose weight travels round the
+/// glyph, so it reads as a coil rather than a blinking dot.
+const SPIRAL: [char; 8] = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
+
+/// The frame of the spiral to draw now.
+#[must_use]
+pub fn spiral(frame: usize) -> char {
+    SPIRAL[frame % SPIRAL.len()]
+}
+
+/// A turning spiral above what it is waiting for, in the middle of `area`.
+pub fn waiting(frame: &mut ratatui::Frame, area: Rect, spin: usize, what: &str) {
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+    let width = u16::try_from(what.chars().count()).unwrap_or(0).max(1);
+    let at = centre(area, width, 3);
+    let lines = vec![
+        Line::from(Span::styled(spiral(spin).to_string(), crate::style::key())).centered(),
+        Line::default(),
+        Line::from(Span::styled(what.to_owned(), crate::style::dim())).centered(),
+    ];
+    frame.render_widget(Paragraph::new(lines), at);
+}

@@ -6,8 +6,8 @@ use serde::Serialize;
 
 use crate::Result;
 use crate::model::{
-    BufferInfo, EdgeWatermark, Pipeline, PipelineHealth, PipelineKey, Timestamp, VertexKind,
-    VertexMetrics, VertexName, Windows,
+    BufferInfo, EdgeWatermark, Pipeline, PipelineHealth, PipelineKey, Timestamp, Topology,
+    VertexKind, VertexMetrics, VertexName, Windows,
 };
 use crate::ports::{ClusterPort, DaemonConnector};
 
@@ -105,6 +105,56 @@ impl PipelineView {
 }
 
 /// Build the view. Each daemon call fails independently; a failure becomes a warning.
+/// The shape alone: what the cluster knows without asking the daemon
+/// anything. One API call, so it lands while the numbers are still coming,
+/// and a reader has the graph to look at meanwhile.
+#[tracing::instrument(level = "info", skip_all, fields(pipeline = %key))]
+pub async fn pipeline_shape(
+    cluster: &dyn ClusterPort,
+    key: &PipelineKey,
+    now: Timestamp,
+) -> Result<PipelineView> {
+    let started = Instant::now();
+    let pipeline = cluster.get_pipeline(key).await?;
+    Ok(assemble(
+        pipeline,
+        Daemon::default(),
+        Vec::new(),
+        Timings {
+            spec: started.elapsed(),
+            ..Timings::default()
+        },
+        now,
+    ))
+}
+
+/// What a daemon answered, or the parts of it that did.
+#[derive(Default)]
+struct Daemon {
+    health: Option<PipelineHealth>,
+    metrics: Vec<VertexMetrics>,
+    buffers: Vec<BufferInfo>,
+    watermarks: Vec<EdgeWatermark>,
+}
+
+/// Fill in the numbers on a shape already read. Never fails: a daemon that
+/// cannot be reached leaves the shape as it was, with a warning saying why.
+#[tracing::instrument(level = "info", skip_all)]
+pub async fn pipeline_numbers(
+    daemons: &dyn DaemonConnector,
+    shape: PipelineView,
+    now: Timestamp,
+) -> PipelineView {
+    let key = shape.pipeline.key.clone();
+    let mut timings = shape.timings;
+    let mut warnings = Vec::new();
+    let (got, connect, numbers) =
+        ask(daemons, &key, &shape.pipeline.spec.topology, &mut warnings).await;
+    timings.connect = connect;
+    timings.numbers = numbers;
+    assemble(shape.pipeline, got, warnings, timings, now)
+}
+
 #[tracing::instrument(level = "info", skip_all, fields(pipeline = %key))]
 pub async fn pipeline_view(
     cluster: &dyn ClusterPort,
@@ -112,15 +162,16 @@ pub async fn pipeline_view(
     key: &PipelineKey,
     now: Timestamp,
 ) -> Result<PipelineView> {
-    let started = Instant::now();
-    let pipeline = cluster.get_pipeline(key).await?;
-    let mut timings = Timings {
-        spec: started.elapsed(),
-        ..Timings::default()
-    };
-    let mut warnings = Vec::new();
-    let t = &pipeline.spec.topology;
+    let shape = pipeline_shape(cluster, key, now).await?;
+    Ok(pipeline_numbers(daemons, shape, now).await)
+}
 
+async fn ask(
+    daemons: &dyn DaemonConnector,
+    key: &PipelineKey,
+    t: &Topology,
+    warnings: &mut Vec<String>,
+) -> (Daemon, Duration, Duration) {
     let (mut health, mut metrics, mut buffers, mut watermarks) = (
         None,
         Vec::<VertexMetrics>::new(),
@@ -128,13 +179,15 @@ pub async fn pipeline_view(
         Vec::<EdgeWatermark>::new(),
     );
     let at_connect = Instant::now();
+    let connect;
+    let mut numbers = Duration::default();
     match daemons.connect(key, Some(t)).await {
         Err(e) => {
-            timings.connect = at_connect.elapsed();
+            connect = at_connect.elapsed();
             warnings.push(format!("daemon unavailable: {e}"));
         }
         Ok(d) => {
-            timings.connect = at_connect.elapsed();
+            connect = at_connect.elapsed();
             let at_numbers = Instant::now();
             // Four questions of one daemon, asked together: one after another
             // is four round trips, and on a distant cluster a round trip is
@@ -162,10 +215,36 @@ pub async fn pipeline_view(
                 Ok(got) => watermarks = got,
                 Err(e) => warnings.push(format!("watermarks: {e}")),
             }
-            timings.numbers = at_numbers.elapsed();
+            numbers = at_numbers.elapsed();
         }
     }
+    (
+        Daemon {
+            health,
+            metrics,
+            buffers,
+            watermarks,
+        },
+        connect,
+        numbers,
+    )
+}
 
+/// The view a reader sees, from a pipeline and whatever the daemon gave.
+fn assemble(
+    pipeline: Pipeline,
+    got: Daemon,
+    warnings: Vec<String>,
+    timings: Timings,
+    now: Timestamp,
+) -> PipelineView {
+    let Daemon {
+        health,
+        metrics,
+        buffers,
+        watermarks,
+    } = got;
+    let t = &pipeline.spec.topology;
     let vertices = t
         .vertices()
         .iter()
@@ -198,7 +277,7 @@ pub async fn pipeline_view(
         })
         .collect();
 
-    Ok(PipelineView {
+    PipelineView {
         pipeline,
         health,
         vertices,
@@ -206,7 +285,7 @@ pub async fn pipeline_view(
         warnings,
         at: now,
         timings,
-    })
+    }
 }
 
 #[cfg(all(test, feature = "fake"))]

@@ -135,6 +135,9 @@ impl App {
     }
 }
 
+/// How often the screen is repainted for something that is moving.
+const FRAME: Duration = Duration::from_millis(120);
+
 /// Run the UI until the user quits. Takes over the terminal; restores it on exit.
 pub async fn run(
     cluster: Arc<dyn ClusterPort>,
@@ -161,6 +164,9 @@ pub async fn run(
     let mut keys = EventStream::new();
     let mut ticker = tokio::time::interval(tick);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Fast enough for a spinner to turn, and it fetches nothing.
+    let mut frames = tokio::time::interval(FRAME);
+    frames.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = loop {
         if let Err(e) = terminal.draw(|f| app.draw(f)) {
             break Err(e);
@@ -174,6 +180,7 @@ pub async fn run(
             },
             Some(r) = replies.recv() => AppEvent::Worker(r),
             _ = ticker.tick() => AppEvent::Tick,
+            _ = frames.tick() => AppEvent::Frame,
         };
         if !app.handle(ev).await {
             break Ok(());

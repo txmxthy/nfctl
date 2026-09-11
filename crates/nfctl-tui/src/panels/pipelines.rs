@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Row, Table, TableState};
 
 use crate::event::{Action, AppEvent};
-use crate::panels::{centre, pressed};
+use crate::panels::{centre, pressed, waiting};
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, style};
 use unicode_width::UnicodeWidthStr as _;
@@ -25,6 +25,8 @@ pub struct PipelinesPanel {
     loading: bool,
     /// Show how long the last list took, from `--timings`.
     timings: bool,
+    /// Frame of the spinner.
+    spin: usize,
     took: Option<std::time::Duration>,
 }
 
@@ -46,6 +48,7 @@ impl PipelinesPanel {
             error: None,
             loading: true,
             timings: false,
+            spin: 0,
             took: None,
         }
     }
@@ -84,6 +87,10 @@ impl Model for PipelinesPanel {
     fn update(&mut self, ev: &AppEvent) -> (Option<Action>, Vec<WorkerMessage>) {
         match ev {
             AppEvent::Tick => (None, self.reload()),
+            AppEvent::Frame => {
+                self.spin = self.spin.wrapping_add(1);
+                (None, vec![])
+            }
             AppEvent::Worker(WorkerReply::Pipelines(r, took)) => {
                 self.loading = false;
                 self.took = Some(*took);
@@ -152,11 +159,7 @@ impl Model for PipelinesPanel {
             return;
         }
         if self.loading {
-            let at = centre(room, TITLE_ROOM, 3);
-            frame.render_widget(
-                ratatui::widgets::Paragraph::new("loading...").block(block),
-                at,
-            );
+            waiting(frame, room, self.spin, "listing pipelines");
             return;
         }
         let header = Row::new(HEADER).style(style::title());

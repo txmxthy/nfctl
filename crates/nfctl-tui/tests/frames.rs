@@ -452,3 +452,38 @@ async fn detail_split_is_adjustable() {
     let shorter = frame(&panel, 120, 40);
     assert_ne!(shorter, taller);
 }
+
+/// The shape arrives before the numbers: the graph is drawn straight away,
+/// with a spiral saying the numbers are still coming, and no spiral once
+/// they are in.
+#[tokio::test]
+async fn detail_draws_the_shape_before_the_numbers() {
+    use nfctl_core::service::{Timings, pipeline_shape};
+    let fx = fixture();
+    let cluster = FakeCluster::from_fixture(&fx);
+    let key = fx.pipelines[0].key.clone();
+    let at = Timestamp::parse_rfc3339("2026-01-01T00:00:10Z").unwrap();
+    let shape = pipeline_shape(&cluster, &key, at).await.unwrap();
+    assert_eq!(shape.timings.connect, std::time::Duration::ZERO);
+
+    let mut panel = DetailPanel::new(key.clone());
+    panel.update(&AppEvent::Worker(WorkerReply::Shape(Box::new(
+        shape.clone(),
+    ))));
+    let early = frame(&panel, 110, 34);
+    // The cards are there, and the header says the numbers are outstanding.
+    assert!(early.contains(&fx.pipelines[0].spec.topology.vertices()[0].name.to_string()));
+    assert!(early.contains("numbers"), "{early}");
+
+    // Numbers in: the spiral goes.
+    let full = nfctl_core::service::PipelineView {
+        timings: Timings {
+            connect: std::time::Duration::from_millis(5),
+            ..shape.timings
+        },
+        ..shape
+    };
+    panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(full)))));
+    let late = frame(&panel, 110, 34);
+    assert!(!late.contains("numbers"), "{late}");
+}

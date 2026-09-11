@@ -94,7 +94,7 @@ impl Model for LogsPanel {
                 }
                 _ => (None, vec![]),
             },
-            AppEvent::Tick | AppEvent::Worker(_) => (None, vec![]),
+            AppEvent::Tick | AppEvent::Frame | AppEvent::Worker(_) => (None, vec![]),
         }
     }
 
