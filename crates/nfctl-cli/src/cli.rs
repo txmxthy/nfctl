@@ -56,7 +56,9 @@ pub struct Globals {
     pub no_color: bool,
 
     /// Print how long each step took, to stderr. `NFCTL_LOG` picks the
-    /// targets and level when more than the timings are wanted.
+    /// targets and level when more than the timings are wanted. The TUI
+    /// shows them in its own chrome, and writes them too when stderr is
+    /// redirected: `nfctl --timings tui 2> timings.log`
     #[arg(long, global = true)]
     pub timings: bool,
 

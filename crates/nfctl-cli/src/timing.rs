@@ -16,7 +16,19 @@ pub const LOG_ENV: &str = "NFCTL_LOG";
 
 /// Install the subscriber for this process, if anything asked for one. Safe
 /// to call once; a second call is ignored, which is what the tests want.
-pub fn install(timings: bool) {
+///
+/// `owns_terminal` is the one command that draws over the whole screen. It
+/// gets no subscriber while stderr is that same screen, because the lines
+/// would land on top of what it drew; redirect stderr and it is written
+/// there, which is how a TUI session is captured:
+///
+/// ```text
+/// nfctl --timings tui 2> timings.log
+/// ```
+pub fn install(timings: bool, owns_terminal: bool) {
+    if owns_terminal && std::io::stderr().is_terminal() {
+        return;
+    }
     let filter = match std::env::var(LOG_ENV) {
         Ok(spec) if !spec.trim().is_empty() => EnvFilter::new(spec),
         // Timings only: the spans themselves, nothing else.
