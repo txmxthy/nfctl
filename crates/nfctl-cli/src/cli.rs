@@ -57,8 +57,7 @@ pub struct Globals {
 
     /// Print how long each step took, to stderr. `NFCTL_LOG` picks the
     /// targets and level when more than the timings are wanted. The TUI
-    /// shows them in its own chrome, and writes them too when stderr is
-    /// redirected: `nfctl --timings tui 2> timings.log`
+    /// writes them to a file instead and names it on the way out
     #[arg(long, global = true)]
     pub timings: bool,
 

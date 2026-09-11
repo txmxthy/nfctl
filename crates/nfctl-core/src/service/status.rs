@@ -136,20 +136,30 @@ pub async fn pipeline_view(
         Ok(d) => {
             timings.connect = at_connect.elapsed();
             let at_numbers = Instant::now();
-            match d.health().await {
-                Ok(h) => health = Some(h),
+            // Four questions of one daemon, asked together: one after another
+            // is four round trips, and on a distant cluster a round trip is
+            // most of what each one costs. `join` keeps every answer, so one
+            // failing still leaves its own warning and the rest their data.
+            let (got_health, got_metrics, got_buffers, got_marks) = futures::join!(
+                d.health(),
+                d.vertex_metrics(None),
+                d.buffers(),
+                d.watermarks(),
+            );
+            match got_health {
+                Ok(got) => health = Some(got),
                 Err(e) => warnings.push(format!("health: {e}")),
             }
-            match d.vertex_metrics(None).await {
-                Ok(m) => metrics = m,
+            match got_metrics {
+                Ok(got) => metrics = got,
                 Err(e) => warnings.push(format!("vertex metrics: {e}")),
             }
-            match d.buffers().await {
-                Ok(b) => buffers = b,
+            match got_buffers {
+                Ok(got) => buffers = got,
                 Err(e) => warnings.push(format!("buffers: {e}")),
             }
-            match d.watermarks().await {
-                Ok(w) => watermarks = w,
+            match got_marks {
+                Ok(got) => watermarks = got,
                 Err(e) => warnings.push(format!("watermarks: {e}")),
             }
             timings.numbers = at_numbers.elapsed();

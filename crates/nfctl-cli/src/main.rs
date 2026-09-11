@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     // completer that queries the cluster builds its own.
     clap_complete::CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
-    nfctl_cli::timing::install(cli.globals.timings, cli.owns_the_terminal());
+    let timings_at = nfctl_cli::timing::install(cli.globals.timings, cli.owns_the_terminal());
     let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -25,7 +25,12 @@ fn main() -> ExitCode {
         eprintln!("nfctl: cannot start the async runtime");
         return ExitCode::FAILURE;
     };
-    rt.block_on(async_main(&cli))
+    let code = rt.block_on(async_main(&cli));
+    // Said once the screen is handed back, not while the TUI owns it.
+    if let Some(path) = timings_at {
+        eprintln!("nfctl: timings written to {}", path.display());
+    }
+    code
 }
 
 async fn async_main(cli: &Cli) -> ExitCode {

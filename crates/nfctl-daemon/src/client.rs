@@ -62,6 +62,10 @@ pub enum Flavour {
     MonoVertex,
 }
 
+/// Connections kept open. A view asks four questions at once, so it wants
+/// four; more only opens more port-forwards, which cost more than they save.
+const POOL: usize = 4;
+
 /// [`DaemonPort`] over the daemon's JSON API, bound to one pipeline or `MonoVertex`.
 #[derive(Clone)]
 pub struct HttpDaemonClient {
@@ -94,7 +98,7 @@ impl HttpDaemonClient {
     ) -> Self {
         let http = Client::builder(TokioExecutor::new())
             .pool_idle_timeout(Duration::from_mins(1))
-            .pool_max_idle_per_host(1)
+            .pool_max_idle_per_host(POOL)
             .build(dialer);
         let base = if secure {
             "https://daemon".to_owned()
@@ -263,6 +267,10 @@ impl DaemonPort for HttpDaemonClient {
                 ));
             }
         };
+        // The daemon has no bulk endpoint: one call a vertex, in turn. Six at
+        // a time was tried and was worse: each wants its own connection, and
+        // a connection here is a port-forward, which costs more to open than
+        // the round trips it saves.
         let mut out = Vec::new();
         for v in names {
             let d: dto::VertexMetricsListDto = self

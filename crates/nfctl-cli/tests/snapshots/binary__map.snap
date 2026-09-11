@@ -11,7 +11,7 @@ nfctl
 ├── -o/--output  OUTPUT [table|wide|json|yaml]  = table  — Output format  (global)
 ├── --daemon-url  URL  — Talk to the pipeline daemon at this URL instead of port-forwarding  (global)
 ├── --no-color  — Disable colour (also honours the `NO_COLOR` environment variable)  (global)
-├── --timings  — Print how long each step took, to stderr. `NFCTL_LOG` picks the targets and level when more than the timings are wanted. The TUI shows them in its own chrome, and writes them too when stderr is redirected: `nfctl --timings tui 2> timings.log`  (global)
+├── --timings  — Print how long each step took, to stderr. `NFCTL_LOG` picks the targets and level when more than the timings are wanted. The TUI writes them to a file instead and names it on the way out  (global)
 ├── --fixture  FILE  — Answer from this fixture file instead of a cluster (demos, tests, screenshots)  (global)
 ├── ls  List pipelines
 ├── get  Show one pipeline

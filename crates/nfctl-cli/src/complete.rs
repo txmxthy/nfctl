@@ -184,15 +184,9 @@ pub fn fresh(modified: SystemTime, now: SystemTime) -> bool {
 }
 
 fn cache_path(context: Option<&str>) -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     context.unwrap_or("").hash(&mut h);
-    Some(
-        base.join("nfctl")
-            .join(format!("catalog-{:016x}.json", h.finish())),
-    )
+    Some(crate::paths::cache_dir()?.join(format!("catalog-{:016x}.json", h.finish())))
 }
 
 fn read_cache(path: &PathBuf) -> Option<(Catalog, SystemTime)> {

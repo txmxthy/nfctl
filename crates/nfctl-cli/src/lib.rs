@@ -6,6 +6,7 @@ mod commands;
 pub mod complete;
 pub mod map;
 mod output;
+pub mod paths;
 pub mod timing;
 
 pub use cli::{Cli, Command, Globals, OutputFormat};
