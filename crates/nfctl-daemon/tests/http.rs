@@ -20,6 +20,7 @@ fn connector(server: &MockServer, retries: u8) -> DirectConnector {
     let opts = ClientOptions {
         timeout: Duration::from_millis(300),
         retries,
+        ..ClientOptions::default()
     };
     DirectConnector::new(&server.uri(), None, opts).unwrap()
 }

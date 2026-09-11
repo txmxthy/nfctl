@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -25,6 +26,9 @@ pub struct ClientOptions {
     pub timeout: Duration,
     /// Extra attempts on transport failure or timeout (never on HTTP errors).
     pub retries: u8,
+    /// How long a whole-pipeline metrics answer is reused before asking
+    /// again. See `METRICS_TTL`.
+    pub metrics_ttl: Duration,
 }
 
 impl Default for ClientOptions {
@@ -32,6 +36,7 @@ impl Default for ClientOptions {
         Self {
             timeout: Duration::from_secs(5),
             retries: 2,
+            metrics_ttl: METRICS_TTL,
         }
     }
 }
@@ -66,6 +71,29 @@ pub enum Flavour {
 /// four; more only opens more port-forwards, which cost more than they save.
 const POOL: usize = 4;
 
+/// The last whole-pipeline metrics answer, with when it was given.
+type Recent = Arc<Mutex<Option<(Instant, Vec<VertexMetrics>)>>>;
+
+/// How long a whole-pipeline metrics answer is reused.
+///
+/// The daemon has no endpoint for every vertex at once, so this is one call a
+/// vertex: eleven round trips for an eleven-vertex pipeline, and on a distant
+/// cluster that is seconds. Everything else a view needs is one call each, so
+/// metrics alone are asked for less often than the rest.
+///
+/// Five seconds costs a reader nothing. The rates are already averages over
+/// one, five and fifteen minutes, so a two-second refresh was redrawing the
+/// same numbers; pending is a gauge, and five seconds behind on a queue depth
+/// changes no decision anyone makes from this tool.
+///
+/// Numaflow's UI server does have one endpoint for all of them
+/// (`/namespaces/{ns}/pipelines/{p}/vertices/metrics`), but it is a separate
+/// deployment that can have its own authentication in front of it, and it
+/// only loops over the same per-vertex call inside the cluster. Depending on
+/// it would trade this tool's two dependencies, the Kubernetes API and a
+/// pipeline's own daemon, for three.
+const METRICS_TTL: Duration = Duration::from_secs(5);
+
 /// [`DaemonPort`] over the daemon's JSON API, bound to one pipeline or `MonoVertex`.
 #[derive(Clone)]
 pub struct HttpDaemonClient {
@@ -77,6 +105,8 @@ pub struct HttpDaemonClient {
     /// Buffer names carry no from/to, so the topology supplies them.
     topology: Option<Topology>,
     opts: ClientOptions,
+    /// The last whole-pipeline metrics answer, and when it was given.
+    metrics: Recent,
 }
 
 impl std::fmt::Debug for HttpDaemonClient {
@@ -112,7 +142,20 @@ impl HttpDaemonClient {
             key,
             topology,
             opts,
+            metrics: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// The last whole-pipeline metrics answer, while it is inside the window.
+    fn recent_metrics(&self) -> Option<Vec<VertexMetrics>> {
+        let held = self.metrics.lock().unwrap_or_else(PoisonError::into_inner);
+        let (at, got) = held.as_ref()?;
+        (at.elapsed() < self.opts.metrics_ttl).then(|| got.clone())
+    }
+
+    fn remember_metrics(&self, got: &[VertexMetrics]) {
+        *self.metrics.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((Instant::now(), got.to_vec()));
     }
 
     async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -267,10 +310,18 @@ impl DaemonPort for HttpDaemonClient {
                 ));
             }
         };
-        // The daemon has no bulk endpoint: one call a vertex, in turn. Six at
-        // a time was tried and was worse: each wants its own connection, and
-        // a connection here is a port-forward, which costs more to open than
-        // the round trips it saves.
+        // Asked for the whole pipeline, and asked again inside the window:
+        // the last answer will do. Only this call has the problem worth
+        // avoiding, being one round trip a vertex.
+        if vertex.is_none()
+            && let Some(recent) = self.recent_metrics()
+        {
+            return Ok(recent);
+        }
+        // The daemon has no endpoint for every vertex at once, so it is one
+        // call a vertex, in turn. Six at a time was tried and was worse: each
+        // wants its own connection, and a connection here is a port-forward,
+        // which costs more to open than the round trips it saves.
         let mut out = Vec::new();
         for v in names {
             let d: dto::VertexMetricsListDto = self
@@ -279,6 +330,9 @@ impl DaemonPort for HttpDaemonClient {
             for m in d.vertex_metrics {
                 out.push(dto::metrics_from(&m).map_err(Error::daemon)?);
             }
+        }
+        if vertex.is_none() {
+            self.remember_metrics(&out);
         }
         Ok(out)
     }
