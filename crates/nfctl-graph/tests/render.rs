@@ -218,3 +218,63 @@ fn ascii_colour_is_only_escapes() {
     assert!(coloured.contains("\x1b[36m") && coloured.contains("\x1b[35m"));
     assert!(coloured.contains("\x1b[2m"));
 }
+
+/// A crowded graph whose long tag labels used to be corrupted: the renderer
+/// drew each label while routing, so a later edge painted its line or
+/// arrowhead through an earlier label, and a label whose anchor sat one column
+/// left of another was cut off after a single character — which read as the
+/// next label's first letter doubled (`ddlq-target:…`).
+fn crowded_tags() -> Topology {
+    let tag = |n: &str| format!("dlq-target:alpha-forwarder-{n}");
+    let long = |from: &str, to: &str, vs: &[String]| Edge {
+        conditions: Some(TagCondition {
+            operator: TagOperator::Or,
+            values: vs.to_vec(),
+        }),
+        ..e(from, to)
+    };
+    let mut verts = vec![v("node-0", VertexKind::Source)];
+    verts.extend((1..7).map(|i| v(&format!("node-{i}"), VertexKind::Map)));
+    verts.push(v("node-7", VertexKind::Sink));
+    Topology::new(
+        verts,
+        vec![
+            e("node-0", "node-1"),
+            e("node-0", "node-2"),
+            e("node-1", "node-3"),
+            e("node-0", "node-4"),
+            e("node-1", "node-5"),
+            e("node-1", "node-6"),
+            e("node-6", "node-7"),
+            long("node-3", "node-4", &[tag("3400"), tag("3401")]),
+            long("node-6", "node-5", &[tag("6500")]),
+            long("node-2", "node-7", &[tag("2700")]),
+            long("node-1", "node-7", &[tag("1700")]),
+        ],
+    )
+    .unwrap()
+}
+
+/// Box-drawing glyphs and label text never share a cell: no line runs through
+/// a label, and no label is left as a one-character stub against another.
+#[test]
+fn edge_labels_are_never_overdrawn() {
+    const BOX: &str = "─│┌┐└┘├┤┬┴┼╌╎╭╮╰╯━┃▶◀▲▼";
+
+    let out = render(&crowded_tags(), Format::Ascii, Some(100));
+    let word = |c: char| c.is_alphanumeric() || c == '-' || c == ':' || c == ',';
+    for line in out.lines() {
+        let cs: Vec<char> = line.chars().collect();
+        for i in 1..cs.len().saturating_sub(1) {
+            assert!(
+                !(BOX.contains(cs[i]) && word(cs[i - 1]) && word(cs[i + 1])),
+                "line drawn through a label at column {i}:\n{out}"
+            );
+        }
+        assert!(
+            !line.contains("ddlq-target:"),
+            "one-character label stub against its neighbour:\n{out}"
+        );
+    }
+    insta::assert_snapshot!("crowded_tags_ascii", out);
+}
