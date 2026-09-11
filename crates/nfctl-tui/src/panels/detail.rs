@@ -28,8 +28,9 @@ pub enum Focus {
 const MIN_TABLE: u16 = 4;
 /// Nor the flow below its border and one card.
 const MIN_FLOW: u16 = 7;
-/// The column a scroll bar has to itself down the right of a box.
-const GUTTER: u16 = 1;
+/// Columns kept for the scroll bar down the right of a box: the bar itself,
+/// and a blank one so the text does not run into it.
+const GUTTER: u16 = 2;
 
 #[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)]
