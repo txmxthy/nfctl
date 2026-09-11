@@ -69,6 +69,9 @@ pub(crate) struct Ctx<'a> {
     /// two colours. Dropped when the result would give an edge more than one
     /// junction at an end.
     pub by_colour: bool,
+    /// Order a fan-in by the row each branch comes in on rather than by the
+    /// card it comes from. Dropped on the same terms.
+    pub aim_in: bool,
 }
 
 impl Ctx<'_> {
@@ -274,6 +277,7 @@ fn geometry(
     gaps: &Gaps,
     opts: LayoutOptions,
     heights: &[i32],
+    aim_in: bool,
 ) -> Geometry {
     let cards_in = cards(&l.columns);
     // Cards only: pass slots are placed afterwards, on a row the edge already
@@ -348,7 +352,7 @@ fn geometry(
         // Twice: the first pass has to order each fan by where its branches
         // end, the second by the row they actually leave on, which is only
         // known once the pass rows are out.
-        own_rows(g, &mut geo, None);
+        own_rows(g, &mut geo, None, aim_in);
         pass_rows(g, l, &mut geo);
         let aim: Vec<Option<i32>> = (0..g.edges.len())
             .map(|ei| {
@@ -356,7 +360,7 @@ fn geometry(
                 geo.attach[g.nodes.len() + ei].map(|_| geo.at(LNode::Pass(e)).1)
             })
             .collect();
-        own_rows(g, &mut geo, Some(&aim));
+        own_rows(g, &mut geo, Some(&aim), aim_in);
     }
     pass_rows(g, l, &mut geo);
     if opts.bundling == Bundling::Ribbon {
@@ -372,7 +376,7 @@ fn geometry(
 /// symmetric, three take all of them. A card with more edges than rows keeps
 /// the single bus. Rows go to edges in the order of the cards they join, so
 /// the lines do not cross each other on the way out.
-fn own_rows(g: &ViewGraph, geo: &mut Geometry, aim: Option<&[Option<i32>]>) {
+fn own_rows(g: &ViewGraph, geo: &mut Geometry, aim: Option<&[Option<i32>]>, aim_in: bool) {
     geo.exit = vec![None; g.edges.len()];
     geo.entry = vec![None; g.edges.len()];
     let line = super::lines(g);
@@ -387,15 +391,14 @@ fn own_rows(g: &ViewGraph, geo: &mut Geometry, aim: Option<&[Option<i32>]>) {
         if to_col <= from_col {
             continue; // back edges keep the middle row and their lane
         }
-        // The row the edge turns towards on leaving, which for a long edge is
-        // the row it runs across on, not its far card: ordering the branches
-        // of a fan by where their cards are, when they head somewhere else
-        // first, is what makes a fan cross itself.
-        let turn = aim
-            .and_then(|a| a.get(ei).copied().flatten())
-            .unwrap_or(to_row);
-        out[e.from.0 as usize].push((turn, id));
-        into[e.to.0 as usize].push((from_row, id));
+        // The row the edge runs across on, which is where it turns towards on
+        // leaving and where it comes in from on arriving. Ordering a fan by
+        // where its branches' cards are, when they go somewhere else first,
+        // is what makes a fan cross itself.
+        let turn = aim.and_then(|a| a.get(ei).copied().flatten());
+        out[e.from.0 as usize].push((turn.unwrap_or(to_row), id));
+        let comes_from = if aim_in { turn } else { None };
+        into[e.to.0 as usize].push((comes_from.unwrap_or(from_row), id));
     }
     // One edge takes the middle row, two the outer two so the pair stays
     // symmetric, three all of them. Past that the rows are shared out in
@@ -1551,7 +1554,7 @@ pub(crate) fn refine(
         g,
         ctx.ranked,
         layered,
-        &geometry(g, layered, &ys, &gaps, ctx.opts, ctx.heights),
+        &geometry(g, layered, &ys, &gaps, ctx.opts, ctx.heights, ctx.aim_in),
     );
     let mut search = Search {
         ctx: *ctx,
@@ -1634,6 +1637,7 @@ impl Search<'_> {
             self.gaps,
             self.ctx.opts,
             self.ctx.heights,
+            self.ctx.aim_in,
         );
         Some(proxy(self.ctx.g, self.ctx.ranked, self.layered, &geo))
     }
@@ -2057,7 +2061,7 @@ fn build_with(ctx: &Ctx, layered: &Layered, ys: &Placement, gaps: &Gaps) -> Layo
     let (g, ranked) = (ctx.g, ctx.ranked);
     let cols = layered.columns.len();
     let card_w = i32::from(ctx.opts.card_w);
-    let geo = geometry(g, layered, ys, gaps, ctx.opts, ctx.heights);
+    let geo = geometry(g, layered, ys, gaps, ctx.opts, ctx.heights, ctx.aim_in);
     let lane = lanes(g, ranked, geo.cards_h);
     let sp = spans(g, ranked, layered, &geo, &lane, ctx.edge_colour);
     let margin = if g

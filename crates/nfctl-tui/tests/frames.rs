@@ -223,16 +223,19 @@ async fn detail_bridges_true_crossings() {
     .unwrap();
     let bridge = Palette::default().with_crossing(CrossingStyle::Bridge);
     let cross = Palette::default().with_crossing(CrossingStyle::Cross);
+    // The default is the bridge, so the panel drawn plain is the bridged one.
     let plain = frame(&topology_panel(topology.clone()).await, 120, 40);
-    let crossed = topology_panel(topology.clone()).await.with_palette(cross);
-    assert_eq!(frame(&crossed, 120, 40), plain);
     let bridged = frame(
-        &topology_panel(topology).await.with_palette(bridge),
+        &topology_panel(topology.clone()).await.with_palette(bridge),
         120,
         40,
     );
-    assert!(bridged.contains("─╴│╶─"), "{bridged}");
-    assert_eq!(plain.matches('┼').count(), 1);
+    assert_eq!(bridged, plain);
+    let crossed = frame(&topology_panel(topology).await.with_palette(cross), 120, 40);
+    // The horizontal is broken either side of the crossing, unless the cell
+    // there is the edge's own end and there is nothing to break.
+    assert!(plain.contains('╴') || plain.contains('╶'), "{plain}");
+    assert_eq!(crossed.matches('┼').count(), 1);
     assert_eq!(bridged.matches('┼').count(), 0);
     insta::assert_snapshot!(bridged);
 
@@ -244,7 +247,7 @@ async fn detail_bridges_true_crossings() {
     panel.update(&AppEvent::Key(crossterm_key('x')));
     let expanded = frame(&panel, 120, 40);
     assert!(expanded.contains("─╴│┘"), "{expanded}");
-    panel = topology_panel(routing_topology()).await;
+    panel = topology_panel(routing_topology()).await.with_palette(cross);
     panel.update(&AppEvent::Key(crossterm_key('x')));
     assert_eq!(frame(&panel, 120, 40).matches('┼').count(), 1);
 }

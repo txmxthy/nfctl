@@ -60,7 +60,7 @@ impl Default for Palette {
     fn default() -> Self {
         Self {
             colour: true,
-            crossing: CrossingStyle::Cross,
+            crossing: CrossingStyle::Bridge,
         }
     }
 }

@@ -176,17 +176,32 @@ pub(crate) fn lines(g: &ViewGraph) -> Vec<Option<u32>> {
 /// built in full, placement search included, and the lowest full score wins.
 #[must_use]
 pub fn layout(g: &ViewGraph, opts: LayoutOptions) -> Layout {
-    let drawn = layout_with(g, opts, opts.bundling == Bundling::Ribbon);
+    let ribbon = opts.bundling == Bundling::Ribbon;
+    let drawn = layout_with(g, opts, ribbon, ribbon);
     // Giving each colour its own track can leave an edge with a junction at
-    // each end of a split bus. Where it does, the shared bus is the better
-    // drawing even though it loses a colour.
-    if score::score(g, &drawn).junction_over > 0 {
-        return layout_with(g, opts, false);
+    // each end of a split bus. Where it does, try the shared bus, which loses
+    // a colour where two meet, and keep it only if it really is the better
+    // drawing: sometimes it has the same fault and its own besides.
+    let split = score::score(g, &drawn);
+    if split.junction_over == 0 {
+        return drawn;
     }
-    drawn
+    // Then the shared bus, which loses a colour where two meet, and then the
+    // fan-in ordered by the cards its branches come from rather than the rows
+    // they come in on. Whichever is cleanest wins; the split bus is first
+    // among equals because it is the better drawing when it works.
+    let mut best = (split.vocabulary(), split.total, drawn);
+    for by_colour in [false, ribbon] {
+        let other = layout_with(g, opts, by_colour, false);
+        let s = score::score(g, &other);
+        if (s.vocabulary(), s.total) < (best.0, best.1) {
+            best = (s.vocabulary(), s.total, other);
+        }
+    }
+    best.2
 }
 
-fn layout_with(g: &ViewGraph, opts: LayoutOptions, by_colour: bool) -> Layout {
+fn layout_with(g: &ViewGraph, opts: LayoutOptions, by_colour: bool, aim_in: bool) -> Layout {
     let edge_colour = colours(g);
     let ranked = rank::rank(g);
     let badges = badges_for(g, &edge_colour);
@@ -199,6 +214,7 @@ fn layout_with(g: &ViewGraph, opts: LayoutOptions, by_colour: bool) -> Layout {
         badges: &badges,
         opts,
         by_colour,
+        aim_in,
     };
     let mut layered = order::layer(g, &ranked);
     let orderings = order::orderings(&mut layered);

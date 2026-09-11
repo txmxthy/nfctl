@@ -39,7 +39,8 @@ impl DetailPanel {
             scroll: std::cell::Cell::new(0),
             follow: false,
             palette: Palette::default(),
-            bundling: nfctl_graph::layout::Bundling::default(),
+            // A row per colour, so a line can be followed by its colour.
+            bundling: nfctl_graph::layout::Bundling::Ribbon,
         }
     }
 
