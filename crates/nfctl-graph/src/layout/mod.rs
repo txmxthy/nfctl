@@ -326,6 +326,30 @@ fn polish(
     route::refine(ctx, layered, slots, (layout, s)).0
 }
 
+/// The badges of one card, split into the rows they take at `width`. Whole
+/// badges only: a tag is never broken across two lines. The painter draws
+/// these rows and the layout counts them, so a card is as tall as its tags.
+#[must_use]
+pub fn badge_rows(labels: &[String], width: usize) -> Vec<std::ops::Range<usize>> {
+    if labels.is_empty() || width == 0 {
+        return Vec::new();
+    }
+    let mut rows = Vec::new();
+    let (mut start, mut used) = (0, 0usize);
+    for (i, label) in labels.iter().enumerate() {
+        let w = label.chars().count();
+        let gap = usize::from(used > 0);
+        if used > 0 && used + gap + w > width {
+            rows.push(start..i);
+            (start, used) = (i, w);
+        } else {
+            used += gap + w;
+        }
+    }
+    rows.push(start..labels.len());
+    rows
+}
+
 fn badges_for(g: &ViewGraph, edge_colour: &[Option<EdgeColour>]) -> HashMap<NodeId, Vec<Badge>> {
     let mut tagged_in: HashMap<NodeId, Vec<(String, Option<EdgeColour>)>> = HashMap::new();
     for (i, e) in g.edges.iter().enumerate() {

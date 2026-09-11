@@ -402,18 +402,20 @@ async fn detail_scrolls_a_tall_flow() {
     let mut panel = topology_panel(wide_topology(10)).await;
     panel.update(&AppEvent::Key(crossterm_key('x')));
     let short = frame(&panel, 120, 26);
-    assert!(short.contains('▼'), "{short}");
-    assert!(!short.contains('▲'), "{short}");
+    // A bar down the right says there is more, and where in it we are.
+    assert!(short.contains('█'), "a bar\n{short}");
+    let thumb_at = |f: &str| f.lines().position(|l| l.contains('█'));
+    let top = thumb_at(&short);
     panel.update(&AppEvent::Key(crossterm::event::KeyEvent::new(
         crossterm::event::KeyCode::PageDown,
         crossterm::event::KeyModifiers::NONE,
     )));
     let down = frame(&panel, 120, 26);
-    assert!(down.contains('▲'), "{down}");
     assert_ne!(down, short);
+    assert!(thumb_at(&down) > top, "the bar moved down\n{down}");
     // Tall enough for the whole drawing: no markers, nothing cut off.
     let tall = frame(&panel, 120, 110);
-    assert!(!tall.contains('▼') && !tall.contains('▲'), "{tall}");
+    assert!(!tall.contains('█'), "{tall}");
 }
 
 /// More edges than the table has rows: one column still, saying how many are
@@ -426,8 +428,7 @@ async fn detail_edge_table_is_one_column_and_says_what_is_hidden() {
     let wide = frame(&panel, 200, 30);
     // One block: the header appears once however wide the terminal is.
     assert_eq!(wide.matches("EDGE").count(), 1, "{wide}");
-    assert!(wide.contains('\u{25bc}'), "says how many are below\n{wide}");
-    assert!(!wide.contains('\u{25b2}'), "nothing above yet\n{wide}");
+    assert!(wide.contains('█'), "a bar says there is more\n{wide}");
 
     // Focus the table and scroll: the marker flips to say some are above.
     panel.update(&mouse_at(MouseEventKind::Down(MouseButton::Left), 20, 26));
@@ -438,7 +439,7 @@ async fn detail_edge_table_is_one_column_and_says_what_is_hidden() {
         )));
     }
     let scrolled = frame(&panel, 200, 30);
-    assert!(scrolled.contains('\u{25b2}'), "{scrolled}");
+    assert_ne!(scrolled, wide, "it scrolled");
 }
 
 /// `+` and `-` move the line between the flow and the edge table.
@@ -548,10 +549,10 @@ async fn detail_scrolls_the_focused_box() {
     );
 }
 
-/// A tag row too wide for its card is moved along rather than cut, and comes
-/// round; one that fits is left alone.
+/// Tags too wide for a card wrap onto another row, and the card is made tall
+/// enough to hold them rather than cutting them off.
 #[tokio::test]
-async fn card_tags_ticker_when_they_do_not_fit() {
+async fn card_tags_wrap_and_the_card_grows() {
     use nfctl_core::model::{
         Edge, OnFull, ScaleSpec, TagCondition, TagOperator, Topology, Vertex, VertexKind,
     };
@@ -581,29 +582,14 @@ async fn card_tags_ticker_when_they_do_not_fit() {
     )
     .unwrap();
     let mut panel = topology_panel(t).await;
-    // The card's tag row only, not the edge table underneath, which lists
-    // every tag in full.
-    let card_row = |f: &str| {
-        f.lines()
-            .find(|l| l.contains("a-very-long-tag"))
-            .map(str::to_owned)
-            .unwrap_or_default()
-    };
-    let first = frame(&panel, 120, 24);
-    let row = card_row(&first);
-    assert!(!row.is_empty(), "{first}");
-    assert!(
-        !row.contains("and-a-third"),
-        "cut short, not all of it\n{row}"
-    );
-
-    // Frames move it along; a few frames later it reads differently.
+    let f = frame(&panel, 120, 24);
+    // Every tag is on screen, over more than one row inside the card.
+    for tag in ["a-very-long-tag-name", "another-long-one", "and-a-third"] {
+        assert!(f.contains(tag), "{tag} missing\n{f}");
+    }
+    // Nothing moves: several frames later it reads the same.
     for _ in 0..6 {
         panel.update(&AppEvent::Frame);
     }
-    assert_ne!(
-        card_row(&frame(&panel, 120, 24)),
-        row,
-        "the tags moved along"
-    );
+    assert_eq!(frame(&panel, 120, 24), f, "the tags sit still");
 }

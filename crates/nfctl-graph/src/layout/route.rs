@@ -101,8 +101,23 @@ pub(crate) fn heights(g: &ViewGraph, r: &Ranked, opts: LayoutOptions) -> Vec<i32
         out[e.from.0 as usize].insert(c);
         into[e.to.0 as usize].insert(c);
     }
+    // A card also has to hold what is written in it: a name, the numbers, and
+    // its tags on as many rows as they take at this width. The painter wraps
+    // them the same way, so the two agree.
+    let colour = super::colours(g);
+    let badges = super::badges_for(g, &colour);
+    let room = usize::from(opts.card_w).saturating_sub(2);
     (0..g.nodes.len())
-        .map(|n| base.max(i(out[n].len().max(into[n].len())) + 2))
+        .map(|n| {
+            let id = NodeId(u32::try_from(n).unwrap_or(u32::MAX));
+            let labels: Vec<String> = badges
+                .get(&id)
+                .map(|b| b.iter().map(|b| b.label.clone()).collect())
+                .unwrap_or_default();
+            let written = 2 + i(super::badge_rows(&labels, room).len());
+            let edges = i(out[n].len().max(into[n].len()));
+            base.max(edges.max(written) + 2)
+        })
         .collect()
 }
 

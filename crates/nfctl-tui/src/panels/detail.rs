@@ -28,6 +28,8 @@ pub enum Focus {
 const MIN_TABLE: u16 = 4;
 /// Nor the flow below its border and one card.
 const MIN_FLOW: u16 = 7;
+/// The column a scroll bar has to itself down the right of a box.
+const GUTTER: u16 = 1;
 
 #[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -182,6 +184,46 @@ impl DetailPanel {
             ));
         }
         line
+    }
+
+    /// The flow box and the drawing inside it, scrolled and with its bar.
+    /// Returns where the box was drawn, for the click that focuses it.
+    fn draw_flow(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        v: &PipelineView,
+        cards: &CardView,
+        scroll: usize,
+    ) -> Rect {
+        let flow = section(frame, area, " flow ", self.focus == Focus::Flow);
+        let selected = self.selected_vertex().map(|x| x.name.as_str());
+        let dy = self.vscroll_for(cards, flow.height, selected);
+        let cards_h = cards.height();
+        // A drawing that fits sits in the middle of the box; one that does
+        // not starts at the top and scrolls.
+        let room = Rect {
+            width: flow.width.saturating_sub(GUTTER),
+            ..flow
+        };
+        let at = centre(room, cards.layout.width, cards_h.min(room.height));
+        let paint = cards::Paint {
+            scroll: cards::Scroll {
+                column: scroll,
+                row: i32::from(dy),
+            },
+            palette: self.palette,
+            spin: self.spin.get(),
+        };
+        cards::render(frame, at, v, cards, paint, selected);
+        bar(
+            frame,
+            flow,
+            usize::from(cards_h),
+            usize::from(flow.height),
+            usize::from(dy),
+        );
+        flow
     }
 
     /// Rows the panel needs at `width` to show everything: the border, the
@@ -454,44 +496,21 @@ impl Model for DetailPanel {
         }
         frame.render_widget(Paragraph::new(lines), head);
 
-        let flow = section(frame, dag, " flow ", self.focus == Focus::Flow);
-        let selected = self.selected_vertex().map(|x| x.name.as_str());
-        let dy = self.vscroll_for(&cards, flow.height, selected);
-        // A drawing that fits sits in the middle of the box; one that does
-        // not starts at the top and scrolls.
-        let area = if cards_h <= flow.height {
-            centre(flow, cards.layout.width, cards_h)
-        } else {
-            centre(flow, cards.layout.width, flow.height)
-        };
-        let at = cards::Paint {
-            scroll: cards::Scroll {
-                column: scroll,
-                row: i32::from(dy),
-            },
-            palette: self.palette,
-            spin: self.spin.get(),
-        };
-        cards::render(frame, area, v, &cards, at, selected);
-        if cards_h > flow.height {
-            let below = cards_h - flow.height - dy;
-            more(frame, flow, dy, below);
-        }
+        let flow = self.draw_flow(frame, dag, v, &cards, scroll);
 
-        let table = section(frame, edges, " edges ", self.focus == Focus::Edges);
-        // Rows above and below what the table has room for, so a list longer
-        // than the box says so rather than just ending.
-        let fits = usize::from(table.height.saturating_sub(1));
+        let box_ = section(frame, edges, " edges ", self.focus == Focus::Edges);
+        // The bar has the rightmost column to itself, so nothing is written
+        // under it. What is left is the table's.
+        let fits = usize::from(box_.height.saturating_sub(1));
         let rows = self.rows.min(v.edges.len().saturating_sub(1));
         self.rows_at.set(rows);
+        let table = Rect {
+            width: box_.width.saturating_sub(GUTTER),
+            ..box_
+        };
         frame.render_widget(edge_table(v, table, self.palette, rows), table);
-        more(
-            frame,
-            table,
-            u16::try_from(rows).unwrap_or(u16::MAX),
-            u16::try_from(v.edges.len().saturating_sub(rows + fits)).unwrap_or(u16::MAX),
-        );
-        self.hit.set((flow, table));
+        bar(frame, box_, v.edges.len(), fits, rows);
+        self.hit.set((flow, box_));
 
         let warnings: Vec<Line> = v
             .warnings
@@ -515,22 +534,25 @@ fn table_rows(edges: usize) -> u16 {
         .max(6)
 }
 
-/// How much of a drawing is out of sight above and below its box.
-fn more(frame: &mut Frame, area: Rect, above: u16, below: u16) {
-    for (rows, mark, y) in [(above, '▲', area.y), (below, '▼', area.bottom() - 1)] {
-        if rows == 0 || area.height == 0 {
-            continue;
-        }
-        let s = format!("{mark} {rows} more");
-        let w = u16::try_from(s.width()).unwrap_or(0).min(area.width);
-        let r = Rect {
-            x: area.right() - w,
-            y,
-            width: w,
-            height: 1,
-        };
-        frame.render_widget(Paragraph::new(Line::styled(s, style::key())), r);
+/// A bar down the right of `area` saying where in `total` rows the `shown`
+/// on screen start. Takes the rightmost column, which the caller leaves
+/// free, so nothing is written under it.
+fn bar(frame: &mut Frame, area: Rect, total: usize, shown: usize, at: usize) {
+    use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+    if total <= shown || area.height == 0 {
+        return;
     }
+    let mut state = ScrollbarState::new(total.saturating_sub(shown)).position(at);
+    frame.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(Some("│"))
+            .thumb_symbol("█")
+            .track_style(style::dim()),
+        area,
+        &mut state,
+    );
 }
 
 /// Draw a titled box over `area` and return the room left inside it. The one

@@ -488,9 +488,9 @@ const TICK_HOLD: usize = 3;
 /// Blank columns between the end of a ticker's text and its start coming round.
 const TICK_GAP: usize = 4;
 
-/// Text wider than the room it has, moved along a column at a time so all of
-/// it can be read, like a ticker. Colours travel with the characters. Text
-/// that fits is left alone.
+/// A name wider than the room it has, moved along a column at a time so all
+/// of it can be read. Only the name: tags wrap onto another row instead,
+/// which is quieter to read when several cards have them.
 fn ticker(spans: Vec<Span<'static>>, width: usize, frame: usize) -> Vec<Span<'static>> {
     let total: usize = spans.iter().map(|s| s.content.width()).sum();
     if total <= width || width == 0 {
@@ -554,15 +554,21 @@ fn card(
         Span::raw(fmt_i64(*pending)),
     ]);
     let mut lines = vec![head, nums];
-    if !badges.is_empty() {
+    // Tags wrap onto as many rows as they take, and the card was made tall
+    // enough for them; scrolling them was worse to read than a second row.
+    let labels: Vec<String> = badges.iter().map(|b| b.label.clone()).collect();
+    for row in layout::badge_rows(&labels, usize::from(inner.width)) {
         let mut tags: Vec<Span<'static>> = Vec::new();
-        for (i, b) in badges.iter().enumerate() {
-            if i > 0 {
+        for i in row {
+            if !tags.is_empty() {
                 tags.push(Span::raw(" "));
             }
-            tags.push(Span::styled(b.label.clone(), palette.edge(b.colour)));
+            tags.push(Span::styled(
+                badges[i].label.clone(),
+                palette.edge(badges[i].colour),
+            ));
         }
-        lines.push(Line::from(ticker(tags, usize::from(inner.width), spin)));
+        lines.push(Line::from(tags));
     }
     // A card is as tall as its busiest side needs, which can be taller than
     // its three lines of text; the text sits in the middle of the box rather
