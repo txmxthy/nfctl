@@ -128,7 +128,7 @@ pub async fn pipeline_view(
         Vec::<EdgeWatermark>::new(),
     );
     let at_connect = Instant::now();
-    match daemons.connect(key).await {
+    match daemons.connect(key, Some(t)).await {
         Err(e) => {
             timings.connect = at_connect.elapsed();
             warnings.push(format!("daemon unavailable: {e}"));

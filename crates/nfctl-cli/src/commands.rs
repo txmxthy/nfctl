@@ -525,7 +525,7 @@ async fn run_apply(
         Err(Error::NotFound { .. }) => None,
         Err(e) => return Err(e),
     };
-    let backlog = match (&live, ctx.service.daemons().connect(&new.key).await) {
+    let backlog = match (&live, ctx.service.daemons().connect(&new.key, None).await) {
         (Some(_), Ok(d)) => d
             .buffers()
             .await

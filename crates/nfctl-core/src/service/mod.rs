@@ -13,9 +13,11 @@ pub use logs::{ContainerSelect, TailHandle, TailOptions};
 pub use pipeline::PipelineService;
 pub use status::{EdgeView, PipelineView, VertexView, pipeline_view};
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
-use crate::model::PipelineKey;
+use crate::model::{PipelineKey, Topology};
 use crate::ports::{DaemonConnector, DaemonPort};
 use crate::{Error, Result};
 
@@ -26,7 +28,11 @@ pub struct NoDaemon;
 
 #[async_trait]
 impl DaemonConnector for NoDaemon {
-    async fn connect(&self, key: &PipelineKey) -> Result<Box<dyn DaemonPort>> {
+    async fn connect(
+        &self,
+        key: &PipelineKey,
+        _topology: Option<&Topology>,
+    ) -> Result<Arc<dyn DaemonPort>> {
         Err(Error::Daemon(
             format!("no daemon adapter configured for {key}").into(),
         ))
@@ -35,7 +41,7 @@ impl DaemonConnector for NoDaemon {
     async fn connect_monovertex(
         &self,
         key: &crate::model::MonoVertexKey,
-    ) -> Result<Box<dyn DaemonPort>> {
+    ) -> Result<Arc<dyn DaemonPort>> {
         Err(Error::Daemon(
             format!("no daemon adapter configured for {key}").into(),
         ))

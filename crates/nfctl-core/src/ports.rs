@@ -1,6 +1,8 @@
 //! The two things that vary between environments, as traits. Adapters implement
 //! them; services and UIs only ever see `dyn ClusterPort` / `dyn DaemonPort`.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 
@@ -9,7 +11,7 @@ use crate::model::LogOptions;
 use crate::model::{
     BufferInfo, BufferName, ContainerName, DesiredPhase, EdgeWatermark, IsbService, LogLine,
     MonoVertex, MonoVertexKey, Namespace, Pipeline, PipelineHealth, PipelineKey, PodEvent, PodName,
-    PodRef, ReplicaErrors, ResumeStrategy, Selector, VertexMetrics, VertexName,
+    PodRef, ReplicaErrors, ResumeStrategy, Selector, Topology, VertexMetrics, VertexName,
 };
 
 /// Kubernetes: CRDs, pods and logs.
@@ -109,9 +111,15 @@ pub trait DaemonPort: Send + Sync {
 /// adapter connects on first use.
 #[async_trait]
 pub trait DaemonConnector: Send + Sync {
-    async fn connect(&self, key: &PipelineKey) -> Result<Box<dyn DaemonPort>>;
+    /// `topology` saves the connector a second read of the pipeline when the
+    /// caller already has it; buffers are attributed to edges with it.
+    async fn connect(
+        &self,
+        key: &PipelineKey,
+        topology: Option<&Topology>,
+    ) -> Result<Arc<dyn DaemonPort>>;
 
     /// A `MonoVertex`'s daemon: `vertex_metrics` and `health` work; buffers and
     /// watermarks do not exist for a `MonoVertex` and return an error.
-    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>>;
+    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Arc<dyn DaemonPort>>;
 }

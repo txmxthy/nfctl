@@ -73,7 +73,7 @@ pub async fn pause(
         Some(t) => wait_for_phase(cluster, key, PipelinePhase::Paused, t).await?,
         None => cluster.get_pipeline(key).await?,
     };
-    let drained = match daemons.connect(key).await {
+    let drained = match daemons.connect(key, None).await {
         Ok(d) => d.buffers().await.ok().filter(|b| !b.is_empty()).map(|b| {
             b.iter()
                 .all(|x| x.pending == Some(0) && x.ack_pending == Some(0))

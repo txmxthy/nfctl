@@ -44,7 +44,7 @@ async fn happy_path_health_and_metrics() {
         ))
         .mount(&server)
         .await;
-    let d = connector(&server, 0).connect(&key()).await.unwrap();
+    let d = connector(&server, 0).connect(&key(), None).await.unwrap();
     let h = d.health().await.unwrap();
     assert_eq!(h.code, "D2");
     let m = d
@@ -67,7 +67,7 @@ async fn http_errors_are_not_retried() {
         .expect(1)
         .mount(&server)
         .await;
-    let d = connector(&server, 3).connect(&key()).await.unwrap();
+    let d = connector(&server, 3).connect(&key(), None).await.unwrap();
     let err = d.health().await.unwrap_err();
     assert!(err.to_string().contains("404"), "{err}");
     assert!(err.to_string().contains("nope"), "{err}");
@@ -82,7 +82,7 @@ async fn timeouts_are_retried_up_to_budget() {
         .expect(3)
         .mount(&server)
         .await;
-    let d = connector(&server, 2).connect(&key()).await.unwrap();
+    let d = connector(&server, 2).connect(&key(), None).await.unwrap();
     let err = d.health().await.unwrap_err();
     assert!(err.to_string().contains("timed out"), "{err}");
 }
@@ -95,7 +95,7 @@ async fn malformed_json_is_a_decode_error() {
         .respond_with(ResponseTemplate::new(200).set_body_raw("{not json", "application/json"))
         .mount(&server)
         .await;
-    let d = connector(&server, 0).connect(&key()).await.unwrap();
+    let d = connector(&server, 0).connect(&key(), None).await.unwrap();
     assert!(d.buffers().await.is_err());
 }
 
@@ -111,4 +111,23 @@ fn rejects_bad_urls() {
         )
         .is_ok()
     );
+}
+
+/// Connecting twice hands back the same client, so the connection pool it
+/// holds survives a refresh instead of being rebuilt with it.
+#[tokio::test]
+async fn a_second_connect_reuses_the_client() {
+    let server = MockServer::start().await;
+    let c = connector(&server, 0);
+    let a = c.connect(&key(), None).await.unwrap();
+    let b = c.connect(&key(), None).await.unwrap();
+    assert!(std::sync::Arc::ptr_eq(&a, &b), "same client");
+
+    // A different pipeline gets its own.
+    let other = PipelineKey::new(
+        Namespace::new("ns").unwrap(),
+        PipelineName::new("q").unwrap(),
+    );
+    let d = c.connect(&other, None).await.unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&a, &d), "one client per pipeline");
 }

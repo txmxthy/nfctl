@@ -494,12 +494,16 @@ impl FakeDaemons {
 
 #[async_trait]
 impl DaemonConnector for FakeDaemons {
-    async fn connect(&self, key: &PipelineKey) -> Result<Box<dyn DaemonPort>> {
-        Ok(Box::new(self.for_name(&key.name)))
+    async fn connect(
+        &self,
+        key: &PipelineKey,
+        _topology: Option<&Topology>,
+    ) -> Result<Arc<dyn DaemonPort>> {
+        Ok(Arc::new(self.for_name(&key.name)))
     }
 
-    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>> {
-        Ok(Box::new(self.for_name(&key.name)))
+    async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Arc<dyn DaemonPort>> {
+        Ok(Arc::new(self.for_name(&key.name)))
     }
 }
 

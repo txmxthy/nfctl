@@ -26,7 +26,7 @@ async fn port_forward_round_trip() {
         Namespace::default_ns(),
         PipelineName::new(pipeline).unwrap(),
     );
-    let d = daemons.connect(&key).await.unwrap();
+    let d = daemons.connect(&key, None).await.unwrap();
 
     let h = d.health().await.unwrap();
     assert!(!h.code.is_empty());
