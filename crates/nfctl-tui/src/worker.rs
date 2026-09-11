@@ -4,28 +4,31 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use nfctl_core::model::{
-    Namespace, Pipeline, PipelineKey, Selector, TaggedLine, Timestamp, VertexName,
+    MonoVertexKey, Namespace, PipelineKey, Selector, TaggedLine, Timestamp, VertexName, Workload,
+    WorkloadKey, WorkloadKind,
 };
 use nfctl_core::ports::ClusterPort;
 use nfctl_core::service::logs::{TailHandle, TailOptions, tail};
-use nfctl_core::service::{PipelineService, PipelineView};
+use nfctl_core::service::{MonoVertexView, PipelineService, PipelineView};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerMessage {
-    LoadPipelines(Option<Namespace>),
+    LoadWorkloads(Option<Namespace>),
     LoadView(PipelineKey),
-    StartLogs(PipelineKey, Option<VertexName>),
+    LoadMonoVertex(MonoVertexKey),
+    StartLogs(WorkloadKey, Option<VertexName>),
     StopLogs,
 }
 
 #[derive(Debug)]
 pub enum WorkerReply {
     /// The list, and how long the cluster took to answer.
-    Pipelines(Result<Vec<Pipeline>, String>, std::time::Duration),
+    Workloads(Result<Vec<Workload>, String>, std::time::Duration),
     /// A pipeline's shape, before its numbers are in.
     Shape(Box<PipelineView>),
     View(Box<Result<PipelineView, String>>),
+    MonoVertex(Box<Result<MonoVertexView, String>>),
     Log(TaggedLine),
     LogsFailed(String),
 }
@@ -61,17 +64,27 @@ impl Worker {
 
     async fn handle(&mut self, msg: WorkerMessage) {
         match msg {
-            WorkerMessage::LoadPipelines(ns) => {
+            WorkerMessage::LoadWorkloads(ns) => {
                 let started = std::time::Instant::now();
                 let r = self
                     .service
-                    .list(ns.as_ref())
+                    .list_workloads(ns.as_ref())
                     .await
                     .map_err(|e| e.to_string());
                 let _ = self
                     .tx
-                    .send(WorkerReply::Pipelines(r, started.elapsed()))
+                    .send(WorkerReply::Workloads(r, started.elapsed()))
                     .await;
+            }
+            WorkerMessage::LoadMonoVertex(key) => {
+                // A MonoVertex has no shape to draw before its numbers: one
+                // read of the CRD and two daemon calls are the whole view.
+                let r = self
+                    .service
+                    .monovertex_view(&key, Timestamp::now())
+                    .await
+                    .map_err(|e| e.to_string());
+                let _ = self.tx.send(WorkerReply::MonoVertex(Box::new(r))).await;
             }
             WorkerMessage::LoadView(key) => {
                 // The shape is one call to the cluster and the numbers are
@@ -98,7 +111,10 @@ impl Worker {
             }
             WorkerMessage::StartLogs(key, vertex) => {
                 self.stop_logs();
-                let selector = Selector::vertex_pods(&key.name, vertex.as_ref());
+                let selector = match key.kind {
+                    WorkloadKind::Pipeline => Selector::vertex_pods(&key.name, vertex.as_ref()),
+                    WorkloadKind::MonoVertex => Selector::monovertex_pods(&key.name),
+                };
                 let opts = TailOptions {
                     tail_lines: Some(50),
                     ..TailOptions::default()

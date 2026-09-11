@@ -1,6 +1,5 @@
 ---
 source: crates/nfctl-cli/tests/binary.rs
-assertion_line: 178
 expression: text
 ---
 nfctl
@@ -13,9 +12,9 @@ nfctl
 ├── --no-color  — Disable colour (also honours the `NO_COLOR` environment variable)  (global)
 ├── --timings  — Print how long each step took, to stderr. `NFCTL_LOG` picks the targets and level when more than the timings are wanted. The TUI writes them to a file instead and names it on the way out  (global)
 ├── --fixture  FILE  — Answer from this fixture file instead of a cluster (demos, tests, screenshots)  (global)
-├── ls  List pipelines
-├── get  Show one pipeline
-│   └── name  NAME  — Pipeline name
+├── ls  List pipelines and MonoVertices
+├── get  Show one pipeline or MonoVertex
+│   └── name  NAME  — Pipeline or MonoVertex name
 ├── dag  Render a pipeline's topology
 │   ├── name  NAME  — Pipeline name
 │   ├── -f/--format  FORMAT [ascii|mermaid|dot]  = ascii  — Diagram format (`-o json|yaml` prints the topology model instead)
@@ -68,10 +67,7 @@ nfctl
 │   ├── vertex  VERTEX  — Vertex name
 │   ├── replicas  REPLICAS  — Replica count
 │   └── --dry-run  — Validate on the server without changing anything
-├── mvtx  MonoVertex operations
-│   ├── ls  List MonoVertices
-│   ├── get  Show one MonoVertex
-│   │   └── name  NAME
+├── mvtx  MonoVertex verbs not yet unified (ls and get cover both kinds)
 │   ├── status  Phase, health, rate and pending from the MonoVertex daemon
 │   │   └── name  NAME
 │   ├── logs  Logs from the MonoVertex pods

@@ -2,7 +2,8 @@
 source: crates/nfctl-cli/tests/render.rs
 expression: "out(&[\"ls\", \"-A\", \"-o\", \"wide\"]).await"
 ---
-NAMESPACE  NAME             PHASE    VERTICES  SOURCES  SINKS  UDFS  AGE  DESIRED  ISB      MESSAGE
-demo       paused-pipeline  Paused   3         1        1      1     3d   Running  default  waiting for buffers to drain
-demo       simple-pipeline  Running  3         1        1      1     3d   Running  default
-other      elsewhere        Failed   3         1        1      1     3d   Running  default
+NAMESPACE  KIND        NAME             PHASE    VERTICES  AGE  DESIRED  SOURCES  SINKS  UDFS  REPLICAS  READY  ISB      MESSAGE
+demo       MonoVertex  mono             Running  1         3d   Running  -        -      -     1         1      -
+demo       Pipeline    paused-pipeline  Paused   3         3d   Running  1        1      1     -         -      default  waiting for buffers to drain
+demo       Pipeline    simple-pipeline  Running  3         3d   Running  1        1      1     -         -      default
+other      Pipeline    elsewhere        Failed   3         3d   Running  1        1      1     -         -      default

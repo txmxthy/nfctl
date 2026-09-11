@@ -357,22 +357,50 @@ async fn apply_check_blocks_and_warns() {
 
 #[tokio::test]
 async fn mvtx_commands() {
-    insta::assert_snapshot!("mvtx_ls", out(&["mvtx", "ls", "-o", "wide"]).await);
     insta::assert_snapshot!("mvtx_status", out(&["mvtx", "status", "mono"]).await);
-    assert_eq!(out(&["mvtx", "pause", "mono"]).await, "demo/mono: pause\n");
     let ctx = ctx();
     assert_eq!(
         out_ctx(&Cli::parse_from(["nfctl", "mvtx", "pause", "mono"]), &ctx).await,
         "demo/mono: pause\n"
     );
+    // `get` is the unified one: it resolves a MonoVertex as readily as a pipeline.
     assert!(
-        out_ctx(&Cli::parse_from(["nfctl", "mvtx", "get", "mono"]), &ctx)
+        out_ctx(&Cli::parse_from(["nfctl", "get", "mono"]), &ctx)
             .await
             .contains("Paused")
     );
     assert_eq!(
         out_ctx(&Cli::parse_from(["nfctl", "mvtx", "resume", "mono"]), &ctx).await,
         "demo/mono: resume\n"
+    );
+}
+
+/// `get` resolves a `MonoVertex` by bare name, and says which kind it found.
+#[tokio::test]
+async fn get_covers_both_kinds() {
+    insta::assert_snapshot!("get_monovertex", out(&["get", "mono"]).await);
+    // The JSON carries the kind, so a reader does not have to guess.
+    let json = out(&["get", "mono", "-o", "json"]).await;
+    assert!(json.contains("\"kind\": \"MonoVertex\""), "{json}");
+}
+
+/// A name carried by a pipeline and a `MonoVertex` at once is ambiguous, and the
+/// error names both rather than picking one.
+#[tokio::test]
+async fn a_name_shared_by_two_kinds_is_ambiguous() {
+    let c = FakeCluster::default();
+    c.add_pipelines([sample_pipeline("demo", "twin", PipelinePhase::Running)]);
+    c.add_monovertices([sample_monovertex("demo", "twin", MonoVertexPhase::Running)]);
+    let ctx = ctx_with(c);
+    let err = run(&Cli::parse_from(["nfctl", "get", "twin"]), &ctx)
+        .await
+        .err()
+        .unwrap();
+    assert!(matches!(err, nfctl_core::Error::Usage(_)), "{err}");
+    assert!(
+        err.to_string().contains("Pipeline demo/twin")
+            && err.to_string().contains("MonoVertex demo/twin"),
+        "{err}"
     );
 }
 

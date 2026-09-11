@@ -1,5 +1,5 @@
 use crossterm::event::KeyCode;
-use nfctl_core::model::{PipelineKey, TagCondition, TagOperator, VertexName};
+use nfctl_core::model::{PipelineKey, TagCondition, TagOperator, VertexName, WorkloadKey};
 use nfctl_core::service::PipelineView;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -156,7 +156,7 @@ impl DetailPanel {
         let health = v.health.as_ref().map(|h| h.status);
         let mut line = Line::from(vec![
             Span::styled("phase ", style::dim()),
-            Span::styled(p.status.phase.as_str(), style::phase(p.status.phase)),
+            Span::styled(p.status.phase.as_str(), style::phase(p.status.phase.into())),
             Span::styled("   health ", style::dim()),
             Span::styled(
                 health.map_or("unknown", |h| h.as_str()),
@@ -417,12 +417,16 @@ impl Model for DetailPanel {
                     (None, vec![])
                 }
                 Some(KeyCode::Char('r')) => (None, self.on_enter()),
-                Some(KeyCode::Char('l')) => {
-                    (Some(Action::OpenLogs(self.key.clone(), None)), vec![])
-                }
+                Some(KeyCode::Char('l')) => (
+                    Some(Action::OpenLogs(WorkloadKey::from(&self.key), None)),
+                    vec![],
+                ),
                 Some(KeyCode::Enter) => {
                     let v = self.selected_vertex().map(|v| v.name.clone());
-                    (Some(Action::OpenLogs(self.key.clone(), v)), vec![])
+                    (
+                        Some(Action::OpenLogs(WorkloadKey::from(&self.key), v)),
+                        vec![],
+                    )
                 }
                 _ => (None, vec![]),
             },
@@ -519,7 +523,7 @@ impl Model for DetailPanel {
             .map(|w| {
                 Line::styled(
                     format!("warning: {w}"),
-                    style::phase(nfctl_core::model::PipelinePhase::Pausing),
+                    style::phase(nfctl_core::model::WorkloadPhase::Pausing),
                 )
             })
             .collect();

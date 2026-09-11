@@ -4,7 +4,8 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use nfctl_core::model::{Pipeline, Timestamp};
+use nfctl_core::model::{Pipeline, Timestamp, Workload};
+use nfctl_core::service::MonoVertexView;
 use nfctl_core::{Error, Result};
 use serde::Serialize;
 use unicode_width::UnicodeWidthStr;
@@ -83,9 +84,11 @@ pub fn age(d: Option<Duration>) -> String {
     }
 }
 
-/// Render pipelines as a table, or as JSON/YAML.
-pub fn pipelines(
-    items: &[Pipeline],
+/// Render workloads of either kind as a table, or as JSON/YAML. A column that
+/// only one kind has shows `-` for the other rather than being left out: the
+/// list is one table, so every row has to line up.
+pub fn workloads(
+    items: &[Workload],
     fmt: OutputFormat,
     with_namespace: bool,
     now: Timestamp,
@@ -94,40 +97,47 @@ pub fn pipelines(
         OutputFormat::Json | OutputFormat::Yaml => serialised(&items, fmt),
         OutputFormat::Table | OutputFormat::Wide => {
             if items.is_empty() {
-                return Ok("No pipelines found.\n".to_owned());
+                return Ok("No pipelines or MonoVertices found.\n".to_owned());
             }
             let wide = fmt == OutputFormat::Wide;
             let mut header = Vec::new();
             if with_namespace {
                 header.push("NAMESPACE");
             }
-            header.extend([
-                "NAME", "PHASE", "VERTICES", "SOURCES", "SINKS", "UDFS", "AGE",
-            ]);
+            header.extend(["KIND", "NAME", "PHASE", "VERTICES", "AGE"]);
             if wide {
-                header.extend(["DESIRED", "ISB", "MESSAGE"]);
+                header.extend([
+                    "DESIRED", "SOURCES", "SINKS", "UDFS", "REPLICAS", "READY", "ISB", "MESSAGE",
+                ]);
             }
             let mut t = Table::new(header);
-            for p in items {
+            for w in items {
                 let mut row = Vec::new();
                 if with_namespace {
-                    row.push(p.key.namespace.to_string());
+                    row.push(w.namespace().to_string());
                 }
-                let c = p.status.counts;
                 row.extend([
-                    p.key.name.to_string(),
-                    p.status.phase.as_str().to_owned(),
-                    c.total.to_string(),
-                    c.sources.to_string(),
-                    c.sinks.to_string(),
-                    c.udfs.to_string(),
-                    age(p.age(now)),
+                    w.kind().as_str().to_owned(),
+                    w.name().to_string(),
+                    w.phase().as_str().to_owned(),
+                    w.vertices().to_string(),
+                    age(w.age(now)),
                 ]);
                 if wide {
+                    let dash = || "-".to_owned();
+                    let counts = w.counts();
+                    let replicas = w.replicas();
                     row.extend([
-                        p.spec.lifecycle.desired.as_str().to_owned(),
-                        p.spec.isb.to_string(),
-                        p.status.message.clone().unwrap_or_default(),
+                        w.desired().as_str().to_owned(),
+                        counts.map_or_else(dash, |c| c.sources.to_string()),
+                        counts.map_or_else(dash, |c| c.sinks.to_string()),
+                        counts.map_or_else(dash, |c| c.udfs.to_string()),
+                        replicas.map_or_else(dash, |(n, _)| n.to_string()),
+                        replicas.map_or_else(dash, |(_, ready)| {
+                            ready.map_or_else(dash, |n| n.to_string())
+                        }),
+                        w.isb().map_or_else(dash, ToString::to_string),
+                        w.message().unwrap_or_default().to_owned(),
                     ]);
                 }
                 t.row(row);
@@ -395,84 +405,14 @@ pub fn apply_report(
     out
 }
 
-/// `mvtx ls` / `mvtx get`.
-pub fn monovertices(
-    items: &[nfctl_core::model::MonoVertex],
-    fmt: OutputFormat,
-    with_namespace: bool,
-    now: Timestamp,
-) -> Result<String> {
+/// `mvtx status`: the `MonoVertex` half of what `status` shows for a pipeline.
+pub fn monovertex_view(v: &MonoVertexView, fmt: OutputFormat) -> Result<String> {
     if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
-        return serialised(&items, fmt);
+        return serialised(v, fmt);
     }
-    if items.is_empty() {
-        return Ok("No monovertices found.\n".to_owned());
-    }
-    let wide = fmt == OutputFormat::Wide;
-    let mut header = Vec::new();
-    if with_namespace {
-        header.push("NAMESPACE");
-    }
-    header.extend(["NAME", "PHASE", "REPLICAS", "READY", "AGE"]);
-    if wide {
-        header.extend(["DESIRED", "TRANSFORMER", "MAP", "MESSAGE"]);
-    }
-    let mut t = Table::new(header);
-    for m in items {
-        let mut row = Vec::new();
-        if with_namespace {
-            row.push(m.key.namespace.to_string());
-        }
-        let yes_no = |b: bool| if b { "yes".to_owned() } else { "no".to_owned() };
-        row.extend([
-            m.key.name.to_string(),
-            m.phase.as_str().to_owned(),
-            m.replicas.to_string(),
-            m.ready_replicas
-                .map_or_else(|| "-".to_owned(), |n| n.to_string()),
-            age(m.created.and_then(|c| c.elapsed_until(now))),
-        ]);
-        if wide {
-            row.extend([
-                m.desired.as_str().to_owned(),
-                yes_no(m.has_transformer),
-                yes_no(m.has_map),
-                m.message.clone().unwrap_or_default(),
-            ]);
-        }
-        t.row(row);
-    }
-    Ok(t.render())
-}
-
-/// `mvtx status`.
-pub fn monovertex_status(
-    m: &nfctl_core::model::MonoVertex,
-    health: Option<&nfctl_core::model::PipelineHealth>,
-    metrics: Option<&[nfctl_core::model::VertexMetrics]>,
-    warnings: &[String],
-    fmt: OutputFormat,
-) -> Result<String> {
-    if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
-        #[derive(Serialize)]
-        struct View<'a> {
-            monovertex: &'a nfctl_core::model::MonoVertex,
-            health: Option<&'a nfctl_core::model::PipelineHealth>,
-            metrics: Option<&'a [nfctl_core::model::VertexMetrics]>,
-            warnings: &'a [String],
-        }
-        return serialised(
-            &View {
-                monovertex: m,
-                health,
-                metrics,
-                warnings,
-            },
-            fmt,
-        );
-    }
+    let m = &v.monovertex;
     let mut out = String::new();
-    let h = health.map_or("unknown", |h| h.status.as_str());
+    let h = v.health.as_ref().map_or("unknown", |h| h.status.as_str());
     let _ = writeln!(
         out,
         "{}  phase={}  health={h}  desired={}  replicas={}/{}",
@@ -482,7 +422,7 @@ pub fn monovertex_status(
         m.ready_replicas.unwrap_or(0),
         m.replicas
     );
-    if let Some(h) = health
+    if let Some(h) = &v.health
         && !h.message.is_empty()
     {
         let _ = writeln!(out, "{} ({})", h.message, h.code);
@@ -490,7 +430,7 @@ pub fn monovertex_status(
     if let Some(msg) = &m.message {
         let _ = writeln!(out, "{msg}");
     }
-    if let Some(mm) = metrics.and_then(|v| v.first()) {
+    if let Some(mm) = v.metrics() {
         let _ = writeln!(
             out,
             "rate/1m={}  rate/5m={}  pending={}",
@@ -499,7 +439,7 @@ pub fn monovertex_status(
             opt_i64(mm.pending.default.or(mm.pending.m1))
         );
     }
-    for w in warnings {
+    for w in &v.warnings {
         let _ = writeln!(out, "warning: {w}");
     }
     Ok(out)

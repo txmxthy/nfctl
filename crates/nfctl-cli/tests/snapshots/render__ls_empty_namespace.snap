@@ -2,4 +2,4 @@
 source: crates/nfctl-cli/tests/render.rs
 expression: "out(&[\"ls\", \"-n\", \"empty\"]).await"
 ---
-No pipelines found.
+No pipelines or MonoVertices found.

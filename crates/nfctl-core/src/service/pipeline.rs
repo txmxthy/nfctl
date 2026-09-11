@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use crate::Result;
-use crate::model::{Namespace, Pipeline, PipelineKey};
+use crate::model::{
+    MonoVertex, MonoVertexKey, Namespace, Pipeline, PipelineKey, Timestamp, Workload, WorkloadKey,
+    WorkloadKind,
+};
 use crate::ports::{ClusterPort, DaemonConnector};
 
 /// Pipeline-level operations composed from the two ports.
@@ -32,6 +35,56 @@ impl PipelineService {
 
     pub async fn get(&self, key: &PipelineKey) -> Result<Pipeline> {
         self.cluster.get_pipeline(key).await
+    }
+
+    /// Pipelines and `MonoVertices` together, sorted by namespace then name.
+    /// Both lists are asked for at once: they are independent API calls and
+    /// one after the other doubles what a distant cluster costs.
+    pub async fn list_workloads(&self, ns: Option<&Namespace>) -> Result<Vec<Workload>> {
+        let (pipelines, monovertices) = futures::try_join!(
+            self.cluster.list_pipelines(ns),
+            self.cluster.list_monovertices(ns),
+        )?;
+        let mut v: Vec<Workload> = pipelines
+            .into_iter()
+            .map(Workload::from)
+            .chain(monovertices.into_iter().map(Workload::from))
+            .collect();
+        v.sort_by(|a, b| {
+            (a.namespace(), a.name(), a.kind()).cmp(&(b.namespace(), b.name(), b.kind()))
+        });
+        Ok(v)
+    }
+
+    /// One workload of either kind.
+    pub async fn get_workload(&self, key: &WorkloadKey) -> Result<Workload> {
+        match key.kind {
+            WorkloadKind::Pipeline => {
+                let k = PipelineKey::new(key.namespace.clone(), key.name.clone());
+                self.cluster.get_pipeline(&k).await.map(Workload::from)
+            }
+            WorkloadKind::MonoVertex => {
+                let k = MonoVertexKey {
+                    namespace: key.namespace.clone(),
+                    name: key.name.clone(),
+                };
+                self.cluster.get_monovertex(&k).await.map(Workload::from)
+            }
+        }
+    }
+
+    pub async fn get_monovertex(&self, key: &MonoVertexKey) -> Result<MonoVertex> {
+        self.cluster.get_monovertex(key).await
+    }
+
+    /// A `MonoVertex` fused with what its own daemon knows. Never fails
+    /// because of the daemon.
+    pub async fn monovertex_view(
+        &self,
+        key: &MonoVertexKey,
+        now: Timestamp,
+    ) -> Result<super::MonoVertexView> {
+        super::monovertex_view(self.cluster.as_ref(), self.daemons.as_ref(), key, now).await
     }
 
     /// CRD state fused with daemon runtime data. Never fails because of the daemon.

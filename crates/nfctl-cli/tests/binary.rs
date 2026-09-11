@@ -49,7 +49,9 @@ fn dynamic_completion_offers_fixture_resources() {
     );
     let vertices = complete(&["nfctl", "logs", "fanout", "e"]);
     assert_eq!(vertices.trim(), "even-or-odd\neven-sink");
-    assert!(complete(&["nfctl", "mvtx", "get", ""]).starts_with("mono\t"));
+    // `get` completes MonoVertices as well as pipelines.
+    assert!(complete(&["nfctl", "get", "mono"]).starts_with("mono\t"));
+    assert!(complete(&["nfctl", "mvtx", "status", ""]).starts_with("mono\t"));
     assert!(complete(&["nfctl", "isb", "inspect", ""]).starts_with("default\t"));
     // A namespace on the line narrows the candidates.
     assert_eq!(complete(&["nfctl", "-n", "nowhere", "get", ""]).trim(), "");

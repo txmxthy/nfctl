@@ -2,7 +2,7 @@
 
 | Command | Status | Milestone |
 |---|---|---|
-| `ls`, `get` | done | M1 |
+| `ls`, `get` (pipelines and MonoVertices, with a KIND column) | done | M1 |
 | `completions` | done | M1 |
 | `map` | done | — |
 | `dag` | done | M2 |
@@ -14,7 +14,8 @@
 | `apply --check` | done | M5 |
 | `scale` | done | M5 |
 | `tui` | done | M7 |
-| `mvtx ls/get/status/logs/pause/resume` | done | M8 |
+| `mvtx status/logs/pause/resume` (`ls`/`get` unified away, ADR 0009) | done | M8 |
+| unify `mvtx status/logs/pause/resume` into the shared verbs | planned | later |
 | corpus tests + benches (private seed) | done | M9 |
 | `tui`: shard collapse (`x`), edge bundling, tag colours, badges, scroll | done | M10 |
 | `dag --expand-shards`, coloured `dag -f ascii` | done | M10 |

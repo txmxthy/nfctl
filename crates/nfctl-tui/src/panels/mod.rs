@@ -1,6 +1,7 @@
 pub mod detail;
 pub mod logs;
-pub mod pipelines;
+pub mod monovertex;
+pub mod workloads;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::layout::Rect;

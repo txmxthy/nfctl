@@ -4,6 +4,24 @@ expression: "out(&[\"ls\", \"-o\", \"json\"]).await"
 ---
 [
   {
+    "kind": "MonoVertex",
+    "key": {
+      "namespace": "demo",
+      "name": "mono"
+    },
+    "desired": "Running",
+    "phase": "Running",
+    "replicas": 1,
+    "desired_replicas": 1,
+    "ready_replicas": 1,
+    "has_transformer": true,
+    "has_map": false,
+    "message": null,
+    "conditions": [],
+    "created": "1970-01-01T00:00:00Z"
+  },
+  {
+    "kind": "Pipeline",
     "key": {
       "namespace": "demo",
       "name": "paused-pipeline"
@@ -97,6 +115,7 @@ expression: "out(&[\"ls\", \"-o\", \"json\"]).await"
     }
   },
   {
+    "kind": "Pipeline",
     "key": {
       "namespace": "demo",
       "name": "simple-pipeline"
@@ -190,6 +209,7 @@ expression: "out(&[\"ls\", \"-o\", \"json\"]).await"
     }
   },
   {
+    "kind": "Pipeline",
     "key": {
       "namespace": "other",
       "name": "elsewhere"

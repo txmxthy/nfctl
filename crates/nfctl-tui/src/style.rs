@@ -1,12 +1,12 @@
-use nfctl_core::model::{Health, PipelinePhase};
+use nfctl_core::model::{Health, WorkloadPhase};
 use ratatui::style::{Color, Modifier, Style};
 
-pub fn phase(p: PipelinePhase) -> Style {
+pub fn phase(p: WorkloadPhase) -> Style {
     let c = match p {
-        PipelinePhase::Running => Color::Green,
-        PipelinePhase::Paused | PipelinePhase::Pausing => Color::Yellow,
-        PipelinePhase::Failed => Color::Red,
-        PipelinePhase::Deleting | PipelinePhase::Unknown => Color::DarkGray,
+        WorkloadPhase::Running => Color::Green,
+        WorkloadPhase::Paused | WorkloadPhase::Pausing => Color::Yellow,
+        WorkloadPhase::Failed => Color::Red,
+        WorkloadPhase::Deleting | WorkloadPhase::Unknown => Color::DarkGray,
     };
     Style::default().fg(c)
 }

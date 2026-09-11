@@ -16,7 +16,8 @@ All notable changes to this project are documented here. Format follows
 - Lifecycle: `pause --wait` (reports drain), `resume --strategy fast|slow`, `recycle` (vertex pods or pause-drain-resume), `wait --phase`, `scale`; every mutating verb takes `--dry-run`.
 - `nfctl apply`: server-side apply with `--check`, which refuses immutable changes (ISB, instance, vertex type, reduce partitions) and warns on topology or image changes that risk in-flight data.
 - `nfctl tui`: pipelines list, pipeline detail with vertex cards laid out by rank and live rates/pending, and a following log view. One worker task owns all I/O; panels are message-driven.
-- `nfctl mvtx ls|get|status|logs|pause|resume`: MonoVertex support, including its daemon (metrics and health) and its pause/resume semantics.
+- `nfctl mvtx status|logs|pause|resume`: MonoVertex support, including its daemon (metrics and health) and its pause/resume semantics.
+- A MonoVertex is a kind, not a separate hierarchy (ADR 0009): `ls` lists both kinds with a `KIND` column, `get <name>` resolves either and names both candidates when a name is ambiguous, and the TUI list shows both and opens a MonoVertex panel with no flow drawing or edge table. `ls -o json|yaml` now emits objects carrying a `kind` field; `mvtx ls` and `mvtx get` are gone, replaced by the unified pair.
 - `nfctl map`: the whole command surface as one tree (or JSON), for pruning.
 - Lists span all namespaces unless `-n` is given, and single-resource commands resolve a bare name across namespaces (error if ambiguous). Fits a namespace-per-pipeline layout.
 - TUI: every edge is drawn (fan-out, fan-in, column-skipping and back edges); tables size columns to their content; log lines wrap.

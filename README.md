@@ -14,8 +14,8 @@ every mutating one.
 ## Commands
 
 ```
-nfctl ls                                  pipelines in a namespace (-A for all)
-nfctl get <pipeline> [-o wide|json|yaml]
+nfctl ls                                  pipelines and MonoVertices, with a KIND column (-A for all)
+nfctl get <name> [-o wide|json|yaml]      either kind, resolved by name
 nfctl dag <pipeline> [-f ascii|mermaid|dot] [--expand-shards]
 nfctl logs <pipeline> [vertex] [-f] [-c container] [--since 10m] [--tail N]
 nfctl status <pipeline>                   phase + health + rates + pending + buffer usage
@@ -27,7 +27,7 @@ nfctl recycle <pipeline> [vertex]         restart a vertex's pods one at a time,
 nfctl wait <pipeline> --phase paused
 nfctl scale <pipeline> <vertex> <n>
 nfctl apply -f spec.yaml [--check]        refuses changes that need delete-and-recreate
-nfctl mvtx ls|get|status|logs|pause|resume  MonoVertex equivalents
+nfctl mvtx status|logs|pause|resume       MonoVertex verbs not yet unified (see ADR 0009)
 nfctl tui                                 the same, interactive
 nfctl completions <shell>                 tab-completes resource names from the cluster
 nfctl map                                 every command and option as one tree
@@ -37,8 +37,10 @@ Global flags: `-n/--namespace`, `--context`, `--request-timeout`, `-o`, `--daemo
 (skip the port-forward when running in-cluster), `--fixture` (no cluster at all),
 `--no-color` (`NO_COLOR` in the environment does the same).
 
-Without `-n`, lists span every namespace and a bare pipeline name resolves to the
-namespace it lives in; the tool refuses only when the same name exists in several.
+Without `-n`, lists span every namespace and a bare name resolves to the namespace
+it lives in; the tool refuses only when the same name exists in several. `get`
+resolves across kinds too, so it also refuses a name a Pipeline and a MonoVertex
+both carry — the error names each candidate's kind.
 
 ### `dag`
 

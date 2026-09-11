@@ -1,0 +1,16 @@
+---
+source: crates/nfctl-tui/tests/frames.rs
+expression: "frame(&panel, 100, 12)"
+---
+"┌ workloads (all namespaces) ──────────────────────────────────────────────────────────────────────┐"
+"│             ┌──────────────────────────────────────────────────────────────────────┐             │"
+"│             │NAMESPACE  KIND        NAME        PHASE    VERTICES  DESIRED  MESSAGE│             │"
+"│             │default    Pipeline    fanout      Running  5         Running         │             │"
+"│             │default    Pipeline    linear      Running  3         Running         │             │"
+"│             │default    Pipeline    partitions  Running  3         Running         │             │"
+"│             │default    Pipeline    scaling     Running  3         Running         │             │"
+"│             │default    Pipeline    sharded     Running  8         Running         │             │"
+"│             │default    MonoVertex  mono        Running  1         Running         │             │"
+"│             └──────────────────────────────────────────────────────────────────────┘             │"
+"│                                                                                                  │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

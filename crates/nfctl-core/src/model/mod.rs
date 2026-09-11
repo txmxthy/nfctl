@@ -9,6 +9,7 @@ mod pods;
 mod runtime;
 mod time;
 mod topology;
+mod workload;
 
 pub use ids::{
     BufferName, ContainerName, InvalidName, IsbName, Namespace, PipelineKey, PipelineName, PodName,
@@ -32,3 +33,4 @@ pub use topology::{
     Edge, OnFull, ScaleSpec, TagCondition, TagOperator, Topology, TopologyDiff, TopologyError,
     Vertex, VertexKind,
 };
+pub use workload::{Workload, WorkloadKey, WorkloadKind, WorkloadPhase};

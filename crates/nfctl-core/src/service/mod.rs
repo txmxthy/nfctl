@@ -12,7 +12,8 @@ pub use lifecycle::{PauseReport, RecycleReport, pause, recycle, resume, wait_for
 pub use logs::{ContainerSelect, TailHandle, TailOptions};
 pub use pipeline::PipelineService;
 pub use status::{
-    EdgeView, PipelineView, Timings, VertexView, pipeline_numbers, pipeline_shape, pipeline_view,
+    EdgeView, MonoVertexView, PipelineView, Timings, VertexView, monovertex_view, pipeline_numbers,
+    pipeline_shape, pipeline_view,
 };
 
 use std::sync::Arc;

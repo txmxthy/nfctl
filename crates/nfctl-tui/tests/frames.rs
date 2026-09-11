@@ -6,11 +6,12 @@
 use std::sync::Arc;
 
 use nfctl_core::fake::{FakeCluster, FakeDaemons, Fixture};
-use nfctl_core::model::{MonoVertexKey, PipelineKey, Timestamp, VertexName};
-use nfctl_core::service::{PipelineService, pipeline_view};
+use nfctl_core::model::{MonoVertexKey, PipelineKey, Timestamp, VertexName, Workload, WorkloadKey};
+use nfctl_core::service::{PipelineService, monovertex_view, pipeline_view};
 use nfctl_tui::panels::detail::DetailPanel;
 use nfctl_tui::panels::logs::LogsPanel;
-use nfctl_tui::panels::pipelines::PipelinesPanel;
+use nfctl_tui::panels::monovertex::MonoVertexPanel;
+use nfctl_tui::panels::workloads::WorkloadsPanel;
 use nfctl_tui::{AppEvent, Model, WorkerReply};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -27,12 +28,26 @@ fn frame(model: &dyn Model, width: u16, height: u16) -> String {
     term.backend().to_string()
 }
 
+/// Both kinds in one list, with a KIND column telling them apart.
 #[tokio::test]
-async fn pipelines_panel() {
+async fn workloads_panel() {
     let fx = fixture();
-    let mut panel = PipelinesPanel::new(None);
-    panel.update(&AppEvent::Worker(WorkerReply::Pipelines(
-        Ok(fx.pipelines.clone()),
+    let mut panel = WorkloadsPanel::new(None);
+    let items: Vec<Workload> = fx
+        .pipelines
+        .iter()
+        .cloned()
+        .map(Workload::from)
+        .chain(fx.monovertices.iter().cloned().map(Workload::from))
+        .collect();
+    assert!(
+        items
+            .iter()
+            .any(|w| w.kind() == nfctl_core::model::WorkloadKind::MonoVertex),
+        "the fixture has a MonoVertex to list"
+    );
+    panel.update(&AppEvent::Worker(WorkerReply::Workloads(
+        Ok(items),
         std::time::Duration::from_millis(12),
     )));
     insta::assert_snapshot!(frame(&panel, 100, 12));
@@ -87,7 +102,10 @@ async fn logs_panel_follows_then_pins() {
         fx.pipelines[0].key.namespace.clone(),
         nfctl_core::model::PipelineName::new("linear").unwrap(),
     );
-    let mut panel = LogsPanel::new(key, Some(VertexName::new("cat").unwrap()));
+    let mut panel = LogsPanel::new(
+        WorkloadKey::from(&key),
+        Some(VertexName::new("cat").unwrap()),
+    );
     for pod in &fx.pods {
         let mut containers: Vec<_> = pod.logs.iter().collect();
         containers.sort_by(|a, b| a.0.cmp(b.0));
@@ -107,10 +125,29 @@ async fn logs_panel_follows_then_pins() {
     insta::assert_snapshot!("logs_following", frame(&panel, 100, 8));
     panel.update(&AppEvent::Key(crossterm_key('k')));
     insta::assert_snapshot!("logs_pinned", frame(&panel, 100, 8));
-    let _ = MonoVertexKey {
-        namespace: fx.pipelines[0].key.namespace.clone(),
-        name: fx.monovertices[0].key.name.clone(),
-    };
+}
+
+/// A `MonoVertex` opens a panel of its own: no flow drawing, no edge table,
+/// just the phase, health and the one row of numbers its daemon answers with.
+#[tokio::test]
+async fn monovertex_panel() {
+    let fx = fixture();
+    let cluster = FakeCluster::from_fixture(&fx);
+    let daemons = FakeDaemons::from_fixture(&fx);
+    let key: MonoVertexKey = fx.monovertices[0].key.clone();
+    let view = monovertex_view(
+        &cluster,
+        &daemons,
+        &key,
+        Timestamp::parse_rfc3339("2026-01-01T00:00:10Z").unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut panel = MonoVertexPanel::new(key);
+    panel.update(&AppEvent::Worker(WorkerReply::MonoVertex(Box::new(Ok(
+        view,
+    )))));
+    insta::assert_snapshot!(frame(&panel, 100, 12));
 }
 
 fn crossterm_key(c: char) -> crossterm::event::KeyEvent {

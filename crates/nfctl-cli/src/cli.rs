@@ -83,14 +83,12 @@ pub enum OutputFormat {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// List pipelines
-    #[command(alias = "list")]
+    #[command(alias = "list", about = "List pipelines and MonoVertices")]
     Ls,
 
-    /// Show one pipeline
+    #[command(about = "Show one pipeline or MonoVertex")]
     Get {
-        /// Pipeline name
-        #[arg(add = ArgValueCompleter::new(complete::pipelines))]
+        #[arg(add = ArgValueCompleter::new(complete::workloads), help = "Pipeline or MonoVertex name")]
         name: String,
     },
 
@@ -253,7 +251,7 @@ pub enum Command {
         dry_run: bool,
     },
 
-    #[command(about = "MonoVertex operations")]
+    #[command(about = "MonoVertex verbs not yet unified (ls and get cover both kinds)")]
     Mvtx {
         #[command(subcommand)]
         command: MvtxCommand,
@@ -299,17 +297,8 @@ pub enum DagFormat {
 
 #[derive(Debug, Subcommand)]
 pub enum MvtxCommand {
-    #[command(alias = "list", about = "List MonoVertices")]
-    Ls,
-    #[command(about = "Show one MonoVertex")]
-    Get {
-        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
-        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
-        name: String,
-    },
     #[command(about = "Phase, health, rate and pending from the MonoVertex daemon")]
     Status {
-        #[arg(add = ArgValueCompleter::new(complete::monovertices))]
         #[arg(add = ArgValueCompleter::new(complete::monovertices))]
         name: String,
     },

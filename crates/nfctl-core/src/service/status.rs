@@ -6,8 +6,8 @@ use serde::Serialize;
 
 use crate::Result;
 use crate::model::{
-    BufferInfo, EdgeWatermark, Pipeline, PipelineHealth, PipelineKey, Timestamp, Topology,
-    VertexKind, VertexMetrics, VertexName, Windows,
+    BufferInfo, EdgeWatermark, MonoVertex, MonoVertexKey, Pipeline, PipelineHealth, PipelineKey,
+    Timestamp, Topology, VertexKind, VertexMetrics, VertexName, Windows,
 };
 use crate::ports::{ClusterPort, DaemonConnector};
 
@@ -286,6 +286,71 @@ fn assemble(
         at: now,
         timings,
     }
+}
+
+/// Everything a `MonoVertex` screen shows. It has no topology, so no edges and
+/// no buffers: its daemon answers health and one vertex's metrics, and that is
+/// the whole of the runtime half.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MonoVertexView {
+    pub monovertex: MonoVertex,
+    pub health: Option<PipelineHealth>,
+    pub metrics: Vec<VertexMetrics>,
+    pub warnings: Vec<String>,
+    pub at: Timestamp,
+}
+
+impl MonoVertexView {
+    /// The one vertex's metrics, when the daemon gave any.
+    #[must_use]
+    pub fn metrics(&self) -> Option<&VertexMetrics> {
+        self.metrics.first()
+    }
+}
+
+/// Build the view. As with a pipeline, a daemon that cannot be reached leaves
+/// the CRD half intact and adds a warning saying why.
+#[tracing::instrument(level = "info", skip_all, fields(monovertex = %key))]
+pub async fn monovertex_view(
+    cluster: &dyn ClusterPort,
+    daemons: &dyn DaemonConnector,
+    key: &MonoVertexKey,
+    now: Timestamp,
+) -> Result<MonoVertexView> {
+    let monovertex = cluster.get_monovertex(key).await?;
+    let mut warnings = Vec::new();
+    let (health, metrics) = match daemons.connect_monovertex(key).await {
+        Ok(d) => {
+            // Two questions of one daemon, asked together, as a pipeline's are.
+            let (got_health, got_metrics) = futures::join!(d.health(), d.vertex_metrics(None));
+            let health = match got_health {
+                Ok(h) => Some(h),
+                Err(e) => {
+                    warnings.push(format!("health: {e}"));
+                    None
+                }
+            };
+            let metrics = match got_metrics {
+                Ok(m) => m,
+                Err(e) => {
+                    warnings.push(format!("metrics: {e}"));
+                    Vec::new()
+                }
+            };
+            (health, metrics)
+        }
+        Err(e) => {
+            warnings.push(format!("daemon unavailable: {e}"));
+            (None, Vec::new())
+        }
+    };
+    Ok(MonoVertexView {
+        monovertex,
+        health,
+        metrics,
+        warnings,
+        at: now,
+    })
 }
 
 #[cfg(all(test, feature = "fake"))]

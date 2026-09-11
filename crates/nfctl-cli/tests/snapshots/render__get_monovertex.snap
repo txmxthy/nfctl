@@ -1,0 +1,6 @@
+---
+source: crates/nfctl-cli/tests/render.rs
+expression: "out(&[\"get\", \"mono\"]).await"
+---
+KIND        NAME  PHASE    VERTICES  AGE  DESIRED  SOURCES  SINKS  UDFS  REPLICAS  READY  ISB  MESSAGE
+MonoVertex  mono  Running  1         3d   Running  -        -      -     1         1      -

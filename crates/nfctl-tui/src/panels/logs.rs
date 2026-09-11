@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crossterm::event::KeyCode;
-use nfctl_core::model::{PipelineKey, TaggedLine, VertexName};
+use nfctl_core::model::{TaggedLine, VertexName, WorkloadKey};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -16,7 +16,7 @@ const CAPACITY: usize = 5000;
 
 #[derive(Debug)]
 pub struct LogsPanel {
-    key: PipelineKey,
+    key: WorkloadKey,
     vertex: Option<VertexName>,
     lines: VecDeque<TaggedLine>,
     /// `None` = follow the tail; `Some(n)` = pinned so the top line is index n.
@@ -27,7 +27,7 @@ pub struct LogsPanel {
 }
 
 impl LogsPanel {
-    pub fn new(key: PipelineKey, vertex: Option<VertexName>) -> Self {
+    pub fn new(key: WorkloadKey, vertex: Option<VertexName>) -> Self {
         Self {
             key,
             vertex,

@@ -1,5 +1,5 @@
 use crossterm::event::KeyCode;
-use nfctl_core::model::{Namespace, Pipeline};
+use nfctl_core::model::{Namespace, Workload};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -17,9 +17,9 @@ const SPACING: u16 = 2;
 const TITLE_ROOM: u16 = 30;
 
 #[derive(Debug)]
-pub struct PipelinesPanel {
+pub struct WorkloadsPanel {
     ns: Option<Namespace>,
-    items: Vec<Pipeline>,
+    items: Vec<Workload>,
     state: TableState,
     error: Option<String>,
     loading: bool,
@@ -32,8 +32,9 @@ pub struct PipelinesPanel {
     took: Option<std::time::Duration>,
 }
 
-const HEADER: [&str; 6] = [
+const HEADER: [&str; 7] = [
     "NAMESPACE",
+    "KIND",
     "NAME",
     "PHASE",
     "VERTICES",
@@ -41,7 +42,7 @@ const HEADER: [&str; 6] = [
     "MESSAGE",
 ];
 
-impl PipelinesPanel {
+impl WorkloadsPanel {
     pub fn new(ns: Option<Namespace>) -> Self {
         Self {
             ns,
@@ -71,7 +72,7 @@ impl PipelinesPanel {
         self
     }
 
-    fn selected(&self) -> Option<&Pipeline> {
+    fn selected(&self) -> Option<&Workload> {
         self.state.selected().and_then(|i| self.items.get(i))
     }
 
@@ -86,11 +87,11 @@ impl PipelinesPanel {
     }
 
     fn reload(&self) -> Vec<WorkerMessage> {
-        vec![WorkerMessage::LoadPipelines(self.ns.clone())]
+        vec![WorkerMessage::LoadWorkloads(self.ns.clone())]
     }
 }
 
-impl Model for PipelinesPanel {
+impl Model for WorkloadsPanel {
     fn on_enter(&mut self) -> Vec<WorkerMessage> {
         self.reload()
     }
@@ -102,15 +103,15 @@ impl Model for PipelinesPanel {
                 self.spin = self.spin.wrapping_add(1);
                 (None, vec![])
             }
-            AppEvent::Worker(WorkerReply::Pipelines(r, took)) => {
+            AppEvent::Worker(WorkerReply::Workloads(r, took)) => {
                 self.loading = false;
                 self.took = Some(*took);
                 match r {
                     Ok(items) => {
-                        // Keep the selection on the same pipeline across refreshes.
-                        let keep = self.selected().map(|p| p.key.clone());
+                        // Keep the selection on the same workload across refreshes.
+                        let keep = self.selected().map(Workload::key);
                         self.items.clone_from(items);
-                        let idx = keep.and_then(|k| self.items.iter().position(|p| p.key == k));
+                        let idx = keep.and_then(|k| self.items.iter().position(|w| w.key() == k));
                         self.state
                             .select(idx.or_else(|| (!self.items.is_empty()).then_some(0)));
                         self.error = None;
@@ -130,13 +131,11 @@ impl Model for PipelinesPanel {
                     (None, vec![])
                 }
                 Some(KeyCode::Char('r')) => (None, self.reload()),
-                Some(KeyCode::Enter) => (
-                    self.selected().map(|p| Action::OpenDetail(p.key.clone())),
-                    vec![],
-                ),
+                Some(KeyCode::Enter) => {
+                    (self.selected().map(|w| Action::OpenDetail(w.key())), vec![])
+                }
                 Some(KeyCode::Char('l')) => (
-                    self.selected()
-                        .map(|p| Action::OpenLogs(p.key.clone(), None)),
+                    self.selected().map(|w| Action::OpenLogs(w.key(), None)),
                     vec![],
                 ),
                 _ => (None, vec![]),
@@ -149,10 +148,10 @@ impl Model for PipelinesPanel {
         // The terminal keeps a border of its own, dim, with the title on it;
         // what the panel holds sits in a brighter box floating inside.
         let mut title = match (&self.ns, self.source.as_str()) {
-            (Some(ns), "") => format!(" pipelines in {ns} "),
-            (Some(ns), from) => format!(" {from} · pipelines in {ns} "),
-            (None, "") => " pipelines (all namespaces) ".to_owned(),
-            (None, from) => format!(" {from} · pipelines (all namespaces) "),
+            (Some(ns), "") => format!(" workloads in {ns} "),
+            (Some(ns), from) => format!(" {from} · workloads in {ns} "),
+            (None, "") => " workloads (all namespaces) ".to_owned(),
+            (None, from) => format!(" {from} · workloads (all namespaces) "),
         };
         if let (true, Some(took)) = (self.timings, self.took) {
             title = format!("{title}· listed in {:.2}s ", took.as_secs_f32());
@@ -172,21 +171,22 @@ impl Model for PipelinesPanel {
             return;
         }
         if self.loading {
-            waiting(frame, room, self.spin, "listing pipelines");
+            waiting(frame, room, self.spin, "listing workloads");
             return;
         }
         let header = Row::new(HEADER).style(style::title());
         let cells: Vec<Vec<String>> = self
             .items
             .iter()
-            .map(|p| {
+            .map(|w| {
                 vec![
-                    p.key.namespace.to_string(),
-                    p.key.name.to_string(),
-                    p.status.phase.as_str().to_owned(),
-                    p.status.counts.total.to_string(),
-                    p.spec.lifecycle.desired.as_str().to_owned(),
-                    p.status.message.clone().unwrap_or_default(),
+                    w.namespace().to_string(),
+                    w.kind().as_str().to_owned(),
+                    w.name().to_string(),
+                    w.phase().as_str().to_owned(),
+                    w.vertices().to_string(),
+                    w.desired().as_str().to_owned(),
+                    w.message().unwrap_or_default().to_owned(),
                 ]
             })
             .collect();
@@ -201,12 +201,13 @@ impl Model for PipelinesPanel {
                 .unwrap_or(u16::MAX)
                 .saturating_add(3),
         );
-        let rows = self.items.iter().zip(cells).map(|(p, c)| {
+        let rows = self.items.iter().zip(cells).map(|(w, c)| {
             let mut c = c.into_iter();
             Row::new(vec![
                 Line::raw(c.next().unwrap_or_default()),
+                Line::styled(c.next().unwrap_or_default(), style::dim()),
                 Line::raw(c.next().unwrap_or_default()),
-                Line::styled(c.next().unwrap_or_default(), style::phase(p.status.phase)),
+                Line::styled(c.next().unwrap_or_default(), style::phase(w.phase())),
                 Line::raw(c.next().unwrap_or_default()),
                 Line::raw(c.next().unwrap_or_default()),
                 Line::styled(c.next().unwrap_or_default(), style::dim()),

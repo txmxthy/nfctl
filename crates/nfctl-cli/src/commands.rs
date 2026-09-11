@@ -6,7 +6,7 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use nfctl_core::model::{
     ContainerName, IsbName, MonoVertexKey, Namespace, PipelineKey, PipelineName, Selector,
-    TaggedLine, Timestamp, VertexName,
+    TaggedLine, Timestamp, VertexName, Workload, WorkloadKey,
 };
 use nfctl_core::model::{PipelinePhase, ResumeStrategy};
 use nfctl_core::ports::ClusterPort;
@@ -113,6 +113,26 @@ impl Context {
         unique("pipeline", &name, found)
     }
 
+    /// A pipeline or `MonoVertex` by name: in `-n` when given, else wherever
+    /// exactly one of either kind carries that name. Two kinds sharing a name
+    /// in one namespace is as ambiguous as one kind in two namespaces, and is
+    /// reported the same way.
+    async fn resolve_workload(&self, cli: &Cli, name: &str) -> Result<WorkloadKey> {
+        let name = PipelineName::new(name).map_err(|e| invalid_arg("workload", name, e))?;
+        let ns = Self::scope(cli)?;
+        let found: Vec<WorkloadKey> = self
+            .service
+            .list_workloads(ns.as_ref())
+            .await?
+            .iter()
+            .filter(|w| w.name() == &name)
+            .map(Workload::key)
+            .collect();
+        unique_by("workload", &name, found, |k| {
+            format!("{} {k}", k.kind.as_str())
+        })
+    }
+
     async fn resolve_monovertex(&self, cli: &Cli, name: &str) -> Result<MonoVertexKey> {
         let name = PipelineName::new(name).map_err(|e| invalid_arg("monovertex", name, e))?;
         if let Some(namespace) = Self::scope(cli)? {
@@ -134,7 +154,18 @@ impl Context {
 fn unique<K: std::fmt::Display>(
     kind: &'static str,
     name: &PipelineName,
+    found: Vec<K>,
+) -> Result<K> {
+    unique_by(kind, name, found, ToString::to_string)
+}
+
+/// As [`unique`], with `describe` saying how each candidate is named in the
+/// error: a workload needs its kind said as well as where it lives.
+fn unique_by<K>(
+    kind: &'static str,
+    name: &PipelineName,
     mut found: Vec<K>,
+    describe: impl Fn(&K) -> String,
 ) -> Result<K> {
     match found.len() {
         0 => Err(Error::NotFound {
@@ -143,12 +174,8 @@ fn unique<K: std::fmt::Display>(
         }),
         1 => Ok(found.remove(0)),
         _ => Err(Error::Usage(format!(
-            "{kind} `{name}` exists in more than one namespace ({}); pass -n",
-            found
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
+            "{kind} `{name}` is ambiguous ({}); pass -n",
+            found.iter().map(describe).collect::<Vec<_>>().join(", ")
         ))),
     }
 }
@@ -266,18 +293,16 @@ async fn run_text(cli: &Cli, ctx: &Context) -> Result<String> {
     match &cli.command {
         Command::Ls => {
             let ns = Context::scope(cli)?;
-            let pipelines = ctx.service.list(ns.as_ref()).await?;
-            output::pipelines(&pipelines, fmt, ns.is_none(), ctx.now)
+            let items = ctx.service.list_workloads(ns.as_ref()).await?;
+            output::workloads(&items, fmt, ns.is_none(), ctx.now)
         }
         Command::Get { name } => {
-            let p = ctx
-                .service
-                .get(&ctx.resolve_pipeline(cli, name).await?)
-                .await?;
+            let key = ctx.resolve_workload(cli, name).await?;
+            let w = ctx.service.get_workload(&key).await?;
             match fmt {
-                OutputFormat::Json | OutputFormat::Yaml => output::serialised(&p, fmt),
+                OutputFormat::Json | OutputFormat::Yaml => output::serialised(&w, fmt),
                 OutputFormat::Table | OutputFormat::Wide => {
-                    output::pipelines(std::slice::from_ref(&p), OutputFormat::Wide, false, ctx.now)
+                    output::workloads(std::slice::from_ref(&w), OutputFormat::Wide, false, ctx.now)
                 }
             }
         }
@@ -681,50 +706,10 @@ async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Out
     let fmt = cli.globals.output;
     let cluster = ctx.cluster.as_ref();
     match command {
-        MvtxCommand::Ls => {
-            let ns = Context::scope(cli)?;
-            let mut items = cluster.list_monovertices(ns.as_ref()).await?;
-            items.sort_by(|a, b| {
-                (&a.key.namespace, &a.key.name).cmp(&(&b.key.namespace, &b.key.name))
-            });
-            output::monovertices(&items, fmt, ns.is_none(), ctx.now).map(Output::Text)
-        }
-        MvtxCommand::Get { name } => {
-            let key = ctx.resolve_monovertex(cli, name).await?;
-            let m = cluster.get_monovertex(&key).await?;
-            match fmt {
-                OutputFormat::Json | OutputFormat::Yaml => output::serialised(&m, fmt),
-                OutputFormat::Table | OutputFormat::Wide => output::monovertices(
-                    std::slice::from_ref(&m),
-                    OutputFormat::Wide,
-                    false,
-                    ctx.now,
-                ),
-            }
-            .map(Output::Text)
-        }
         MvtxCommand::Status { name } => {
             let key = ctx.resolve_monovertex(cli, name).await?;
-            let m = cluster.get_monovertex(&key).await?;
-            let mut warnings = Vec::new();
-            let (health, metrics) = match ctx.service.daemons().connect_monovertex(&key).await {
-                Ok(d) => (
-                    d.health()
-                        .await
-                        .map_err(|e| warnings.push(format!("health: {e}")))
-                        .ok(),
-                    d.vertex_metrics(None)
-                        .await
-                        .map_err(|e| warnings.push(format!("metrics: {e}")))
-                        .ok(),
-                ),
-                Err(e) => {
-                    warnings.push(format!("daemon unavailable: {e}"));
-                    (None, None)
-                }
-            };
-            output::monovertex_status(&m, health.as_ref(), metrics.as_deref(), &warnings, fmt)
-                .map(Output::Text)
+            let view = ctx.service.monovertex_view(&key, ctx.now).await?;
+            output::monovertex_view(&view, fmt).map(Output::Text)
         }
         MvtxCommand::Logs {
             name,

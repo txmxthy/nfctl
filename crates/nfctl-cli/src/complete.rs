@@ -352,6 +352,17 @@ pub fn pipelines(current: &OsStr) -> Vec<CompletionCandidate> {
     )
 }
 
+/// Pipelines and `MonoVertices` together, for the commands that take either.
+pub fn workloads(current: &OsStr) -> Vec<CompletionCandidate> {
+    let line = current_line();
+    let c = catalog(&line);
+    candidates(
+        c.pipelines.iter().chain(&c.monovertices),
+        current,
+        line.namespace.as_deref(),
+    )
+}
+
 pub fn monovertices(current: &OsStr) -> Vec<CompletionCandidate> {
     let line = current_line();
     candidates(

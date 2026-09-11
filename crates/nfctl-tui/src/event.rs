@@ -1,5 +1,5 @@
 use crossterm::event::KeyEvent;
-use nfctl_core::model::{PipelineKey, VertexName};
+use nfctl_core::model::{VertexName, WorkloadKey};
 
 use crate::worker::WorkerReply;
 
@@ -21,7 +21,8 @@ pub enum AppEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Quit,
-    OpenDetail(PipelineKey),
-    OpenLogs(PipelineKey, Option<VertexName>),
+    /// Open whichever detail panel the workload's kind calls for.
+    OpenDetail(WorkloadKey),
+    OpenLogs(WorkloadKey, Option<VertexName>),
     Back,
 }

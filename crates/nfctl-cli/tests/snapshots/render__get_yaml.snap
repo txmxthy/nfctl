@@ -2,6 +2,7 @@
 source: crates/nfctl-cli/tests/render.rs
 expression: "out(&[\"get\", \"simple-pipeline\", \"-o\", \"yaml\"]).await"
 ---
+kind: Pipeline
 key:
   namespace: demo
   name: simple-pipeline

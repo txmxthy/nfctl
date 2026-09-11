@@ -18,40 +18,45 @@ use tokio::sync::mpsc;
 use crate::event::{Action, AppEvent};
 use crate::panels::detail::DetailPanel;
 use crate::panels::logs::LogsPanel;
-use crate::panels::pipelines::PipelinesPanel;
+use crate::panels::monovertex::MonoVertexPanel;
+use crate::panels::workloads::WorkloadsPanel;
 use crate::style::Palette;
 use crate::worker::{Worker, WorkerMessage};
 use crate::{Model, style};
 
 enum Panel {
-    Pipelines(Box<PipelinesPanel>),
+    Workloads(Box<WorkloadsPanel>),
     Detail(Box<DetailPanel>),
+    MonoVertex(Box<MonoVertexPanel>),
     Logs(Box<LogsPanel>),
 }
 
 impl Panel {
     fn model(&mut self) -> &mut dyn Model {
         match self {
-            Panel::Pipelines(p) => p.as_mut(),
+            Panel::Workloads(p) => p.as_mut(),
             Panel::Detail(p) => p.as_mut(),
+            Panel::MonoVertex(p) => p.as_mut(),
             Panel::Logs(p) => p.as_mut(),
         }
     }
 
     fn model_ref(&self) -> &dyn Model {
         match self {
-            Panel::Pipelines(p) => p.as_ref(),
+            Panel::Workloads(p) => p.as_ref(),
             Panel::Detail(p) => p.as_ref(),
+            Panel::MonoVertex(p) => p.as_ref(),
             Panel::Logs(p) => p.as_ref(),
         }
     }
 
     fn keys(&self) -> &'static str {
         match self {
-            Panel::Pipelines(_) => "j/k move  enter detail  l logs  r refresh  q quit",
+            Panel::Workloads(_) => "j/k move  enter detail  l logs  r refresh  q quit",
             Panel::Detail(_) => {
                 "tab vertex  ↑/↓ scroll pane  click focus  +/- split  x shards  enter logs  l pipeline logs  esc back  q quit"
             }
+            Panel::MonoVertex(_) => "l logs  r refresh  esc back  q quit",
             Panel::Logs(_) => "j/k scroll  G follow  esc back  q quit",
         }
     }
@@ -93,11 +98,21 @@ impl App {
         match action {
             None => true,
             Some(Action::Quit) => false,
+            // A MonoVertex has no topology, so it gets a panel of its own
+            // rather than a flow drawing with nothing in it.
             Some(Action::OpenDetail(key)) => {
-                let panel = DetailPanel::new(key)
-                    .with_palette(self.palette)
-                    .with_timings(self.timings);
-                self.push(Panel::Detail(Box::new(panel))).await;
+                let panel = match (key.as_pipeline(), key.as_monovertex()) {
+                    (Some(k), _) => Panel::Detail(Box::new(
+                        DetailPanel::new(k)
+                            .with_palette(self.palette)
+                            .with_timings(self.timings),
+                    )),
+                    (_, Some(k)) => Panel::MonoVertex(Box::new(MonoVertexPanel::new(k))),
+                    // `WorkloadKey` is one kind or the other, so one of the
+                    // two always answers.
+                    (None, None) => return true,
+                };
+                self.push(panel).await;
                 true
             }
             Some(Action::OpenLogs(key, vertex)) => {
@@ -176,8 +191,8 @@ pub async fn run(
         timings,
         tx,
     };
-    app.push(Panel::Pipelines(Box::new(
-        PipelinesPanel::new(ns).with_timings(timings).from(source),
+    app.push(Panel::Workloads(Box::new(
+        WorkloadsPanel::new(ns).with_timings(timings).from(source),
     )))
     .await;
 
