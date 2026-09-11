@@ -125,6 +125,7 @@ impl HttpDaemonClient {
         }
     }
 
+    #[tracing::instrument(level = "info", skip(self), fields(path))]
     async fn get_once<T: DeserializeOwned>(&self, path: &str) -> std::result::Result<T, CallError> {
         let uri: Uri = format!("{}{}", self.base, path)
             .parse()
@@ -210,6 +211,7 @@ impl HttpDaemonClient {
 
 #[async_trait]
 impl DaemonPort for HttpDaemonClient {
+    #[tracing::instrument(level = "info", skip_all)]
     async fn buffers(&self) -> Result<Vec<BufferInfo>> {
         self.not_for_monovertex("buffers")?;
         let d: dto::ListBuffersDto = self.get_json(&self.path("buffers")).await?;
@@ -222,6 +224,7 @@ impl DaemonPort for HttpDaemonClient {
             .collect()
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn buffer(&self, name: &BufferName) -> Result<BufferInfo> {
         self.not_for_monovertex("buffer")?;
         let d: dto::GetBufferDto = self
@@ -235,6 +238,7 @@ impl DaemonPort for HttpDaemonClient {
         dto::buffer_from(&b, from, to).map_err(Error::daemon)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn vertex_metrics(&self, vertex: Option<&VertexName>) -> Result<Vec<VertexMetrics>> {
         if self.flavour == Flavour::MonoVertex {
             let d: dto::MonoVertexMetricsDto = self.get_json(&self.path("metrics")).await?;
@@ -271,6 +275,7 @@ impl DaemonPort for HttpDaemonClient {
         Ok(out)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn watermarks(&self) -> Result<Vec<EdgeWatermark>> {
         self.not_for_monovertex("watermarks")?;
         let d: dto::WatermarksDto = self.get_json(&self.path("watermarks")).await?;
@@ -280,11 +285,13 @@ impl DaemonPort for HttpDaemonClient {
             .collect()
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn health(&self) -> Result<PipelineHealth> {
         let d: dto::GetStatusDto = self.get_json(&self.path("status")).await?;
         Ok(dto::health_from(d.status.unwrap_or_default()))
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn vertex_errors(&self, vertex: &VertexName) -> Result<Vec<ReplicaErrors>> {
         let rest = match self.flavour {
             Flavour::Pipeline => format!("vertices/{vertex}/errors"),

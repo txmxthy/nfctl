@@ -649,6 +649,7 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
             ns,
             Duration::from_secs((*interval).max(1)),
             nfctl_tui::Palette::detect(cli.globals.no_color),
+            cli.globals.timings,
         )
         .await
         .map_err(|e| Error::Cluster(Box::new(e)))?;

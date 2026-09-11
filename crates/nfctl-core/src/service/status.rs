@@ -1,5 +1,7 @@
 //! The fused view: CRD state joined with what the daemon knows.
 
+use std::time::{Duration, Instant};
+
 use serde::Serialize;
 
 use crate::Result;
@@ -53,6 +55,25 @@ impl EdgeView {
     }
 }
 
+/// How long each step of a view took. The TUI owns the terminal and so
+/// cannot print to stderr the way `--timings` does; it reads these instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+pub struct Timings {
+    /// Reading the pipeline from the cluster.
+    pub spec: Duration,
+    /// Reaching the daemon: its pod, a port-forward and a TLS handshake.
+    pub connect: Duration,
+    /// The daemon's own answers: health, metrics, buffers, watermarks.
+    pub numbers: Duration,
+}
+
+impl Timings {
+    #[must_use]
+    pub fn total(&self) -> Duration {
+        self.spec + self.connect + self.numbers
+    }
+}
+
 /// Everything `top`/`status` show. Daemon data is optional: when the daemon is
 /// unreachable the CRD half is still returned and `warnings` says why.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -63,6 +84,8 @@ pub struct PipelineView {
     pub edges: Vec<EdgeView>,
     pub warnings: Vec<String>,
     pub at: Timestamp,
+    #[serde(skip)]
+    pub timings: Timings,
 }
 
 impl PipelineView {
@@ -82,13 +105,19 @@ impl PipelineView {
 }
 
 /// Build the view. Each daemon call fails independently; a failure becomes a warning.
+#[tracing::instrument(level = "info", skip_all, fields(pipeline = %key))]
 pub async fn pipeline_view(
     cluster: &dyn ClusterPort,
     daemons: &dyn DaemonConnector,
     key: &PipelineKey,
     now: Timestamp,
 ) -> Result<PipelineView> {
+    let started = Instant::now();
     let pipeline = cluster.get_pipeline(key).await?;
+    let mut timings = Timings {
+        spec: started.elapsed(),
+        ..Timings::default()
+    };
     let mut warnings = Vec::new();
     let t = &pipeline.spec.topology;
 
@@ -98,9 +127,15 @@ pub async fn pipeline_view(
         Vec::<BufferInfo>::new(),
         Vec::<EdgeWatermark>::new(),
     );
+    let at_connect = Instant::now();
     match daemons.connect(key).await {
-        Err(e) => warnings.push(format!("daemon unavailable: {e}")),
+        Err(e) => {
+            timings.connect = at_connect.elapsed();
+            warnings.push(format!("daemon unavailable: {e}"));
+        }
         Ok(d) => {
+            timings.connect = at_connect.elapsed();
+            let at_numbers = Instant::now();
             match d.health().await {
                 Ok(h) => health = Some(h),
                 Err(e) => warnings.push(format!("health: {e}")),
@@ -117,6 +152,7 @@ pub async fn pipeline_view(
                 Ok(w) => watermarks = w,
                 Err(e) => warnings.push(format!("watermarks: {e}")),
             }
+            timings.numbers = at_numbers.elapsed();
         }
     }
 
@@ -159,6 +195,7 @@ pub async fn pipeline_view(
         edges,
         warnings,
         at: now,
+        timings,
     })
 }
 

@@ -16,6 +16,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::ServerName;
+use tracing::Instrument as _;
 
 /// Numaflow's daemon port.
 pub const DAEMON_PORT: u16 = 4327;
@@ -167,6 +168,7 @@ impl Dialer {
         Ok(name)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn dial(self) -> Result<TokioIo<Forwarded>, DialError> {
         let server_name =
             ServerName::try_from("localhost").map_err(|e| DialError::BadUrl(e.to_string()))?;
@@ -177,10 +179,16 @@ impl Dialer {
                 tls,
                 cached_pod,
             } => {
-                let name = Self::resolve_pod(&pods, &selector, &cached_pod).await?;
+                let name = {
+                    let span = tracing::info_span!("resolve daemon pod");
+                    Self::resolve_pod(&pods, &selector, &cached_pod)
+                        .instrument(span)
+                        .await?
+                };
                 let attempt = async {
                     let mut pf = pods
                         .portforward(&name, &[DAEMON_PORT])
+                        .instrument(tracing::info_span!("port-forward"))
                         .await
                         .map_err(DialError::PortForward)?;
                     let raw: BoxIo = Box::pin(
@@ -189,6 +197,7 @@ impl Dialer {
                     );
                     let io = tls
                         .connect(server_name, raw)
+                        .instrument(tracing::info_span!("tls handshake"))
                         .await
                         .map_err(DialError::Tls)?;
                     Ok::<_, DialError>(Forwarded {

@@ -42,6 +42,7 @@ impl PortForwardConnector {
 
 #[async_trait]
 impl DaemonConnector for PortForwardConnector {
+    #[tracing::instrument(level = "info", skip_all)]
     async fn connect(&self, key: &PipelineKey) -> Result<Box<dyn DaemonPort>> {
         let topology = self
             .cluster
@@ -66,6 +67,7 @@ impl DaemonConnector for PortForwardConnector {
         )))
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn connect_monovertex(&self, key: &MonoVertexKey) -> Result<Box<dyn DaemonPort>> {
         let pods: Api<Pod> = Api::namespaced(self.client.clone(), key.namespace.as_str());
         let dialer = Dialer::PodForward {

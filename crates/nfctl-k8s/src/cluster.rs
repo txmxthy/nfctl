@@ -131,6 +131,7 @@ fn parse_log_line(raw: &str) -> LogLine {
 
 #[async_trait]
 impl ClusterPort for KubeCluster {
+    #[tracing::instrument(level = "info", skip_all)]
     async fn list_pipelines(&self, ns: Option<&Namespace>) -> Result<Vec<Pipeline>> {
         let api = match ns {
             Some(ns) => self.pipelines(ns),
@@ -143,6 +144,7 @@ impl ClusterPort for KubeCluster {
         list.items.into_iter().map(into_pipeline).collect()
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn get_pipeline(&self, key: &PipelineKey) -> Result<Pipeline> {
         let obj = self
             .pipelines(&key.namespace)
@@ -152,6 +154,7 @@ impl ClusterPort for KubeCluster {
         into_pipeline(obj)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn watch_pipeline(
         &self,
         key: &PipelineKey,
@@ -179,6 +182,7 @@ impl ClusterPort for KubeCluster {
         Ok(Box::pin(stream))
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn set_lifecycle(
         &self,
         key: &PipelineKey,
@@ -211,6 +215,7 @@ impl ClusterPort for KubeCluster {
         into_pipeline(obj)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn apply_manifest(
         &self,
         text: &str,
@@ -265,6 +270,7 @@ impl ClusterPort for KubeCluster {
         into_pipeline(applied)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn scale_vertex(
         &self,
         key: &PipelineKey,
@@ -293,6 +299,7 @@ impl ClusterPort for KubeCluster {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn list_isb(&self, ns: Option<&Namespace>) -> Result<Vec<IsbService>> {
         let api = match ns {
             Some(ns) => self.isbs(ns),
@@ -305,6 +312,7 @@ impl ClusterPort for KubeCluster {
         list.items.into_iter().map(into_isb).collect()
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn list_monovertices(&self, ns: Option<&Namespace>) -> Result<Vec<MonoVertex>> {
         let api = match ns {
             Some(ns) => self.monovertices(ns),
@@ -317,6 +325,7 @@ impl ClusterPort for KubeCluster {
         list.items.into_iter().map(into_monovertex).collect()
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn get_monovertex(&self, key: &MonoVertexKey) -> Result<MonoVertex> {
         let obj = self
             .monovertices(&key.namespace)
@@ -326,6 +335,7 @@ impl ClusterPort for KubeCluster {
         into_monovertex(obj)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn set_monovertex_lifecycle(
         &self,
         key: &MonoVertexKey,
@@ -352,6 +362,7 @@ impl ClusterPort for KubeCluster {
         Ok(())
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn list_pods(&self, ns: &Namespace, selector: &Selector) -> Result<Vec<PodRef>> {
         let list = self
             .pods(ns)
@@ -361,6 +372,7 @@ impl ClusterPort for KubeCluster {
         Ok(list.items.iter().filter_map(into_pod_ref).collect())
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn watch_pods(
         &self,
         ns: &Namespace,
@@ -383,6 +395,7 @@ impl ClusterPort for KubeCluster {
         Ok(Box::pin(stream))
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn delete_pods(
         &self,
         ns: &Namespace,
@@ -405,6 +418,7 @@ impl ClusterPort for KubeCluster {
         Ok(deleted)
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn delete_pod(&self, ns: &Namespace, pod: &PodName, dry_run: bool) -> Result<()> {
         let dp = DeleteParams {
             dry_run,
@@ -417,6 +431,7 @@ impl ClusterPort for KubeCluster {
             .map_err(|e| map_kube(e, "pod", pod.as_str()))
     }
 
+    #[tracing::instrument(level = "info", skip_all)]
     async fn tail_logs(
         &self,
         ns: &Namespace,

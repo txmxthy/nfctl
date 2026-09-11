@@ -59,6 +59,8 @@ struct App {
     stack: Vec<Panel>,
     ns: Option<Namespace>,
     palette: Palette,
+    /// Show how long each load took, from `--timings`.
+    timings: bool,
     tx: mpsc::Sender<WorkerMessage>,
 }
 
@@ -89,7 +91,9 @@ impl App {
             None => true,
             Some(Action::Quit) => false,
             Some(Action::OpenDetail(key)) => {
-                let panel = DetailPanel::new(key).with_palette(self.palette);
+                let panel = DetailPanel::new(key)
+                    .with_palette(self.palette)
+                    .with_timings(self.timings);
                 self.push(Panel::Detail(Box::new(panel))).await;
                 true
             }
@@ -138,12 +142,14 @@ pub async fn run(
     ns: Option<Namespace>,
     tick: Duration,
     palette: Palette,
+    timings: bool,
 ) -> std::io::Result<()> {
     let (tx, mut replies) = Worker::spawn(cluster, service);
     let mut app = App {
         stack: Vec::new(),
         ns: ns.clone(),
         palette,
+        timings,
         tx,
     };
     app.push(Panel::Pipelines(Box::new(PipelinesPanel::new(ns))))

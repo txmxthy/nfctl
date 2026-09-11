@@ -30,6 +30,7 @@ impl std::fmt::Debug for Connected {
 }
 
 /// Load kubeconfig (or in-cluster config) and connect.
+#[tracing::instrument(level = "info", skip_all, fields(context = opts.context.as_deref()))]
 pub async fn connect(opts: &ClientOptions) -> Result<Connected> {
     let mut config = match &opts.context {
         Some(ctx) => {
@@ -50,7 +51,10 @@ pub async fn connect(opts: &ClientOptions) -> Result<Connected> {
     }
     let default_namespace = Namespace::new(config.default_namespace.clone())
         .unwrap_or_else(|_| Namespace::default_ns());
-    let client = Client::try_from(config).map_err(Error::cluster)?;
+    let client = {
+        let _build = tracing::info_span!("client build").entered();
+        Client::try_from(config).map_err(Error::cluster)?
+    };
     Ok(Connected {
         client,
         default_namespace,

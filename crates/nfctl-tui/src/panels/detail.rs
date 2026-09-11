@@ -40,6 +40,8 @@ pub struct DetailPanel {
     split: i16,
     palette: Palette,
     bundling: nfctl_graph::layout::Bundling,
+    /// Show how long the last load took, from `--timings`.
+    timings: bool,
 }
 
 impl DetailPanel {
@@ -55,6 +57,7 @@ impl DetailPanel {
             follow: false,
             split: 0,
             palette: Palette::default(),
+            timings: false,
             // A row per colour, so a line can be followed by its colour.
             bundling: nfctl_graph::layout::Bundling::Ribbon,
         }
@@ -71,6 +74,13 @@ impl DetailPanel {
     #[must_use]
     pub fn with_palette(mut self, palette: Palette) -> Self {
         self.palette = palette;
+        self
+    }
+
+    /// Print how long the last load took under the header.
+    #[must_use]
+    pub fn with_timings(mut self, on: bool) -> Self {
+        self.timings = on;
         self
     }
 
@@ -293,14 +303,30 @@ impl Model for DetailPanel {
             Span::styled("   isb ", style::dim()),
             Span::raw(p.spec.isb.to_string()),
         ]);
-        let line2 = Line::styled(
-            v.health
-                .as_ref()
-                .map(|h| h.message.clone())
-                .or_else(|| p.status.message.clone())
-                .unwrap_or_default(),
-            style::dim(),
-        );
+        // With `--timings`, what the load cost replaces the health message,
+        // which is the line a reader is comparing against anyway.
+        let line2 = if self.timings {
+            let t = v.timings;
+            Line::styled(
+                format!(
+                    "loaded in {:.2}s  (spec {:.2}s  daemon connect {:.2}s  numbers {:.2}s)",
+                    t.total().as_secs_f32(),
+                    t.spec.as_secs_f32(),
+                    t.connect.as_secs_f32(),
+                    t.numbers.as_secs_f32(),
+                ),
+                style::key(),
+            )
+        } else {
+            Line::styled(
+                v.health
+                    .as_ref()
+                    .map(|h| h.message.clone())
+                    .or_else(|| p.status.message.clone())
+                    .unwrap_or_default(),
+                style::dim(),
+            )
+        };
         frame.render_widget(Paragraph::new(vec![line1, line2]), head);
 
         let flow = section(frame, dag, " flow ");

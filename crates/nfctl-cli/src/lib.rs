@@ -6,6 +6,7 @@ mod commands;
 pub mod complete;
 pub mod map;
 mod output;
+pub mod timing;
 
 pub use cli::{Cli, Command, Globals, OutputFormat};
 pub use commands::{Context, Output, run, run_offline};

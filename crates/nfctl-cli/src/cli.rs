@@ -45,6 +45,11 @@ pub struct Globals {
     #[arg(long, global = true)]
     pub no_color: bool,
 
+    /// Print how long each step took, to stderr. `NFCTL_LOG` picks the
+    /// targets and level when more than the timings are wanted.
+    #[arg(long, global = true)]
+    pub timings: bool,
+
     /// Answer from this fixture file instead of a cluster (demos, tests, screenshots)
     #[arg(long, global = true, env = "NFCTL_FIXTURE", value_name = "FILE", conflicts_with_all = ["context", "daemon_url"])]
     pub fixture: Option<String>,
