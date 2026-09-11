@@ -487,3 +487,57 @@ async fn detail_draws_the_shape_before_the_numbers() {
     let late = frame(&panel, 110, 34);
     assert!(!late.contains("numbers"), "{late}");
 }
+
+fn mouse_at(kind: crossterm::event::MouseEventKind, col: u16, row: u16) -> AppEvent {
+    AppEvent::Mouse(crossterm::event::MouseEvent {
+        kind,
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    })
+}
+
+/// The arrows move whichever box has the focus, and clicking a box takes it.
+/// Tab walks the vertices, which is what the arrows used to do.
+#[tokio::test]
+async fn detail_scrolls_the_focused_box() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+    let mut panel = topology_panel(wide_topology(14)).await;
+    panel.update(&AppEvent::Key(crossterm_key('x')));
+    let start = frame(&panel, 120, 30);
+
+    // Focus starts on the flow: down scrolls the drawing, not the table.
+    panel.update(&AppEvent::Key(KeyEvent::new(
+        KeyCode::Down,
+        KeyModifiers::NONE,
+    )));
+    let flow_moved = frame(&panel, 120, 30);
+    assert_ne!(flow_moved, start, "the flow scrolled");
+
+    // Click low down, in the table, then scroll: the flow stays put.
+    panel.update(&mouse_at(MouseEventKind::Down(MouseButton::Left), 20, 26));
+    let clicked = frame(&panel, 120, 30);
+    for _ in 0..3 {
+        panel.update(&AppEvent::Key(KeyEvent::new(
+            KeyCode::Down,
+            KeyModifiers::NONE,
+        )));
+    }
+    let table_moved = frame(&panel, 120, 30);
+    assert_ne!(table_moved, clicked, "the table scrolled");
+    // The first edge has gone from the top of the table.
+    assert!(clicked.contains("sink-0"), "{clicked}");
+    assert!(!table_moved.contains("src -> sink-0"), "{table_moved}");
+
+    // Tab still walks the vertices wherever the focus is.
+    let before_tab = frame(&panel, 120, 30);
+    panel.update(&AppEvent::Key(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_ne!(
+        frame(&panel, 120, 30),
+        before_tab,
+        "tab moved the selection"
+    );
+}

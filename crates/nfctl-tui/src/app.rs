@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{Event, EventStream};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use futures::StreamExt;
 use nfctl_core::model::Namespace;
 use nfctl_core::ports::ClusterPort;
@@ -47,7 +50,7 @@ impl Panel {
         match self {
             Panel::Pipelines(_) => "j/k move  enter detail  l logs  r refresh  q quit",
             Panel::Detail(_) => {
-                "j/k vertex  ←/→ ⇞/⇟ scroll  +/- split  x shards  enter logs  l pipeline logs  esc back  q quit"
+                "tab vertex  ↑/↓ scroll pane  click focus  +/- split  x shards  enter logs  l pipeline logs  esc back  q quit"
             }
             Panel::Logs(_) => "j/k scroll  G follow  esc back  q quit",
         }
@@ -161,6 +164,14 @@ pub async fn run(
     .await;
 
     let mut terminal = ratatui::init();
+    // Clicking a box focuses it and the divider can be dragged, so the
+    // terminal has to report the mouse. Shift-Tab needs the enhanced
+    // protocol on terminals that have one; both are undone on the way out.
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        EnableMouseCapture,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES),
+    );
     let mut keys = EventStream::new();
     let mut ticker = tokio::time::interval(tick);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -174,6 +185,7 @@ pub async fn run(
         let ev = tokio::select! {
             k = keys.next() => match k {
                 Some(Ok(Event::Key(k))) => AppEvent::Key(k),
+                Some(Ok(Event::Mouse(m))) => AppEvent::Mouse(m),
                 Some(Ok(_)) => continue,
                 Some(Err(e)) => break Err(e),
                 None => break Ok(()),
@@ -186,6 +198,11 @@ pub async fn run(
             break Ok(());
         }
     };
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableMouseCapture
+    );
     ratatui::restore();
     result
 }

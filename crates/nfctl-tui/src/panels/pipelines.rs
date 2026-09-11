@@ -130,7 +130,7 @@ impl Model for PipelinesPanel {
                 ),
                 _ => (None, vec![]),
             },
-            AppEvent::Worker(_) => (None, vec![]),
+            AppEvent::Mouse(_) | AppEvent::Worker(_) => (None, vec![]),
         }
     }
 

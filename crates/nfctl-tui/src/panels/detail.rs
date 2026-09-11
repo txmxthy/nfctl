@@ -3,6 +3,7 @@ use nfctl_core::model::{PipelineKey, TagCondition, TagOperator, VertexName};
 use nfctl_core::service::PipelineView;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
@@ -16,6 +17,13 @@ use unicode_width::UnicodeWidthStr as _;
 
 /// Rows a page of the flow scrolls by.
 const SCROLL_ROWS: u16 = 5;
+/// Which box the arrow keys move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Focus {
+    #[default]
+    Flow,
+    Edges,
+}
 /// Blank columns between two blocks of the edge table.
 const BLOCK_GAP: u16 = 3;
 /// A block of the edge table narrower than this is not worth splitting into.
@@ -24,6 +32,7 @@ const MIN_BLOCK: u16 = 44;
 const MIN_TABLE: u16 = 4;
 
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct DetailPanel {
     key: PipelineKey,
     view: Option<PipelineView>,
@@ -44,6 +53,14 @@ pub struct DetailPanel {
     timings: bool,
     /// Frame of the spinner, moved on by every tick.
     spin: std::cell::Cell<usize>,
+    /// The box the arrows move. Clicking one makes it the focus.
+    focus: Focus,
+    /// Topmost visible row of the edge table.
+    rows: usize,
+    /// Where each box was drawn last, so a click knows what it hit.
+    hit: std::cell::Cell<(Rect, Rect)>,
+    /// The line between the boxes is being dragged.
+    dragging: bool,
 }
 
 impl DetailPanel {
@@ -61,6 +78,10 @@ impl DetailPanel {
             palette: Palette::default(),
             timings: false,
             spin: std::cell::Cell::new(0),
+            focus: Focus::default(),
+            rows: 0,
+            hit: std::cell::Cell::new((Rect::ZERO, Rect::ZERO)),
+            dragging: false,
             // A row per colour, so a line can be followed by its colour.
             bundling: nfctl_graph::layout::Bundling::Ribbon,
         }
@@ -142,6 +163,17 @@ impl DetailPanel {
             Span::styled("   isb ", style::dim()),
             Span::raw(p.spec.isb.to_string()),
         ]);
+        // The health message reads as part of the health, so it sits with it
+        // rather than on a line of its own.
+        let said = v
+            .health
+            .as_ref()
+            .map(|h| h.message.clone())
+            .or_else(|| p.status.message.clone())
+            .unwrap_or_default();
+        if !said.is_empty() {
+            line.push_span(Span::styled(format!("   {said}"), style::dim()));
+        }
         if v.timings.connect.is_zero() && v.timings.numbers.is_zero() {
             line.push_span(Span::styled(
                 format!("   {} numbers", spiral(self.spin.get())),
@@ -165,7 +197,8 @@ impl DetailPanel {
         );
         let table = table_rows(v.edges.len());
         let warn = u16::try_from(v.warnings.len()).unwrap_or(0);
-        let inner = 2u16
+        let inner = u16::from(self.timings)
+            .saturating_add(1)
             .saturating_add(cards.height().saturating_add(2))
             .saturating_add(table)
             .saturating_add(warn)
@@ -192,6 +225,52 @@ impl DetailPanel {
         let top = top.min(over);
         self.vscroll.set(top);
         top
+    }
+
+    /// A click focuses the box it landed in; dragging between the two moves
+    /// the line between them, a row at a time.
+    fn mouse(&mut self, m: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let (flow, edges) = self.hit.get();
+        let inside =
+            |r: Rect| m.column >= r.x && m.column < r.right() && m.row >= r.y && m.row < r.bottom();
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if inside(flow) {
+                    self.focus = Focus::Flow;
+                } else if inside(edges) {
+                    self.focus = Focus::Edges;
+                }
+                self.dragging = !inside(flow) && !inside(edges) && m.row > flow.y;
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
+                // The line sits between the two boxes: dragging it up gives
+                // the table the rows, down gives them to the flow.
+                let line = flow.bottom();
+                let by = i32::from(line) - i32::from(m.row);
+                self.split = self.split.saturating_add(i16::try_from(by).unwrap_or(0));
+            }
+            MouseEventKind::Up(MouseButton::Left) => self.dragging = false,
+            MouseEventKind::ScrollDown => self.scroll_by(1),
+            MouseEventKind::ScrollUp => self.scroll_by(-1),
+            _ => {}
+        }
+    }
+
+    /// Move the focused box by `delta` rows.
+    fn scroll_by(&mut self, delta: i32) {
+        match self.focus {
+            Focus::Flow => {
+                let at = i64::from(self.vscroll.get()).saturating_add(i64::from(delta));
+                self.vscroll
+                    .set(u16::try_from(at.max(0)).unwrap_or(u16::MAX));
+                self.follow = false;
+            }
+            Focus::Edges => {
+                let at = i64::try_from(self.rows).unwrap_or(0) + i64::from(delta);
+                self.rows = usize::try_from(at.max(0)).unwrap_or(0);
+            }
+        }
     }
 
     fn columns(&self) -> usize {
@@ -232,39 +311,50 @@ impl Model for DetailPanel {
                 }
                 (None, vec![])
             }
+            AppEvent::Mouse(m) => {
+                self.mouse(*m);
+                (None, vec![])
+            }
             AppEvent::Key(k) => match pressed(k) {
                 Some(KeyCode::Char('q')) => (Some(Action::Quit), vec![]),
                 Some(KeyCode::Esc | KeyCode::Char('h') | KeyCode::Backspace) => {
                     (Some(Action::Back), vec![])
                 }
-                Some(KeyCode::Char('j') | KeyCode::Down) => {
+                // Tab walks the vertices; the arrows move whichever box has
+                // the focus, so the flow and the table scroll apart.
+                Some(KeyCode::Tab) => {
                     self.move_by(1);
                     (None, vec![])
                 }
-                Some(KeyCode::Char('k') | KeyCode::Up) => {
+                Some(KeyCode::BackTab) => {
                     self.move_by(-1);
                     (None, vec![])
                 }
-                Some(KeyCode::Right) => {
-                    self.scroll
-                        .set((self.scroll.get() + 1).min(self.columns().saturating_sub(1)));
-                    self.follow = false;
+                Some(KeyCode::Char('j') | KeyCode::Down) => {
+                    self.scroll_by(1);
                     (None, vec![])
                 }
-                Some(KeyCode::Left) => {
-                    self.scroll.set(self.scroll.get().saturating_sub(1));
-                    self.follow = false;
+                Some(KeyCode::Char('k') | KeyCode::Up) => {
+                    self.scroll_by(-1);
                     (None, vec![])
                 }
                 Some(KeyCode::PageDown) => {
-                    self.vscroll
-                        .set(self.vscroll.get().saturating_add(SCROLL_ROWS));
-                    self.follow = false;
+                    self.scroll_by(i32::from(SCROLL_ROWS));
                     (None, vec![])
                 }
                 Some(KeyCode::PageUp) => {
-                    self.vscroll
-                        .set(self.vscroll.get().saturating_sub(SCROLL_ROWS));
+                    self.scroll_by(-i32::from(SCROLL_ROWS));
+                    (None, vec![])
+                }
+                // Sideways only means something in the flow: the table has
+                // no columns off screen, it repacks into blocks instead.
+                Some(k @ (KeyCode::Left | KeyCode::Right)) if self.focus == Focus::Flow => {
+                    let at = self.scroll.get();
+                    self.scroll.set(if k == KeyCode::Right {
+                        (at + 1).min(self.columns().saturating_sub(1))
+                    } else {
+                        at.saturating_sub(1)
+                    });
                     self.follow = false;
                     (None, vec![])
                 }
@@ -322,25 +412,26 @@ impl Model for DetailPanel {
         // above it. The table asks for a row an edge, capped at half the
         // panel, and `+` and `-` move the line between the two.
         let warnings = u16::try_from(v.warnings.len()).unwrap_or(0);
+        // One line: phase, health and what health says. Two only with
+        // `--timings`, which adds what the load cost underneath.
+        let head_h = if self.timings { 2 } else { 1 };
         let spare = inner.height.saturating_sub(warnings + 2);
         let table_h = table_rows(v.edges.len())
             .min(spare / 2)
             .saturating_add_signed(self.split)
             .clamp(MIN_TABLE.min(spare), spare.saturating_sub(3));
         let [head, dag, edges, warn] = Layout::vertical([
-            Constraint::Length(2),
+            Constraint::Length(head_h),
             Constraint::Min(3),
             Constraint::Length(table_h),
             Constraint::Length(warnings),
         ])
         .areas(inner);
 
-        let line1 = self.header(v);
-        // With `--timings`, what the load cost replaces the health message,
-        // which is the line a reader is comparing against anyway.
-        let line2 = if self.timings {
+        let mut lines = vec![self.header(v)];
+        if self.timings {
             let t = v.timings;
-            Line::styled(
+            lines.push(Line::styled(
                 format!(
                     "loaded in {:.2}s  (spec {:.2}s  daemon connect {:.2}s  numbers {:.2}s)",
                     t.total().as_secs_f32(),
@@ -349,20 +440,11 @@ impl Model for DetailPanel {
                     t.numbers.as_secs_f32(),
                 ),
                 style::key(),
-            )
-        } else {
-            Line::styled(
-                v.health
-                    .as_ref()
-                    .map(|h| h.message.clone())
-                    .or_else(|| p.status.message.clone())
-                    .unwrap_or_default(),
-                style::dim(),
-            )
-        };
-        frame.render_widget(Paragraph::new(vec![line1, line2]), head);
+            ));
+        }
+        frame.render_widget(Paragraph::new(lines), head);
 
-        let flow = section(frame, dag, " flow ");
+        let flow = section(frame, dag, " flow ", self.focus == Focus::Flow);
         let selected = self.selected_vertex().map(|x| x.name.as_str());
         let dy = self.vscroll_for(&cards, flow.height, selected);
         // A drawing that fits sits in the middle of the box; one that does
@@ -382,8 +464,9 @@ impl Model for DetailPanel {
             more(frame, flow, dy, below);
         }
 
-        let table = section(frame, edges, " edges ");
-        frame.render_widget(edge_table(v, table, self.palette), table);
+        let table = section(frame, edges, " edges ", self.focus == Focus::Edges);
+        frame.render_widget(edge_table(v, table, self.palette, self.rows), table);
+        self.hit.set((flow, table));
 
         let warnings: Vec<Line> = v
             .warnings
@@ -425,12 +508,18 @@ fn more(frame: &mut Frame, area: Rect, above: u16, below: u16) {
     }
 }
 
-/// Draw a titled box over `area` and return the room left inside it.
-fn section(frame: &mut Frame, area: Rect, title: &'static str) -> Rect {
+/// Draw a titled box over `area` and return the room left inside it. The one
+/// with the focus is drawn brighter, since it is the one the arrows move.
+fn section(frame: &mut Frame, area: Rect, title: &'static str, focused: bool) -> Rect {
+    let ink = if focused {
+        Style::default()
+    } else {
+        style::dim()
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(style::dim())
-        .title(Span::styled(title, style::dim()));
+        .border_style(ink)
+        .title(Span::styled(title, ink));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     inner
@@ -522,9 +611,14 @@ fn edge_cells(v: &PipelineView, palette: Palette) -> (Vec<Vec<String>>, Vec<Vec<
 
 /// The edge table, dealt into as many blocks side by side as the width holds
 /// when one block an edge would want more rows than the table has.
-fn edge_table(v: &PipelineView, area: Rect, palette: Palette) -> Table<'static> {
+fn edge_table(v: &PipelineView, area: Rect, palette: Palette, from: usize) -> Table<'static> {
     const HEADER: [&str; 6] = ["EDGE", "TAGS", "PENDING", "USAGE", "", "WATERMARK"];
-    let (cells, mut built) = edge_cells(v, palette);
+    let (mut cells, mut built) = edge_cells(v, palette);
+    // Scrolled: whole edges are dropped off the top, so the blocks repack
+    // round what is left rather than leaving a gap where they were.
+    let from = from.min(cells.len().saturating_sub(1));
+    cells.drain(..from);
+    built.drain(..from);
     let deep = usize::from(area.height.saturating_sub(1)).max(1);
     let across = usize::from((area.width + BLOCK_GAP) / (MIN_BLOCK + BLOCK_GAP)).max(1);
     let blocks = cells.len().div_ceil(deep).clamp(1, across);

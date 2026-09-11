@@ -1,12 +1,12 @@
 ---
 source: crates/nfctl-tui/tests/frames.rs
-assertion_line: 282
+assertion_line: 297
 expression: "frame(&panel, 110, 32)"
 ---
 "┌ default/sharded ───────────────────────────────────────────────────────────────────────────────────────────┐"
-"│phase Running   health healthy   desired Running   isb default                                              │"
-"│Pipeline data flow is healthy                                                                               │"
+"│phase Running   health healthy   desired Running   isb default   Pipeline data flow is healthy              │"
 "│┌ flow ────────────────────────────────────────────────────────────────────────────────────────────────────┐│"
+"││                                                                                                          ││"
 "││                                                                                                          ││"
 "││                                            ┌───────────────┐                                             ││"
 "││                                            │worker ×3  map │                                             ││"

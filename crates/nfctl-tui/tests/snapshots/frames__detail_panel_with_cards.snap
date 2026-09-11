@@ -1,11 +1,10 @@
 ---
 source: crates/nfctl-tui/tests/frames.rs
-assertion_line: 64
+assertion_line: 75
 expression: "frame(&panel, 110, 34)"
 ---
 "┌ default/fanout ────────────────────────────────────────────────────────────────────────────────────────────┐"
-"│phase Running   health warning   desired Running   isb default                                              │"
-"│Buffer usage above the warning threshold on 1 edge                                                          │"
+"│phase Running   health warning   desired Running   isb default   Buffer usage above the warning threshold on│"
 "│┌ flow ────────────────────────────────────────────────────────────────────────────────────────────────────┐│"
 "││                                                                                                          ││"
 "││                                                                                                          ││"
@@ -26,6 +25,7 @@ expression: "frame(&panel, 110, 34)"
 "││                                                                  └──▶│120.0/s  pending 3    │            ││"
 "││                                                                      │even-tag, odd-tag     │            ││"
 "││                                                                      └──────────────────────┘            ││"
+"││                                                                                                          ││"
 "││                                                                                                          ││"
 "││                                                                                                          ││"
 "│└──────────────────────────────────────────────────────────────────────────────────────────────────────────┘│"

@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::event::{Action, AppEvent};
-use crate::panels::pressed;
+use crate::panels::{pressed, waiting};
 use crate::worker::{WorkerMessage, WorkerReply};
 use crate::{Model, style};
 
@@ -22,6 +22,8 @@ pub struct LogsPanel {
     /// `None` = follow the tail; `Some(n)` = pinned so the top line is index n.
     scroll: Option<usize>,
     error: Option<String>,
+    /// Frame of the spinner.
+    spin: usize,
 }
 
 impl LogsPanel {
@@ -32,6 +34,7 @@ impl LogsPanel {
             lines: VecDeque::new(),
             scroll: None,
             error: None,
+            spin: 0,
         }
     }
 
@@ -94,7 +97,11 @@ impl Model for LogsPanel {
                 }
                 _ => (None, vec![]),
             },
-            AppEvent::Tick | AppEvent::Frame | AppEvent::Worker(_) => (None, vec![]),
+            AppEvent::Frame => {
+                self.spin = self.spin.wrapping_add(1);
+                (None, vec![])
+            }
+            AppEvent::Tick | AppEvent::Mouse(_) | AppEvent::Worker(_) => (None, vec![]),
         }
     }
 
@@ -116,6 +123,13 @@ impl Model for LogsPanel {
         frame.render_widget(block, area);
         if let Some(e) = &self.error {
             frame.render_widget(Paragraph::new(format!("error: {e}")), inner);
+            return;
+        }
+        // An empty panel is otherwise indistinguishable from a broken one:
+        // no pods matched, no permission to read them, or simply nothing
+        // written yet all look the same.
+        if self.lines.is_empty() {
+            waiting(frame, inner, self.spin, "waiting for log lines");
             return;
         }
         let width = usize::from(inner.width.max(1));

@@ -12,6 +12,8 @@ pub enum AppEvent {
     /// Time to redraw, for anything that moves while waiting. Nothing is
     /// fetched on one of these.
     Frame,
+    /// A press, drag or release from the mouse.
+    Mouse(crossterm::event::MouseEvent),
     Worker(WorkerReply),
 }
 
