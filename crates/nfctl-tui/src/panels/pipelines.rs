@@ -2,7 +2,7 @@ use crossterm::event::KeyCode;
 use nfctl_core::model::{Namespace, Pipeline};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Row, Table, TableState};
 
 use crate::event::{Action, AppEvent};
@@ -115,20 +115,28 @@ impl Model for PipelinesPanel {
     }
 
     fn view(&self, frame: &mut Frame, area: Rect) {
+        // The terminal keeps a border of its own, dim, with the title on it;
+        // what the panel holds sits in a brighter box floating inside.
         let title = match &self.ns {
             Some(ns) => format!(" pipelines in {ns} "),
             None => " pipelines (all namespaces) ".to_owned(),
         };
-        let block = Block::default().borders(Borders::ALL).title(title);
+        let chrome = Block::default()
+            .borders(Borders::ALL)
+            .border_style(style::dim())
+            .title(Span::styled(title, style::title()));
+        let room = chrome.inner(area);
+        frame.render_widget(chrome, area);
+        let block = Block::default().borders(Borders::ALL);
         if let Some(e) = &self.error {
             let msg = format!("error: {e}");
             let w = u16::try_from(msg.width()).unwrap_or(0) + 2;
-            let at = centre(area, w.max(TITLE_ROOM), 3);
+            let at = centre(room, w.max(TITLE_ROOM), 3);
             frame.render_widget(ratatui::widgets::Paragraph::new(msg).block(block), at);
             return;
         }
         if self.loading {
-            let at = centre(area, TITLE_ROOM, 3);
+            let at = centre(room, TITLE_ROOM, 3);
             frame.render_widget(
                 ratatui::widgets::Paragraph::new("loading...").block(block),
                 at,
@@ -155,7 +163,7 @@ impl Model for PipelinesPanel {
         // of the terminal; the last column is `Min`, so it is measured at the
         // width its content wants rather than stretched to the screen.
         let at = centre(
-            area,
+            room,
             crate::table::width(&widths, SPACING) + 2,
             u16::try_from(self.items.len())
                 .unwrap_or(u16::MAX)
