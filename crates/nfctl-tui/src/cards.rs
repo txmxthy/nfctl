@@ -241,12 +241,22 @@ impl Canvas {
             if related && colour(h) == colour(v) {
                 continue;
             }
-            self.over[i] = Some(('│', self.turn[i].0));
+            // A bridge is only legible if the horizontal is broken beside
+            // it. Where neither neighbour is a plain horizontal to break, an
+            // edge's own end or corner sits there, and the vertical drawn
+            // over the cell would read as the horizontal stopping for no
+            // reason; the junction is the honest glyph.
             let x = i % self.w;
-            if x > 0 && self.cells[i - 1] == L | R {
+            let left = x > 0 && self.cells[i - 1] == L | R;
+            let right = x + 1 < self.w && self.cells[i + 1] == L | R;
+            if !left && !right {
+                continue;
+            }
+            self.over[i] = Some(('│', self.turn[i].0));
+            if left {
                 self.over[i - 1] = Some(('╴', self.ink[i - 1]));
             }
-            if x + 1 < self.w && self.cells[i + 1] == L | R {
+            if right {
                 self.over[i + 1] = Some(('╶', self.ink[i + 1]));
             }
         }

@@ -232,9 +232,10 @@ async fn detail_bridges_true_crossings() {
     );
     assert_eq!(bridged, plain);
     let crossed = frame(&topology_panel(topology).await.with_palette(cross), 120, 40);
-    // The horizontal is broken either side of the crossing, unless the cell
-    // there is the edge's own end and there is nothing to break.
-    assert!(plain.contains('╴') || plain.contains('╶'), "{plain}");
+    // The horizontal is broken beside the crossing, so the vertical reads as
+    // passing over it. Only one side, where the cell on the other is the
+    // edge's own end and there is nothing to break.
+    assert!(plain.contains('╶') || plain.contains('╴'), "{plain}");
     assert_eq!(crossed.matches('┼').count(), 1);
     assert_eq!(bridged.matches('┼').count(), 0);
     insta::assert_snapshot!(bridged);
