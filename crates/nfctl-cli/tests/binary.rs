@@ -212,3 +212,22 @@ fn help_lists_every_command() {
         );
     }
 }
+
+/// `--timings` writes to stderr, which the TUI is drawing on, so it must not
+/// install a subscriber for that one command. The TUI prints the same numbers
+/// in its own header instead.
+#[test]
+fn timings_do_not_write_over_the_tui() {
+    use clap::Parser as _;
+    use nfctl_cli::Cli;
+    let tui = Cli::parse_from(["nfctl", "--timings", "tui"]);
+    assert!(tui.owns_the_terminal());
+    for cmd in [
+        vec!["nfctl", "--timings", "ls"],
+        vec!["nfctl", "--timings", "top", "p"],
+        vec!["nfctl", "--timings", "status", "p"],
+    ] {
+        let other = Cli::parse_from(&cmd);
+        assert!(!other.owns_the_terminal(), "{cmd:?}");
+    }
+}

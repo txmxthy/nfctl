@@ -21,7 +21,8 @@ pub enum WorkerMessage {
 
 #[derive(Debug)]
 pub enum WorkerReply {
-    Pipelines(Result<Vec<Pipeline>, String>),
+    /// The list, and how long the cluster took to answer.
+    Pipelines(Result<Vec<Pipeline>, String>, std::time::Duration),
     View(Box<Result<PipelineView, String>>),
     Log(TaggedLine),
     LogsFailed(String),
@@ -59,12 +60,16 @@ impl Worker {
     async fn handle(&mut self, msg: WorkerMessage) {
         match msg {
             WorkerMessage::LoadPipelines(ns) => {
+                let started = std::time::Instant::now();
                 let r = self
                     .service
                     .list(ns.as_ref())
                     .await
                     .map_err(|e| e.to_string());
-                let _ = self.tx.send(WorkerReply::Pipelines(r)).await;
+                let _ = self
+                    .tx
+                    .send(WorkerReply::Pipelines(r, started.elapsed()))
+                    .await;
             }
             WorkerMessage::LoadView(key) => {
                 let r = self

@@ -152,8 +152,10 @@ pub async fn run(
         timings,
         tx,
     };
-    app.push(Panel::Pipelines(Box::new(PipelinesPanel::new(ns))))
-        .await;
+    app.push(Panel::Pipelines(Box::new(
+        PipelinesPanel::new(ns).with_timings(timings),
+    )))
+    .await;
 
     let mut terminal = ratatui::init();
     let mut keys = EventStream::new();

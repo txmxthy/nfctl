@@ -15,6 +15,16 @@ pub struct Cli {
     pub command: Command,
 }
 
+impl Cli {
+    /// Whether the command draws over the whole terminal. Timings cannot be
+    /// printed to stderr for one of these: the lines land on top of what it
+    /// drew. The TUI shows them under its own header instead.
+    #[must_use]
+    pub fn owns_the_terminal(&self) -> bool {
+        matches!(self.command, Command::Tui { .. })
+    }
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct Globals {
     /// Namespace. Without it, lists span every namespace and a bare name resolves across them

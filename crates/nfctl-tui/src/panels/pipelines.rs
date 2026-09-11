@@ -23,6 +23,9 @@ pub struct PipelinesPanel {
     state: TableState,
     error: Option<String>,
     loading: bool,
+    /// Show how long the last list took, from `--timings`.
+    timings: bool,
+    took: Option<std::time::Duration>,
 }
 
 const HEADER: [&str; 6] = [
@@ -42,7 +45,16 @@ impl PipelinesPanel {
             state: TableState::default(),
             error: None,
             loading: true,
+            timings: false,
+            took: None,
         }
+    }
+
+    /// Show how long the last list took in the title.
+    #[must_use]
+    pub fn with_timings(mut self, on: bool) -> Self {
+        self.timings = on;
+        self
     }
 
     fn selected(&self) -> Option<&Pipeline> {
@@ -72,8 +84,9 @@ impl Model for PipelinesPanel {
     fn update(&mut self, ev: &AppEvent) -> (Option<Action>, Vec<WorkerMessage>) {
         match ev {
             AppEvent::Tick => (None, self.reload()),
-            AppEvent::Worker(WorkerReply::Pipelines(r)) => {
+            AppEvent::Worker(WorkerReply::Pipelines(r, took)) => {
                 self.loading = false;
+                self.took = Some(*took);
                 match r {
                     Ok(items) => {
                         // Keep the selection on the same pipeline across refreshes.
@@ -117,10 +130,13 @@ impl Model for PipelinesPanel {
     fn view(&self, frame: &mut Frame, area: Rect) {
         // The terminal keeps a border of its own, dim, with the title on it;
         // what the panel holds sits in a brighter box floating inside.
-        let title = match &self.ns {
+        let mut title = match &self.ns {
             Some(ns) => format!(" pipelines in {ns} "),
             None => " pipelines (all namespaces) ".to_owned(),
         };
+        if let (true, Some(took)) = (self.timings, self.took) {
+            title = format!("{title}· listed in {:.2}s ", took.as_secs_f32());
+        }
         let chrome = Block::default()
             .borders(Borders::ALL)
             .border_style(style::dim())

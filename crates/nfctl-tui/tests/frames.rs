@@ -31,9 +31,10 @@ fn frame(model: &dyn Model, width: u16, height: u16) -> String {
 async fn pipelines_panel() {
     let fx = fixture();
     let mut panel = PipelinesPanel::new(None);
-    panel.update(&AppEvent::Worker(WorkerReply::Pipelines(Ok(fx
-        .pipelines
-        .clone()))));
+    panel.update(&AppEvent::Worker(WorkerReply::Pipelines(
+        Ok(fx.pipelines.clone()),
+        std::time::Duration::from_millis(12),
+    )));
     insta::assert_snapshot!(frame(&panel, 100, 12));
 
     // A panel bigger than the terminal fills it instead of floating: every

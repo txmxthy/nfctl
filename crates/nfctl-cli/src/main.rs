@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     // completer that queries the cluster builds its own.
     clap_complete::CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
-    nfctl_cli::timing::install(cli.globals.timings);
+    nfctl_cli::timing::install(cli.globals.timings && !cli.owns_the_terminal());
     let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
