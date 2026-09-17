@@ -164,8 +164,16 @@ async fn monovertex_panel_fallback() {
     insta::assert_snapshot!(frame(&panel, 100, 16));
 }
 
-/// The card floats in the middle of whatever room it has, so a narrow
-/// terminal is not a corner of drawing and three quarters blank.
+/// Too narrow for the spelled-out labels, wide enough to keep the boxes: the
+/// middle rung of the ladder.
+#[tokio::test]
+async fn monovertex_panel_boxed_short() {
+    let panel = monovertex_panel_for(1).await;
+    insta::assert_snapshot!(frame(&panel, 64, 16));
+}
+
+/// Narrower still, so the boxes go too and the card floats in what room is
+/// left, rather than overflowing it.
 #[tokio::test]
 async fn monovertex_panel_narrow() {
     let panel = monovertex_panel_for(1).await;

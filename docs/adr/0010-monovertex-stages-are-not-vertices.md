@@ -29,18 +29,22 @@ than as data that does not exist.
 
 ## Decision
 One card per MonoVertex, because the card is the thing that has a phase, a
-replica count and a rate. The container chain is drawn inside it as a single
-row of labels joined by arrows, with the fallback's hop dashed, since nothing
+replica count and a rate. The container chain is drawn inside it, each stage in
+a box of its own joined by arrows, with the fallback's hop dashed since nothing
 travels it unless the primary sink fails. The replica badge is worked into the
 top border and the throughput into the bottom one, so neither costs an interior
 row. The stack floats in the middle of the panel.
 
-No stage gets a card, a border, a buffer figure or a number of its own, and the
-card layout engine is not involved. `nfctl-graph` stays a pipeline concern.
+The boxes are safe here only because they are nested. A box floating in a flow
+pane promises a vertex; a box inside a frame that carries the name, the replica
+badge and the single rate reads as a container within one pod, which is what it
+is. So no stage gets a buffer figure, a watermark or a number of its own, and
+the card layout engine is not involved — `nfctl-graph` stays a pipeline
+concern.
 
-The labels are spelled out (`source ──▶ transform ──▶ map ──▶ sink`) and shrink
-to `src ──▶ trf ──▶ map ──▶ sink` when the terminal is too narrow for the card
-to fit, rather than the frame overflowing its room.
+Width is a three-rung ladder, widest that fits: boxes with spelled-out labels,
+boxes with abbreviated ones, then bare abbreviated labels with no boxes. The
+frame never overflows its room.
 
 `MonoVertex` gains `has_fallback`, parsed from `spec.sink.fallback`, which the
 DTO previously ignored.

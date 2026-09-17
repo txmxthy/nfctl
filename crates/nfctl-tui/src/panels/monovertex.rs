@@ -1,8 +1,9 @@
 //! A `MonoVertex`'s detail. There is no topology to draw — one vertex, no
 //! edges, no buffers and no watermarks — but there is structure: the container
-//! chain inside the pod. It is drawn as one card, because the card is the thing
-//! that has a phase, a replica count and a rate. The stages inside it share a
-//! pod and a process, so they get no card, no buffer and no number of their own.
+//! chain inside the pod. The stages are boxed, but nested inside the one card
+//! that carries the name, the replica badge and the rate — the wrapper is what
+//! says they are one pod, so a box here reads as a container rather than as a
+//! vertex with a buffer and a replica count of its own.
 
 use crossterm::event::KeyCode;
 use nfctl_core::model::{MonoVertex, MonoVertexKey, WorkloadKey};
@@ -21,10 +22,37 @@ use crate::{Model, style};
 /// Blank columns between the card's frame and the chain inside it.
 const PAD: usize = 3;
 /// What joins one stage to the next.
-const HOP: &str = " ──▶ ";
+const HOP: &str = "──▶";
 /// What joins the sink to its fallback. Dashed, because nothing goes that way
 /// unless the primary sink fails.
-const HOP_FALLBACK: &str = " ╌╌▶ ";
+const HOP_FALLBACK: &str = "╌╌▶";
+/// Blank columns inside a stage's own box, either side of its label.
+const BOX_PAD: usize = 1;
+
+/// How the chain is drawn. The ladder is tried widest first, so a narrow
+/// terminal steps down a rung instead of the card overflowing its room.
+#[derive(Debug, Clone, Copy)]
+struct Step {
+    /// Abbreviated wording (`src`) rather than spelled out (`source`).
+    short: bool,
+    /// Each stage in a box of its own.
+    boxed: bool,
+}
+
+const LADDER: [Step; 3] = [
+    Step {
+        short: false,
+        boxed: true,
+    },
+    Step {
+        short: true,
+        boxed: true,
+    },
+    Step {
+        short: true,
+        boxed: false,
+    },
+];
 
 #[derive(Debug)]
 pub struct MonoVertexPanel {
@@ -97,10 +125,78 @@ fn stages(m: &MonoVertex, short: bool) -> Vec<&'static str> {
     s
 }
 
-/// The chain as one string, for measuring. The hop before the fallback is
-/// dashed, so it is the same width as the others.
-fn chain_of(m: &MonoVertex, short: bool) -> String {
-    stages(m, short).join(HOP)
+/// How wide a hop is drawn. It abuts the boxes when there are boxes, and takes
+/// a blank either side when the labels are bare and would otherwise run into
+/// it. Measuring and drawing both read this, so they cannot disagree.
+fn hop_width(step: Step) -> usize {
+    if step.boxed {
+        HOP.width()
+    } else {
+        HOP.width() + 2
+    }
+}
+
+/// How wide the chain is drawn at this rung. A boxed stage costs its label
+/// plus a border and a blank either side.
+fn chain_width(m: &MonoVertex, step: Step) -> usize {
+    let labels = stages(m, step.short);
+    let hops = (labels.len() - 1) * hop_width(step);
+    let per_box = if step.boxed { (1 + BOX_PAD) * 2 } else { 0 };
+    labels.iter().map(|l| l.width() + per_box).sum::<usize>() + hops
+}
+
+/// The chain's rows: three when the stages are boxed (their tops, their labels
+/// and their bottoms), one when they are not. The fallback's hop is dashed and
+/// its label takes the warning hue, since it is the failure path.
+fn chain_rows(m: &MonoVertex, step: Step) -> Vec<Vec<Span<'static>>> {
+    let dim = style::dim();
+    let labels = stages(m, step.short);
+    let last = labels.len() - 1;
+    let hue = |i: usize| {
+        if m.has_fallback && i == last {
+            style::warn()
+        } else {
+            style::title()
+        }
+    };
+    let hop = |i: usize| {
+        if m.has_fallback && i == last {
+            HOP_FALLBACK
+        } else {
+            HOP
+        }
+    };
+
+    if !step.boxed {
+        let mut mid = Vec::new();
+        for (i, l) in labels.iter().enumerate() {
+            if i > 0 {
+                mid.push(Span::styled(format!(" {} ", hop(i)), dim));
+            }
+            mid.push(Span::styled((*l).to_owned(), hue(i)));
+        }
+        return vec![mid];
+    }
+
+    let (mut top, mut mid, mut bot) = (Vec::new(), Vec::new(), Vec::new());
+    for (i, l) in labels.iter().enumerate() {
+        if i > 0 {
+            // The hop is drawn on the label row; the rows above and below it
+            // hold the gap between the two boxes.
+            top.push(Span::raw(" ".repeat(hop_width(step))));
+            mid.push(Span::styled(hop(i), dim));
+            bot.push(Span::raw(" ".repeat(hop_width(step))));
+        }
+        let rule = "─".repeat(l.width() + BOX_PAD * 2);
+        top.push(Span::styled(format!("┌{rule}┐"), dim));
+        mid.push(Span::styled("│", dim));
+        mid.push(Span::raw(" ".repeat(BOX_PAD)));
+        mid.push(Span::styled((*l).to_owned(), hue(i)));
+        mid.push(Span::raw(" ".repeat(BOX_PAD)));
+        mid.push(Span::styled("│", dim));
+        bot.push(Span::styled(format!("└{rule}┘"), dim));
+    }
+    vec![top, mid, bot]
 }
 
 fn opt_rate(v: Option<f64>) -> String {
@@ -125,10 +221,14 @@ fn replicas(m: &MonoVertex) -> String {
 fn card(v: &MonoVertexView, name: &str, room: usize) -> Vec<Line<'static>> {
     let m = &v.monovertex;
     let metrics = v.metrics();
-    // Spelled-out labels unless they would push the card past its room, in
-    // which case the wording shrinks rather than the frame overflowing.
-    let short = chain_of(m, false).width() + PAD * 2 + 2 > room;
-    let chain = chain_of(m, short);
+    // The widest rung of the ladder that fits, or the narrowest if none does.
+    let fits = |s: &&Step| chain_width(m, **s) + PAD * 2 + 2 <= room;
+    let step = LADDER
+        .iter()
+        .find(fits)
+        .copied()
+        .unwrap_or(LADDER[LADDER.len() - 1]);
+    let chain = chain_width(m, step);
 
     let badge = replicas(m);
     let rate = opt_rate(metrics.and_then(|x| x.rate.m1));
@@ -137,7 +237,7 @@ fn card(v: &MonoVertexView, name: &str, room: usize) -> Vec<Line<'static>> {
 
     // Wide enough for the name, the chain and both badges, and never wider
     // than the room it has.
-    let inner = name.width().max(chain.width()) + PAD * 2;
+    let inner = name.width().max(chain) + PAD * 2;
     let inner = inner
         .max(badge.width() + flow.width() + 8)
         .min(room.saturating_sub(2));
@@ -184,37 +284,19 @@ fn card(v: &MonoVertexView, name: &str, room: usize) -> Vec<Line<'static>> {
     };
     let blank = || row(vec![]);
 
-    // The chain, with the stage labels bold and the hops between them dim. The
-    // fallback is the failure path, so it takes the warning hue.
-    let mut chain_spans: Vec<Span<'static>> = Vec::new();
-    let chain_stages = stages(m, short);
-    let last = chain_stages.len() - 1;
-    for (i, s) in chain_stages.into_iter().enumerate() {
-        if i > 0 {
-            // Only the fallback's own hop is dashed.
-            let dashed = m.has_fallback && i == last;
-            chain_spans.push(Span::styled(if dashed { HOP_FALLBACK } else { HOP }, dim));
-        }
-        let hue = if m.has_fallback && i == last {
-            style::warn()
-        } else {
-            style::title()
-        };
-        chain_spans.push(Span::styled(s, hue));
-    }
-
     let lead = inner.saturating_sub(name.width() + PAD * 2) / 2;
-    vec![
+    let mut lines = vec![
         top,
         row(vec![
             Span::raw(" ".repeat(lead)),
             Span::styled(name.to_owned(), style::title()),
         ]),
         blank(),
-        row(chain_spans),
-        blank(),
-        bottom,
-    ]
+    ];
+    lines.extend(chain_rows(m, step).into_iter().map(row));
+    lines.push(blank());
+    lines.push(bottom);
+    lines
 }
 
 /// The numbers under the card: what the badge rounds off.
