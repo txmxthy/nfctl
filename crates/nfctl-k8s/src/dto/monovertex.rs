@@ -13,6 +13,7 @@ pub struct MonoVertexSpecDto {
     pub replicas: Option<u32>,
     pub source: Option<SourceDto>,
     pub udf: Option<serde_json::Value>,
+    pub sink: Option<SinkDto>,
     #[serde(default)]
     pub lifecycle: LifecycleDto,
 }
@@ -20,6 +21,11 @@ pub struct MonoVertexSpecDto {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourceDto {
     pub transformer: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SinkDto {
+    pub fallback: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -71,6 +77,7 @@ pub fn into_monovertex(o: MonoVertexObject) -> Result<MonoVertex, Error> {
             .as_ref()
             .is_some_and(|s| s.transformer.is_some()),
         has_map: o.spec.udf.is_some(),
+        has_fallback: o.spec.sink.as_ref().is_some_and(|s| s.fallback.is_some()),
         message: st.message.filter(|m| !m.is_empty()),
         conditions: st
             .conditions

@@ -25,6 +25,12 @@ pub fn title() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
 }
 
+/// Something the reader should look at but that is not an error: a replica
+/// short, a pending backlog, the fallback path.
+pub fn warn() -> Style {
+    Style::default().fg(Color::Yellow)
+}
+
 pub fn dim() -> Style {
     Style::default().fg(Color::DarkGray)
 }

@@ -20,3 +20,31 @@ spec:
     udsink:
       container:
         image: quay.io/numaio/numaflow-rs/sink-log:stable
+---
+# The full chain: a transformer, a map, and a sink with a fallback, over three
+# replicas. `mono` above stays the minimal case; this one exercises the
+# fallback branch and the replica badge.
+apiVersion: numaflow.numaproj.io/v1alpha1
+kind: MonoVertex
+metadata:
+  name: enrich
+spec:
+  replicas: 3
+  scale:
+    min: 3
+  source:
+    udsource:
+      container:
+        image: quay.io/numaio/numaflow-rs/simple-source:stable
+    transformer:
+      container:
+        image: quay.io/numaio/numaflow-rs/source-transformer-now:stable
+  udf:
+    container:
+      image: quay.io/numaio/numaflow-go/map-cat:stable
+  sink:
+    udsink:
+      container:
+        image: quay.io/numaio/numaflow-rs/sink-log:stable
+    fallback:
+      blackhole: {}

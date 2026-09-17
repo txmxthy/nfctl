@@ -566,6 +566,7 @@ monovertices:
   ready_replicas: 1
   has_transformer: true
   has_map: true
+  has_fallback: false
   message: null
   conditions:
   - kind: DaemonHealthy
@@ -580,6 +581,32 @@ monovertices:
     ok: true
     reason: Running
     message: All pods are healthy
+  created: '2026-01-01T00:00:00Z'
+- key:
+    namespace: default
+    name: enrich
+  desired: Running
+  phase: Running
+  replicas: 3
+  desired_replicas: 3
+  ready_replicas: 2
+  has_transformer: true
+  has_map: true
+  has_fallback: true
+  message: null
+  conditions:
+  - kind: DaemonHealthy
+    ok: true
+    reason: Successful
+    message: Successful
+  - kind: Deployed
+    ok: true
+    reason: Successful
+    message: Successful
+  - kind: PodsHealthy
+    ok: false
+    reason: Pending
+    message: 2/3 pods are healthy
   created: '2026-01-01T00:00:00Z'
 isbs:
 - namespace: default
@@ -1032,6 +1059,23 @@ daemons:
         m5: 480
         m15: 470
         default: 479
+  enrich:
+    health:
+      status: warning
+      message: MonoVertex is not fully replicated
+      code: D2
+    metrics:
+    - vertex: enrich
+      rate:
+        m1: 6753.2
+        m5: 6900.2
+        m15: 6811.0
+        default: 6753.2
+      pending:
+        m1: 9553
+        m5: 9420
+        m15: 9100
+        default: 9553
 pods:
 - name: linear-in-0-a1b2c
   phase: Running

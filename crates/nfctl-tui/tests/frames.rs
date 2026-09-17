@@ -127,14 +127,12 @@ async fn logs_panel_follows_then_pins() {
     insta::assert_snapshot!("logs_pinned", frame(&panel, 100, 8));
 }
 
-/// A `MonoVertex` opens a panel of its own: no flow drawing, no edge table,
-/// just the phase, health and the one row of numbers its daemon answers with.
-#[tokio::test]
-async fn monovertex_panel() {
+/// The `MonoVertex` panel for the i-th fixture monovertex, loaded.
+async fn monovertex_panel_for(i: usize) -> MonoVertexPanel {
     let fx = fixture();
     let cluster = FakeCluster::from_fixture(&fx);
     let daemons = FakeDaemons::from_fixture(&fx);
-    let key: MonoVertexKey = fx.monovertices[0].key.clone();
+    let key: MonoVertexKey = fx.monovertices[i].key.clone();
     let view = monovertex_view(
         &cluster,
         &daemons,
@@ -147,7 +145,31 @@ async fn monovertex_panel() {
     panel.update(&AppEvent::Worker(WorkerReply::MonoVertex(Box::new(Ok(
         view,
     )))));
-    insta::assert_snapshot!(frame(&panel, 100, 12));
+    panel
+}
+
+/// A `MonoVertex` opens a panel of its own: no flow drawing and no edge table,
+/// but one card carrying the container chain, the replica badge and the rate.
+#[tokio::test]
+async fn monovertex_panel() {
+    let panel = monovertex_panel_for(0).await;
+    insta::assert_snapshot!(frame(&panel, 100, 16));
+}
+
+/// The full chain: a transformer, a map and a fallback sink, with a replica
+/// short so the badge reads `×2/3` rather than `×3`.
+#[tokio::test]
+async fn monovertex_panel_fallback() {
+    let panel = monovertex_panel_for(1).await;
+    insta::assert_snapshot!(frame(&panel, 100, 16));
+}
+
+/// The card floats in the middle of whatever room it has, so a narrow
+/// terminal is not a corner of drawing and three quarters blank.
+#[tokio::test]
+async fn monovertex_panel_narrow() {
+    let panel = monovertex_panel_for(1).await;
+    insta::assert_snapshot!(frame(&panel, 56, 16));
 }
 
 fn crossterm_key(c: char) -> crossterm::event::KeyEvent {

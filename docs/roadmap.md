@@ -14,6 +14,7 @@
 | `apply --check` | done | M5 |
 | `scale` | done | M5 |
 | `tui` | done | M7 |
+| `tui`: MonoVertex card with its container chain (ADR 0010) | done | — |
 | `mvtx status/logs/pause/resume` (`ls`/`get` unified away, ADR 0009) | done | M8 |
 | unify `mvtx status/logs/pause/resume` into the shared verbs | planned | later |
 | corpus tests + benches (private seed) | done | M9 |

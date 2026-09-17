@@ -526,6 +526,7 @@ pub fn sample_monovertex(
         ready_replicas: Some(1),
         has_transformer: true,
         has_map: false,
+        has_fallback: false,
         message: None,
         conditions: vec![],
         created: Some(Timestamp::new(time::OffsetDateTime::UNIX_EPOCH)),

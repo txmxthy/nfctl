@@ -1,0 +1,20 @@
+---
+source: crates/nfctl-tui/tests/frames.rs
+expression: "frame(&panel, 100, 16)"
+---
+"┌ monovertex default/enrich ───────────────────────────────────────────────────────────────────────┐"
+"│                                                                                                  │"
+"│                         phase Running   health warning   desired Running                         │"
+"│                                MonoVertex is not fully replicated                                │"
+"│                                                                                                  │"
+"│                    ╭─ ×2/3 ─────────────────────────────────────────────────╮                    │"
+"│                    │                         enrich                         │                    │"
+"│                    │                                                        │                    │"
+"│                    │   source ──▶ transform ──▶ map ──▶ sink ╌╌▶ fallback   │                    │"
+"│                    │                                                        │                    │"
+"│                    ╰────────────────────────────── 6753.2/s · 9553 pending ─╯                    │"
+"│                                                                                                  │"
+"│                            rate/1m 6753.2   rate/5m 6900.2   ready 2/3                           │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

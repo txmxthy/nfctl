@@ -16,6 +16,7 @@ expression: "out(&[\"ls\", \"-o\", \"json\"]).await"
     "ready_replicas": 1,
     "has_transformer": true,
     "has_map": false,
+    "has_fallback": false,
     "message": null,
     "conditions": [],
     "created": "1970-01-01T00:00:00Z"

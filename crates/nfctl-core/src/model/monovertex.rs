@@ -51,6 +51,10 @@ impl MonoVertexPhase {
 }
 
 /// A single-pod-per-replica source → (transformer) → (map) → sink unit.
+///
+/// The `has_*` flags are the internal container chain. They are structure, not
+/// topology: the stages share one pod and one process, with no buffer and no
+/// watermark between them, so they are never vertices.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonoVertex {
     pub key: MonoVertexKey,
@@ -61,6 +65,8 @@ pub struct MonoVertex {
     pub ready_replicas: Option<u32>,
     pub has_transformer: bool,
     pub has_map: bool,
+    /// The sink has a fallback, written to when the primary sink fails.
+    pub has_fallback: bool,
     pub message: Option<String>,
     pub conditions: Vec<Condition>,
     pub created: Option<Timestamp>,
