@@ -1,8 +1,8 @@
 //! Render a [`Topology`] as Mermaid, DOT, or box-drawing text.
 //!
 //! The Mermaid and DOT emitters are pure functions of the domain model. The
-//! text renderer is the orthodag crate, fed with the Mermaid we emit: one
-//! emitter, two consumers.
+//! text renderer is the orthodag crate, fed the same `ViewGraph` the Mermaid
+//! emitter reads: one view, two pictures.
 
 mod ascii;
 mod dot;
@@ -10,7 +10,6 @@ pub mod layout;
 mod mermaid;
 mod mermaid_in;
 
-pub use ascii::{render_ascii, render_ascii_coloured};
 pub use dot::to_dot;
 pub use mermaid::{Direction, to_mermaid, view_to_mermaid};
 pub use mermaid_in::{ImportError, from_mermaid};
@@ -62,12 +61,8 @@ pub fn render_with(topology: &Topology, format: Format, opts: RenderOptions) -> 
     } else {
         layout::ViewGraph::expanded(topology)
     };
-    let mermaid = view_to_mermaid(&view, Direction::LeftRight);
     match format {
-        Format::Mermaid | Format::Dot => mermaid,
-        Format::Ascii if opts.colour => {
-            render_ascii_coloured(&mermaid, opts.width)
-        }
-        Format::Ascii => render_ascii(&mermaid, opts.width),
+        Format::Mermaid | Format::Dot => view_to_mermaid(&view, Direction::LeftRight),
+        Format::Ascii => ascii::render_ascii(&view, opts.width, opts.colour),
     }
 }

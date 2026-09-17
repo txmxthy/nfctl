@@ -124,12 +124,15 @@ fn ascii() {
     insta::assert_snapshot!("complex_ascii", render(&complex(), Format::Ascii, None));
 }
 
+/// Asking for less width shrinks the drawing through a ladder of tighter
+/// styles. `complex` bottoms out at 72 columns: the layout never flips to
+/// top-down and never clips a box, so a width below the floor gets the floor.
 #[test]
 fn ascii_fits_width() {
     let wide = render(&complex(), Format::Ascii, None);
     let narrow = render(&complex(), Format::Ascii, Some(60));
     let max = |s: &str| s.lines().map(|l| l.chars().count()).max().unwrap_or(0);
-    assert!(max(&narrow) <= max(&wide));
+    assert!(max(&narrow) < max(&wide));
     assert!(max(&narrow) <= 72, "narrow render is {} cols", max(&narrow));
     insta::assert_snapshot!("complex_ascii_narrow", narrow);
 }
@@ -259,7 +262,7 @@ fn crowded_tags() -> Topology {
 /// a label, and no label is left as a one-character stub against another.
 #[test]
 fn edge_labels_are_never_overdrawn() {
-    const BOX: &str = "─│┌┐└┘├┤┬┴┼╌╎╭╮╰╯━┃▶◀▲▼";
+    const BOX: &str = "─│┌┐└┘├┤┬┴┼╌╎╭╮╰╯━┃╴╶▶◀▲▼";
 
     let out = render(&crowded_tags(), Format::Ascii, Some(100));
     let word = |c: char| c.is_alphanumeric() || c == '-' || c == ':' || c == ',';

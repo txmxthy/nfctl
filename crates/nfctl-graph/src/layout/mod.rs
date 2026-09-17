@@ -13,7 +13,7 @@ mod tracks;
 mod view;
 
 pub use score::{EdgeScore, Score, scatter, score, score_full};
-pub use view::{ViewEdge, ViewGraph, ViewNode};
+pub use view::{ViewEdge, ViewGraph, ViewNode, to_graph};
 
 use std::collections::HashMap;
 

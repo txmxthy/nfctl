@@ -216,3 +216,24 @@ impl ViewGraph {
             .map(|i| NodeId(u32::try_from(i).unwrap_or(u32::MAX)))
     }
 }
+
+/// The view graph as orthodag sees it.
+///
+/// Nodes and edges are added in order, so `orthodag::colour::of` lines up with
+/// `edges` and, for an expanded view, with `Topology::edges()`.
+#[must_use]
+pub fn to_graph(g: &ViewGraph) -> orthodag::Graph {
+    let mut out = orthodag::Graph::new();
+    let ids: Vec<_> = g
+        .nodes
+        .iter()
+        .map(|n| out.add_node(orthodag::Node::new(&n.label)))
+        .collect();
+    for e in &g.edges {
+        let (Some(from), Some(to)) = (ids.get(e.from.0 as usize), ids.get(e.to.0 as usize)) else {
+            continue;
+        };
+        out.add_tagged_edge(*from, *to, e.tags.iter().cloned());
+    }
+    out
+}
