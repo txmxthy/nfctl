@@ -90,17 +90,13 @@ PNGs. Changing the fixture changes all three together.
 ## Drawing a pipeline
 
 `nfctl-graph` owns every picture. The Mermaid and DOT emitters are pure functions
-of the topology. `layout` is a pure layered layout for the card view: columns by
-rank (back edges removed first), one-row pass slots for edges that skip columns,
-barycenter ordering, edges sharing a source or a target bundled onto one track
-in the gap, back edges through lanes under the cards. It works on a `ViewGraph`,
-which is the topology with shard groups (`name-0..name-N` with identical
-neighbourhoods) collapsed to one node. Edge colour is decided once, in the
-layout, by tag combination; the TUI painter and the CLI's ANSI writer only map
-a palette index to a hue.
-
-The box-drawing `dag` output is drawn by orthodag (ADR 0004), whose styled spans
-say which flow painted each cell, so the CLI can colour it. The layout itself is
+of the topology. Both pictures of a pipeline start from a `ViewGraph`, which is
+the topology with shard groups (`name-0..name-N` with identical neighbourhoods)
+collapsed to one node, and both are laid out by orthodag (ADR 0004): the
+box-drawing `dag` output is its text, coloured from its styled spans, and the
+TUI's card view reads its boxes and polylines back and paints the cards itself.
+Edge colour is orthodag's palette slot per tag combination; the TUI painter and
+the CLI's ANSI writer only map a slot to a hue. The card layout this replaced is
 ADR 0006; completions are ADR 0007. How cells, colours and tracks turn into glyphs is in [rendering.md](rendering.md).
 
 ## Completions

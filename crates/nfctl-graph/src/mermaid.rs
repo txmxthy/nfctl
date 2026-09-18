@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use nfctl_core::model::{Edge, OnFull, TagCondition, TagOperator, Topology, VertexKind};
 
-use crate::layout::ViewGraph;
+use crate::view::ViewGraph;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {

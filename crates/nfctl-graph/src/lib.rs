@@ -6,13 +6,14 @@
 
 mod ascii;
 mod dot;
-pub mod layout;
 mod mermaid;
 mod mermaid_in;
+pub mod view;
 
 pub use dot::to_dot;
 pub use mermaid::{Direction, to_mermaid, view_to_mermaid};
 pub use mermaid_in::{ImportError, from_mermaid};
+pub use view::{NodeId, ViewEdge, ViewGraph, ViewNode, to_graph};
 
 use nfctl_core::model::Topology;
 
@@ -57,9 +58,9 @@ pub fn render_with(topology: &Topology, format: Format, opts: RenderOptions) -> 
         return to_dot(topology);
     }
     let view = if opts.collapse_shards {
-        layout::ViewGraph::collapsed(topology)
+        ViewGraph::collapsed(topology)
     } else {
-        layout::ViewGraph::expanded(topology)
+        ViewGraph::expanded(topology)
     };
     match format {
         Format::Mermaid | Format::Dot => view_to_mermaid(&view, Direction::LeftRight),

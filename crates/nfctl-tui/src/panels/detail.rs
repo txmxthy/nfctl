@@ -572,7 +572,7 @@ fn section(frame: &mut Frame, area: Rect, title: &'static str, focused: bool) ->
 /// Tags and the arrow between the two names take the edge's colour, the same
 /// one it is drawn in above.
 fn edge_cells(v: &PipelineView, palette: Palette) -> (Vec<Vec<String>>, Vec<Vec<Cell<'static>>>) {
-    use nfctl_graph::layout::{ViewGraph, to_graph};
+    use nfctl_graph::{ViewGraph, to_graph};
     let topology = &v.pipeline.spec.topology;
     // Expanded view: one view edge per topology edge, in the same order.
     let colour_of: std::collections::HashMap<(&VertexName, &VertexName), Option<orthodag::Colour>> =

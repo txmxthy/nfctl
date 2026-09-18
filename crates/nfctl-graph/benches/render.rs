@@ -5,8 +5,8 @@
 mod common;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use nfctl_graph::layout::{Bundling, LayoutOptions, ViewGraph, layout};
 use nfctl_graph::{Direction, Format, from_mermaid, render, to_mermaid};
+use nfctl_graph::{ViewGraph, to_graph};
 
 fn bench(c: &mut Criterion) {
     let mut files = common::corpus();
@@ -24,18 +24,10 @@ fn bench(c: &mut Criterion) {
             c.bench_function(&format!("ascii/{name}/{pl}"), |b| {
                 b.iter(|| render(&t, Format::Ascii, Some(160)));
             });
-            let g = ViewGraph::collapsed(&t);
+            let g = to_graph(&ViewGraph::collapsed(&t));
+            let cards = orthodag::Options::new().box_width(18).box_height(5);
             c.bench_function(&format!("layout/{name}/{pl}"), |b| {
-                b.iter(|| {
-                    layout(
-                        &g,
-                        LayoutOptions {
-                            bundling: Bundling::Spread,
-                            card_w: 18,
-                            card_h: 5,
-                        },
-                    )
-                });
+                b.iter(|| orthodag::layout(&g, cards));
             });
             std::hint::black_box(mmd);
         }

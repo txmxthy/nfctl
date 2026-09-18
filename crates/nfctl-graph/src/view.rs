@@ -6,7 +6,9 @@ use nfctl_core::model::{
     Edge, OnFull, TagCondition, TagOperator, Topology, VertexKind, VertexName,
 };
 
-use super::NodeId;
+/// A node of the view graph: its position in `nodes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NodeId(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewNode {

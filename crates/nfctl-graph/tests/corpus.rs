@@ -3,8 +3,8 @@
 
 mod common;
 
-use nfctl_graph::layout::{ViewGraph, to_graph};
 use nfctl_graph::{Direction, Format, from_mermaid, render, to_mermaid};
+use nfctl_graph::{ViewGraph, to_graph};
 use orthodag::{Heading, Options};
 
 #[test]
@@ -79,7 +79,7 @@ fn laid_out(at: &str, g: &ViewGraph) -> std::time::Duration {
     );
     assert_eq!(d.routes().count(), g.edges.len(), "{at}: a route per edge");
 
-    let box_of = |node: nfctl_graph::layout::NodeId| {
+    let box_of = |node: nfctl_graph::NodeId| {
         d.boxes()
             .find(|b| b.node.index() == node.0 as usize)
             .unwrap()

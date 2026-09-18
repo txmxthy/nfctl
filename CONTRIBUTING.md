@@ -33,8 +33,8 @@ layout.
 
 ## Layout quality
 
-`just layout-score` prints a score for every fixture and corpus pipeline's
-expanded layout (bends over budget, junctions, overlaps, crossings,
-asymmetry, detour); the gate in `crates/nfctl-graph/tests/layout_quality.rs`
-keeps those numbers from regressing. [docs/layout-lab.md](docs/layout-lab.md)
-defines the vocabulary the scorer measures and how to work a change through it.
+The layout is orthodag's, and so is its objective: the gallery's sidebar shows
+each pipeline's score at the card geometry, and a change to how pipelines are
+drawn is made in that crate and measured there, against its own corpus and
+this one. What nfctl decides is only what goes in a card and how a line is
+painted once its cells are known ([docs/rendering.md](docs/rendering.md)).

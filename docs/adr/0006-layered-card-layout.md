@@ -1,6 +1,6 @@
 # 0006 — Layered layout for the card view
 
-Status: accepted · 2026-09-08
+Status: superseded · 2026-09-07
 
 ## Context
 The TUI's first card view placed cards by rank and drew each edge through the
@@ -32,3 +32,9 @@ the corpus tests. Crossings are minimised heuristically, not optimally; the
 corpus keeps that honest. Inline edge labels are gone: a reader looks at the
 badge on the card an edge arrives at, the same rule the reference viewer this
 was modelled on uses.
+
+## Superseded
+orthodag now places the cards and routes the lines (ADR 0004): `nfctl-tui`
+hands it a box per node sized to the card's text and reads the boxes and
+polylines back. Colour by tag combination, badges on the destination card,
+shard collapsing and the card widget itself are unchanged and still nfctl's.

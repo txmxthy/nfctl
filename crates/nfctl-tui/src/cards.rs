@@ -8,7 +8,7 @@ use std::ops::Range;
 
 use nfctl_core::model::Topology;
 use nfctl_core::service::{PipelineView, VertexView};
-use nfctl_graph::layout::{NodeId, ViewGraph, ViewNode};
+use nfctl_graph::{NodeId, ViewGraph, ViewNode};
 use orthodag::{Colour, Crossing, Heading, Options};
 use ratatui::Frame;
 use ratatui::layout::Rect;

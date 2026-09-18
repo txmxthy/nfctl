@@ -34,10 +34,6 @@ corpus out +dirs:
 corpus-fixture:
     cargo run -q -p nfctl-graph --example corpus_fixture -- testdata/private testdata/private/fixture.yaml
 
-# score every fixture (and corpus) layout, worst first; --json PATH also writes the numbers
-layout-score *flags="":
-    cargo run -q -p nfctl-graph --example layout_score -- {{flags}}
-
 # every fixture (and corpus) pipeline through both renderers, as one HTML page
 gallery out="target/gallery/index.html" *flags="":
     cargo run -q -p nfctl-tui --example gallery -- {{out}} {{flags}}

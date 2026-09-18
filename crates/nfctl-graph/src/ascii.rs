@@ -1,6 +1,6 @@
 use orthodag::{Options, Part};
 
-use crate::layout::{ViewGraph, to_graph};
+use crate::view::{ViewGraph, to_graph};
 
 /// SGR foreground codes for the six palette slots, in `orthodag::Colour` slot
 /// order.
