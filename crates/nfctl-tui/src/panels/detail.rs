@@ -49,7 +49,6 @@ pub struct DetailPanel {
     /// Rows the edge table is given beyond what it would take by itself.
     split: i16,
     palette: Palette,
-    bundling: nfctl_graph::layout::Bundling,
     /// Show how long the last load took, from `--timings`.
     timings: bool,
     /// Frame of the spinner, moved on by every tick.
@@ -86,17 +85,7 @@ impl DetailPanel {
             rows_at: std::cell::Cell::new(0),
             hit: std::cell::Cell::new((Rect::ZERO, Rect::ZERO)),
             dragging: false,
-            // A row per colour, so a line can be followed by its colour.
-            bundling: nfctl_graph::layout::Bundling::Ribbon,
         }
-    }
-
-    /// Draw long edges as a ribbon of adjacent rows instead of letting each
-    /// take the row that costs it least.
-    #[must_use]
-    pub fn with_bundling(mut self, bundling: nfctl_graph::layout::Bundling) -> Self {
-        self.bundling = bundling;
-        self
     }
 
     #[must_use]
@@ -130,7 +119,7 @@ impl DetailPanel {
 
     /// The scroll to draw with: the stored one, pulled so the selection is visible.
     fn scroll_for(&self, cards: &CardView, width: u16) -> usize {
-        let cols = cards.layout.col_x.len();
+        let cols = cards.col_x.len();
         let mut scroll = self.scroll.get().min(cols.saturating_sub(1));
         if self.follow
             && let Some(col) = self
@@ -207,7 +196,8 @@ impl DetailPanel {
             width: flow.width.saturating_sub(GUTTER),
             ..flow
         };
-        let at = centre(room, cards.layout.width, cards_h.min(room.height));
+        let width = u16::try_from(cards.drawing.size().0).unwrap_or(u16::MAX);
+        let at = centre(room, width, cards_h.min(room.height));
         let paint = cards::Paint {
             scroll: cards::Scroll {
                 column: scroll,
@@ -237,7 +227,6 @@ impl DetailPanel {
             &v.pipeline.spec.topology,
             width.saturating_sub(4),
             self.expand_shards,
-            self.bundling,
         );
         let table = table_rows(v.edges.len());
         let warn = u16::try_from(v.warnings.len()).unwrap_or(0);
@@ -261,9 +250,12 @@ impl DetailPanel {
             && let Some(card) = selected
                 .and_then(|s| nfctl_core::model::VertexName::new(s).ok())
                 .and_then(|n| cards.graph.node_of(&n))
-                .and_then(|n| cards.layout.card(n))
+                .and_then(|n| cards.card(n))
         {
-            let (y, h) = (u16::try_from(card.y.max(0)).unwrap_or(0), card.h);
+            let (y, h) = (
+                u16::try_from(card.rect.y.max(0)).unwrap_or(0),
+                u16::try_from(card.rect.h.max(0)).unwrap_or(0),
+            );
             top = top.min(y).max((y + h).saturating_sub(room));
         }
         let top = top.min(over);
@@ -455,7 +447,7 @@ impl Model for DetailPanel {
         // The flow and the edges each sit in a box of their own, so the width
         // available to the drawing is the panel's less those borders.
         let room = inner.width.saturating_sub(2);
-        let cards = CardView::new(&p.spec.topology, room, self.expand_shards, self.bundling);
+        let cards = CardView::new(&p.spec.topology, room, self.expand_shards);
         let scroll = self.scroll_for(&cards, room);
         let cards_h = cards.height();
         let warnings = u16::try_from(v.warnings.len()).unwrap_or(0);
@@ -580,14 +572,16 @@ fn section(frame: &mut Frame, area: Rect, title: &'static str, focused: bool) ->
 /// Tags and the arrow between the two names take the edge's colour, the same
 /// one it is drawn in above.
 fn edge_cells(v: &PipelineView, palette: Palette) -> (Vec<Vec<String>>, Vec<Vec<Cell<'static>>>) {
-    use nfctl_graph::layout::{EdgeColour, ViewGraph, colours};
+    use nfctl_graph::layout::{ViewGraph, to_graph};
     let topology = &v.pipeline.spec.topology;
     // Expanded view: one view edge per topology edge, in the same order.
-    let colour_of: std::collections::HashMap<(&VertexName, &VertexName), Option<EdgeColour>> =
+    let colour_of: std::collections::HashMap<(&VertexName, &VertexName), Option<orthodag::Colour>> =
         topology
             .edges()
             .iter()
-            .zip(colours(&ViewGraph::expanded(topology)))
+            .zip(orthodag::colour::of(&to_graph(&ViewGraph::expanded(
+                topology,
+            ))))
             .map(|(e, c)| ((&e.from, &e.to), c))
             .collect();
     let tags = |from: &VertexName, to: &VertexName| -> String {

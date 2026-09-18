@@ -37,7 +37,7 @@ async fn corpus_renders_as_cards() {
                     .unwrap_or_else(|e| panic!("{name}/p{i} at {w}x{h}: {e}"));
                 let text = term.backend().to_string();
                 assert!(
-                    text.contains('▶') || p.spec.topology.edges().is_empty(),
+                    text.contains('▶') || text.contains('▲') || p.spec.topology.edges().is_empty(),
                     "{name}/p{i}: no arrowheads at {w}x{h}"
                 );
             }

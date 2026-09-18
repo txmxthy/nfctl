@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 use nfctl_core::fake::{FakeCluster, FakeDaemons, Fixture};
 use nfctl_core::model::{Namespace, PipelineKey, PipelineName, PipelinePhase, Timestamp, Topology};
 use nfctl_core::service::pipeline_view;
-use nfctl_graph::layout::{Bundling, LayoutOptions, ViewGraph, layout, score};
+use nfctl_graph::layout::{ViewGraph, to_graph};
 use nfctl_graph::{Format, RenderOptions, from_mermaid, render_with, to_mermaid};
 use nfctl_tui::panels::detail::DetailPanel;
 use nfctl_tui::{AppEvent, CrossingStyle, Model, Palette, WorkerReply};
@@ -37,18 +37,10 @@ struct Item {
 }
 
 /// The expanded layout's score at the gallery's 220-column geometry.
-fn item_score(t: &Topology) -> nfctl_graph::layout::Score {
-    let g = ViewGraph::expanded(t);
-    score(
-        &g,
-        &layout(
-            &g,
-            LayoutOptions {
-                bundling: nfctl_graph::layout::Bundling::Spread,
-                card_w: 18,
-                card_h: 5,
-            },
-        ),
+fn item_score(t: &Topology) -> orthodag::Score {
+    orthodag::score_with(
+        &to_graph(&ViewGraph::expanded(t)),
+        orthodag::Options::new().box_width(18).box_height(5),
     )
 }
 
@@ -184,10 +176,8 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
     let view = pipeline_view(&cluster, &FakeDaemons::default(), &p.key, Timestamp::now())
         .await
         .unwrap();
-    let panel = |expand: bool, palette: Palette, bundling: Bundling| {
-        let mut panel = DetailPanel::new(p.key.clone())
-            .with_palette(palette)
-            .with_bundling(bundling);
+    let panel = |expand: bool, palette: Palette| {
+        let mut panel = DetailPanel::new(p.key.clone()).with_palette(palette);
         panel.update(&AppEvent::Worker(WorkerReply::View(Box::new(Ok(
             view.clone()
         )))));
@@ -213,7 +203,7 @@ async fn card_frames(item: &Item) -> Vec<(String, String)> {
     let bridge = Palette::default().with_crossing(CrossingStyle::Bridge);
     let mut frames = Vec::new();
     for expand in [true, false] {
-        let panel = panel(expand, bridge, Bundling::Ribbon);
+        let panel = panel(expand, bridge);
         for w in WIDTHS {
             if !expand && w != 220 {
                 continue; // the narrow check is worth one frame, not two

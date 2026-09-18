@@ -1,13 +1,15 @@
-//! The pipeline as columns of vertex cards, painted from
-//! [`nfctl_graph::layout::Layout`]: bundled edges through the gaps, long edges
-//! straight across pass rows, back edges through lanes under the cards.
-//! Shard groups draw as one card; tagged edges take their combination's colour.
+//! The pipeline as columns of vertex cards, painted from an
+//! [`orthodag::Drawing`]: edges through the gaps, long edges straight across,
+//! back edges up out of the lanes under the cards. Shard groups draw as one
+//! card; tagged edges take their combination's colour.
+
+use std::collections::HashMap;
+use std::ops::Range;
 
 use nfctl_core::model::Topology;
 use nfctl_core::service::{PipelineView, VertexView};
-use nfctl_graph::layout::{
-    self, Bundling, EdgeColour, EdgeId, Layout, LayoutOptions, Route, ViewGraph, ViewNode,
-};
+use nfctl_graph::layout::{NodeId, ViewGraph, ViewNode};
+use orthodag::{Colour, Crossing, Heading, Options};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -27,15 +29,28 @@ const FULL_CARD: u16 = 24;
 const WIDEST_CARD: u16 = 34;
 const GAP: u16 = 5;
 
-/// A laid-out pipeline: the view graph plus cell coordinates for one width.
+/// One tag combination arriving at a card, in the colour its edge is drawn in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Badge {
+    pub label: String,
+    pub colour: Option<Colour>,
+}
+
+/// A laid-out pipeline: the view graph plus the drawing orthodag made of it.
 pub struct CardView {
     pub graph: ViewGraph,
-    pub layout: Layout,
+    pub drawing: orthodag::Drawing,
+    /// Palette slot per view edge, in `graph.edges` order.
+    pub colours: Vec<Option<Colour>>,
+    pub badges: HashMap<NodeId, Vec<Badge>>,
+    /// Leftmost cell of each column, in column order.
+    pub col_x: Vec<i32>,
     pub card_w: u16,
 }
 
 impl CardView {
-    pub fn new(t: &Topology, width: u16, expand_shards: bool, bundling: Bundling) -> Self {
+    #[must_use]
+    pub fn new(t: &Topology, width: u16, expand_shards: bool) -> Self {
         let graph = if expand_shards {
             ViewGraph::expanded(t)
         } else {
@@ -62,37 +77,103 @@ impl CardView {
         } else {
             fits.max(MIN_CARD)
         };
-        let layout = layout::layout(
-            &graph,
-            LayoutOptions {
-                bundling,
-                card_w,
-                card_h: CARD_HEIGHT,
-            },
+
+        // The card's text goes into the graph so orthodag's own height rule
+        // sizes the box: a row for the numbers, then one for every row the
+        // tags wrap onto. Nodes and edges go in in view order, so the
+        // drawing's ids and `colour::of` both line up with `graph`.
+        let labels = badge_labels(&graph);
+        let inner = usize::from(card_w).saturating_sub(2);
+        let mut og = orthodag::Graph::new();
+        let ids: Vec<orthodag::NodeId> = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let at = NodeId(u32::try_from(i).unwrap_or(u32::MAX));
+                let mine: Vec<String> = labels
+                    .get(&at)
+                    .map(|v| v.iter().map(|(l, _)| l.clone()).collect())
+                    .unwrap_or_default();
+                let rows = 1 + badge_rows(&mine, inner).len();
+                let mut node = orthodag::Node::new(&n.label);
+                for _ in 0..rows {
+                    node = node.line("");
+                }
+                og.add_node(node)
+            })
+            .collect();
+        for e in &graph.edges {
+            let (Some(&from), Some(&to)) = (ids.get(e.from.0 as usize), ids.get(e.to.0 as usize))
+            else {
+                continue;
+            };
+            og.add_tagged_edge(from, to, e.tags.iter().cloned());
+        }
+        let colours = orthodag::colour::of(&og);
+        let badges = labels
+            .into_iter()
+            .map(|(node, v)| {
+                let held: Vec<Badge> = v
+                    .into_iter()
+                    .map(|(label, at)| Badge {
+                        label,
+                        colour: colours.get(at).copied().flatten(),
+                    })
+                    .collect();
+                (node, held)
+            })
+            .collect();
+        let drawing = orthodag::layout(
+            &og,
+            Options::new()
+                .box_width(usize::from(card_w))
+                .box_height(usize::from(CARD_HEIGHT))
+                .crossings(Crossing::Cross),
         );
+        let mut col_x: Vec<i32> = Vec::new();
+        for b in drawing.boxes() {
+            if col_x.len() <= b.column {
+                col_x.resize(b.column + 1, i32::MAX);
+            }
+            col_x[b.column] = col_x[b.column].min(b.rect.x);
+        }
         Self {
             graph,
-            layout,
+            drawing,
+            colours,
+            badges,
+            col_x,
             card_w,
         }
     }
 
+    #[must_use]
     pub fn height(&self) -> u16 {
-        self.layout.height
+        u16::try_from(self.drawing.size().1).unwrap_or(u16::MAX)
+    }
+
+    /// The box drawing one node.
+    #[must_use]
+    pub fn card(&self, node: NodeId) -> Option<orthodag::Boxed> {
+        self.drawing
+            .boxes()
+            .find(|b| b.node.index() == node.0 as usize)
     }
 
     /// Column of the card holding `vertex`, if any.
+    #[must_use]
     pub fn column_of(&self, vertex: &str) -> Option<usize> {
         let name = nfctl_core::model::VertexName::new(vertex).ok()?;
         let node = self.graph.node_of(&name)?;
-        self.layout.card(node).map(|c| c.col)
+        self.card(node).map(|b| b.column)
     }
 
     /// First column whose right edge fits when column `first` is at x=0.
+    #[must_use]
     pub fn last_visible(&self, first: usize, width: u16) -> usize {
-        let x0 = self.layout.col_x.get(first).copied().unwrap_or(0);
-        self.layout
-            .col_x
+        let x0 = self.col_x.get(first).copied().unwrap_or(0);
+        self.col_x
             .iter()
             .rposition(|&x| x - x0 + i32::from(self.card_w) <= i32::from(width))
             .unwrap_or(first)
@@ -121,6 +202,48 @@ fn tag_widths(graph: &ViewGraph) -> impl Iterator<Item = usize> {
         .into_iter()
 }
 
+/// The badges of one card, split into the rows they take at `width`. Whole
+/// badges only: a tag is never broken across two lines. The painter draws
+/// these rows and the card is given a text line per row, so a card is as tall
+/// as its tags.
+#[must_use]
+pub fn badge_rows(labels: &[String], width: usize) -> Vec<Range<usize>> {
+    if labels.is_empty() || width == 0 {
+        return Vec::new();
+    }
+    let mut rows = Vec::new();
+    let (mut start, mut used) = (0, 0usize);
+    for (i, label) in labels.iter().enumerate() {
+        let w = label.chars().count();
+        let gap = usize::from(used > 0);
+        if used > 0 && used + gap + w > width {
+            rows.push(start..i);
+            (start, used) = (i, w);
+        } else {
+            used += gap + w;
+        }
+    }
+    rows.push(start..labels.len());
+    rows
+}
+
+/// The tag combinations arriving at each node, in first-seen order, each with
+/// the edge it was first seen on so it can take that edge's colour.
+fn badge_labels(g: &ViewGraph) -> HashMap<NodeId, Vec<(String, usize)>> {
+    let mut out: HashMap<NodeId, Vec<(String, usize)>> = HashMap::new();
+    for (i, e) in g.edges.iter().enumerate() {
+        if e.tags.is_empty() {
+            continue;
+        }
+        let label = e.tags.join(", ");
+        let at = out.entry(e.to).or_default();
+        if !at.iter().any(|(held, _)| *held == label) {
+            at.push((label, i));
+        }
+    }
+    out
+}
+
 // ---- edge canvas ---------------------------------------------------------
 
 const L: u8 = 1;
@@ -132,7 +255,7 @@ const D: u8 = 8;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Ink {
     None,
-    One(Option<EdgeColour>),
+    One(Option<Colour>),
     Mixed,
 }
 
@@ -147,13 +270,14 @@ struct Canvas {
     /// where a bus mixes colours, the branch that reaches furthest wins, so a
     /// trunk reads as one colour from the source to its far end.
     turn: Vec<(Ink, i32)>,
-    heads: Vec<Option<Ink>>,
-    /// Which edge left which bits in a cell, for telling a crossing from a
-    /// junction after the fact.
-    runs: Vec<Vec<(EdgeId, u8)>>,
+    /// Arrowhead ink, and which way the head points.
+    heads: Vec<Option<(Ink, Heading)>>,
+    /// Which edge left which bits in a cell, by its index in the view graph,
+    /// for telling a crossing from a junction after the fact.
+    runs: Vec<Vec<(usize, u8)>>,
     /// Glyph and ink painted instead of the cell's bits: the bridge style.
     over: Vec<Option<(char, Ink)>>,
-    edge: EdgeId,
+    edge: usize,
 }
 
 impl Canvas {
@@ -170,7 +294,7 @@ impl Canvas {
             heads: vec![None; w * h],
             runs: vec![Vec::new(); w * h],
             over: vec![None; w * h],
-            edge: EdgeId(0),
+            edge: 0,
         }
     }
 
@@ -182,7 +306,7 @@ impl Canvas {
         (x < self.w && y < self.h).then_some(y * self.w + x)
     }
 
-    fn set(&mut self, x: i32, y: i32, bits: u8, colour: Option<EdgeColour>, reach: i32) {
+    fn set(&mut self, x: i32, y: i32, bits: u8, colour: Option<Colour>, reach: i32) {
         if let Some(i) = self.idx(x, y) {
             self.cells[i] |= bits;
             self.ink[i] = match self.ink[i] {
@@ -200,17 +324,17 @@ impl Canvas {
         }
     }
 
-    fn head(&mut self, x: i32, y: i32, colour: Option<EdgeColour>) {
+    fn head(&mut self, x: i32, y: i32, colour: Option<Colour>, heading: Heading) {
         if let Some(i) = self.idx(x, y) {
             self.heads[i] = Some(match self.heads[i] {
-                None => Ink::One(colour),
-                Some(Ink::One(c)) if c == colour => Ink::One(c),
-                Some(_) => Ink::Mixed,
+                None => (Ink::One(colour), heading),
+                Some((Ink::One(c), h)) if c == colour => (Ink::One(c), h),
+                Some((_, h)) => (Ink::Mixed, h),
             });
         }
     }
 
-    fn hline(&mut self, y: i32, x0: i32, x1: i32, colour: Option<EdgeColour>) {
+    fn hline(&mut self, y: i32, x0: i32, x1: i32, colour: Option<Colour>) {
         let (a, b) = (x0.min(x1), x0.max(x1));
         for x in a..=b {
             let bits = if x > a { L } else { 0 } | if x < b { R } else { 0 };
@@ -218,7 +342,7 @@ impl Canvas {
         }
     }
 
-    fn vline(&mut self, x: i32, y0: i32, y1: i32, colour: Option<EdgeColour>) {
+    fn vline(&mut self, x: i32, y0: i32, y1: i32, colour: Option<Colour>) {
         let (a, b) = (y0.min(y1), y0.max(y1));
         for y in a..=b {
             let bits = if y > a { U } else { 0 } | if y < b { D } else { 0 };
@@ -227,7 +351,7 @@ impl Canvas {
     }
 
     /// Orthogonal path through the given corner points.
-    fn path(&mut self, edge: EdgeId, pts: &[(i32, i32)], colour: Option<EdgeColour>) {
+    fn path(&mut self, edge: usize, pts: &[(i32, i32)], colour: Option<Colour>) {
         self.edge = edge;
         for w in pts.windows(2) {
             let ((x0, y0), (x1, y1)) = (w[0], w[1]);
@@ -245,18 +369,9 @@ impl Canvas {
     /// the same colour; anything else is bridged, so the cell takes the
     /// vertical's glyph and colour and the horizontal is cut one cell either
     /// side, where it is a plain run.
-    fn bridge(&mut self, graph: &ViewGraph, routes: &[Route]) {
-        let ends = |e: EdgeId| {
-            let e = &graph.edges[e.0 as usize];
-            (e.from, e.to)
-        };
-        let colour = |e: EdgeId| {
-            routes
-                .get(e.0 as usize)
-                .filter(|r| r.edge == e)
-                .or_else(|| routes.iter().find(|r| r.edge == e))
-                .and_then(|r| r.colour)
-        };
+    fn bridge(&mut self, graph: &ViewGraph, colours: &[Option<Colour>]) {
+        let ends = |e: usize| graph.edges.get(e).map(|e| (e.from, e.to));
+        let colour = |e: usize| colours.get(e).copied().flatten();
         for i in 0..self.cells.len() {
             let runs = &self.runs[i];
             let Some(&(h, _)) = runs.iter().find(|(_, b)| *b == L | R) else {
@@ -265,8 +380,9 @@ impl Canvas {
             let Some(&(v, _)) = runs.iter().find(|(_, b)| *b == U | D) else {
                 continue;
             };
-            let (hs, ht) = ends(h);
-            let (vs, vt) = ends(v);
+            let (Some((hs, ht)), Some((vs, vt))) = (ends(h), ends(v)) else {
+                continue;
+            };
             // Unrelated lines are never one line; related ones are only when
             // they carry the same colour.
             let related = hs == vs || ht == vt;
@@ -323,8 +439,12 @@ impl Canvas {
                 let mut run_style = style::dim();
                 for x in 0..self.w {
                     let i = y * self.w + x;
-                    let (ch, st) = if let Some(ink) = self.heads[i] {
-                        ('▶', paint(ink))
+                    let (ch, st) = if let Some((ink, heading)) = self.heads[i] {
+                        let ch = match heading {
+                            Heading::Right => '▶',
+                            Heading::Up => '▲',
+                        };
+                        (ch, paint(ink))
                     } else if let Some((ch, ink)) = self.over[i] {
                         (ch, paint(ink))
                     } else {
@@ -376,30 +496,32 @@ pub fn render(
     at: Paint,
     selected: Option<&str>,
 ) {
-    if cards.layout.cards.is_empty() || area.height == 0 {
+    if cards.drawing.boxes().next().is_none() || area.height == 0 {
         return;
     }
-    let lay = &cards.layout;
     let (scroll, palette) = (at.scroll, at.palette);
     let (dx, dy) = (
-        lay.col_x.get(scroll.column).copied().unwrap_or(0),
+        cards.col_x.get(scroll.column).copied().unwrap_or(0),
         scroll.row,
     );
     let mut canvas = Canvas::new(area.width, area.height, dx, dy);
-    for r in &lay.routes {
-        canvas.path(r.edge, &r.polyline, r.colour);
-        canvas.head(r.head.0, r.head.1, r.colour);
+    for r in cards.drawing.routes() {
+        let colour = cards.colours.get(r.edge.index()).copied().flatten();
+        canvas.path(r.edge.index(), r.points, colour);
+        if let Some(&(x, y)) = r.points.last() {
+            canvas.head(x, y, colour, r.heading);
+        }
     }
     if palette.crossing() == CrossingStyle::Bridge {
-        canvas.bridge(&cards.graph, &cards.layout.routes);
+        canvas.bridge(&cards.graph, &cards.colours);
     }
     frame.render_widget(Paragraph::new(canvas.lines(palette)), area);
 
     let selected_node = selected
         .and_then(|s| nfctl_core::model::VertexName::new(s).ok())
         .and_then(|n| cards.graph.node_of(&n));
-    for c in &lay.cards {
-        let (x, y) = (c.x - dx, c.y - dy);
+    for b in cards.drawing.boxes() {
+        let (x, y) = (b.rect.x - dx, b.rect.y - dy);
         if x < 0 || y < 0 {
             continue;
         }
@@ -407,31 +529,30 @@ pub fn render(
             x: area.x + u16::try_from(x).unwrap_or(u16::MAX),
             y: area.y + u16::try_from(y).unwrap_or(u16::MAX),
             width: cards.card_w,
-            height: c.h,
+            height: u16::try_from(b.rect.h).unwrap_or(0),
         };
         if rect.right() > area.right() || rect.bottom() > area.bottom() {
             continue;
         }
-        let node = &cards.graph.nodes[c.node.0 as usize];
-        let badges = lay
-            .badges
-            .get(&c.node)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
+        let Some(node) = cards.graph.nodes.get(b.node.index()) else {
+            continue;
+        };
+        let id = NodeId(u32::try_from(b.node.index()).unwrap_or(u32::MAX));
+        let badges = cards.badges.get(&id).map(Vec::as_slice).unwrap_or_default();
         card(
             frame,
             rect,
             node,
             &numbers(view, node),
             badges,
-            selected_node == Some(c.node),
+            selected_node == Some(id),
             at,
         );
     }
 
     // Overflow markers.
     let hidden_left = scroll.column;
-    let hidden_right = lay
+    let hidden_right = cards
         .col_x
         .len()
         .saturating_sub(cards.last_visible(scroll.column, area.width) + 1);
@@ -520,7 +641,7 @@ fn card(
     area: Rect,
     node: &ViewNode,
     (rate, pending): &(Option<f64>, Option<i64>),
-    badges: &[layout::Badge],
+    badges: &[Badge],
     selected: bool,
     at: Paint,
 ) {
@@ -557,7 +678,7 @@ fn card(
     // Tags wrap onto as many rows as they take, and the card was made tall
     // enough for them; scrolling them was worse to read than a second row.
     let labels: Vec<String> = badges.iter().map(|b| b.label.clone()).collect();
-    for row in layout::badge_rows(&labels, usize::from(inner.width)) {
+    for row in badge_rows(&labels, usize::from(inner.width)) {
         let mut tags: Vec<Span<'static>> = Vec::new();
         for i in row {
             if !tags.is_empty() {

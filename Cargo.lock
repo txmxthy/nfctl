@@ -1969,6 +1969,7 @@ dependencies = [
  "insta",
  "nfctl-core",
  "nfctl-graph",
+ "orthodag",
  "ratatui",
  "tokio",
  "tracing",

@@ -310,22 +310,24 @@ async fn detail_bridges_true_crossings() {
     );
     assert_eq!(bridged, plain);
     let crossed = frame(&topology_panel(topology).await.with_palette(cross), 120, 40);
-    // The horizontal is broken beside the crossing, so the vertical reads as
-    // passing over it. Only one side, where the cell on the other is the
-    // edge's own end and there is nothing to break.
-    assert!(plain.contains('╶') || plain.contains('╴'), "{plain}");
+    // Nothing crosses here: `p -> sink` drops into the join bus under the fan
+    // rather than passing through it. The one junction belongs to `a`'s own
+    // fan, which really is one line, so it stays a junction in both styles
+    // and no horizontal is broken.
+    assert!(!plain.contains('╶') && !plain.contains('╴'), "{plain}");
     assert_eq!(crossed.matches('┼').count(), 1);
-    assert_eq!(bridged.matches('┼').count(), 0);
+    assert_eq!(bridged.matches('┼').count(), 1);
     insta::assert_snapshot!(bridged);
 
-    // The routing fixture's one crossing sits where the horizontal turns:
-    // only the plain side is cut, the corner stays.
+    // The routing fixture's crossing is the back edge coming up out of its
+    // lane through the run to `sink-b`. A plain horizontal sits either side
+    // of it, so both are cut and the vertical reads as passing over.
     let mut panel = topology_panel(routing_topology())
         .await
         .with_palette(bridge);
     panel.update(&AppEvent::Key(crossterm_key('x')));
     let expanded = frame(&panel, 120, 40);
-    assert!(expanded.contains("─╴│┘"), "{expanded}");
+    assert!(expanded.contains("╴│╶"), "{expanded}");
     panel = topology_panel(routing_topology()).await.with_palette(cross);
     panel.update(&AppEvent::Key(crossterm_key('x')));
     assert_eq!(frame(&panel, 120, 40).matches('┼').count(), 1);
@@ -393,7 +395,10 @@ async fn edge_colours_follow_tag_combinations() {
         buf.content()
             .iter()
             // Arrowheads only; the bold `N more ▶` marker is not an edge.
-            .filter(|c| c.symbol() == "▶" && !c.modifier.contains(ratatui::style::Modifier::BOLD))
+            .filter(|c| {
+                (c.symbol() == "▶" || c.symbol() == "▲")
+                    && !c.modifier.contains(ratatui::style::Modifier::BOLD)
+            })
             .map(|c| format!("{:?}", c.fg))
             .collect()
     };

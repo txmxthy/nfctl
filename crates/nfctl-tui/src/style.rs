@@ -111,10 +111,10 @@ impl Palette {
 
     /// Untagged edges are dim; tagged edges take their slot's hue.
     #[must_use]
-    pub fn edge(self, c: Option<nfctl_graph::layout::EdgeColour>) -> Style {
+    pub fn edge(self, c: Option<orthodag::Colour>) -> Style {
         match c {
             Some(c) if self.colour => {
-                Style::default().fg(Self::HUES[usize::from(c.0) % Self::HUES.len()])
+                Style::default().fg(Self::HUES[usize::from(c.slot()) % Self::HUES.len()])
             }
             Some(_) => Style::default().add_modifier(Modifier::BOLD),
             None => dim(),
