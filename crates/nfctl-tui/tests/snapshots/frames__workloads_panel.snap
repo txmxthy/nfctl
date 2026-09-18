@@ -1,5 +1,6 @@
 ---
 source: crates/nfctl-tui/tests/frames.rs
+assertion_line: 53
 expression: "frame(&panel, 100, 12)"
 ---
 "┌ workloads (all namespaces) ──────────────────────────────────────────────────────────────────────┐"
@@ -11,6 +12,6 @@ expression: "frame(&panel, 100, 12)"
 "│             │default    Pipeline    scaling     Running  3         Running         │             │"
 "│             │default    Pipeline    sharded     Running  8         Running         │             │"
 "│             │default    MonoVertex  mono        Running  1         Running         │             │"
+"│             │default    MonoVertex  enrich      Running  1         Running         │             │"
 "│             └──────────────────────────────────────────────────────────────────────┘             │"
-"│                                                                                                  │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
