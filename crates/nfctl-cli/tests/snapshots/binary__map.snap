@@ -7,7 +7,7 @@ nfctl
 ├── -A/--all-namespaces  — All namespaces (already the default without -n; kept for muscle memory)  (global)
 ├── --context  CONTEXT  — kubeconfig context  (global)
 ├── --request-timeout  SECS  = 20  — Per-request timeout in seconds  (global)
-├── -o/--output  OUTPUT [table|wide|json|yaml]  = table  — Output format  (global)
+├── -o/--output  OUTPUT [table|wide|json|yaml]  = table  — Output format; streaming JSON is NDJSON (one object per line)  (global)
 ├── --daemon-url  URL  — Talk to the pipeline daemon at this URL instead of port-forwarding. HTTPS certificates are checked against the platform trust store  (global)
 ├── --no-color  — Disable colour (also honours the `NO_COLOR` environment variable)  (global)
 ├── --timings  — Print how long each step took, to stderr. `NFCTL_LOG` picks the targets and level when more than the timings are wanted. The TUI writes them to a file instead and names it on the way out  (global)

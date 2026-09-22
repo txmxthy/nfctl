@@ -166,6 +166,22 @@ pub fn serialised<T: Serialize>(value: &T, fmt: OutputFormat) -> Result<String> 
     Ok(s)
 }
 
+/// One value in a machine-readable stream: compact JSON for NDJSON, or one
+/// explicit YAML document. Serialization failures remain valid stream values.
+pub fn stream_item<T: Serialize>(value: &T, fmt: OutputFormat) -> String {
+    match fmt {
+        OutputFormat::Json => serde_json::to_string(value)
+            .unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }).to_string()),
+        OutputFormat::Yaml => match serde_yaml_ng::to_string(value) {
+            Ok(value) => format!("---\n{}", value.trim_end()),
+            Err(e) => format!("---\nerror: {:?}", e.to_string()),
+        },
+        OutputFormat::Table | OutputFormat::Wide => {
+            unreachable!("stream_item() is only called for json/yaml")
+        }
+    }
+}
+
 fn opt_i64(v: Option<i64>) -> String {
     v.map_or_else(|| "-".to_owned(), |n| n.to_string())
 }

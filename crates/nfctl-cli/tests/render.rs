@@ -86,12 +86,36 @@ async fn logs_snapshot_and_follow() {
             &pod.name,
             &ctr.try_into().unwrap(),
             LogScript {
+                lines: vec![line.clone()],
+                hang: false,
+            },
+        );
+        c.script(
+            &pod.name,
+            &ctr.try_into().unwrap(),
+            LogScript {
+                lines: vec![line.clone()],
+                hang: true,
+            },
+        );
+        c.script(
+            &pod.name,
+            &ctr.try_into().unwrap(),
+            LogScript {
                 lines: vec![line],
                 hang: true,
             },
         );
     }
     let ctx = ctx_with(c);
+    let json = out_ctx(
+        &Cli::parse_from(["nfctl", "logs", "simple-pipeline", "-o", "json"]),
+        &ctx,
+    )
+    .await;
+    let parsed: Vec<nfctl_core::model::TaggedLine> = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.len(), 2);
+
     let cli = Cli::parse_from(["nfctl", "logs", "simple-pipeline", "--timestamps"]);
     insta::assert_snapshot!(
         "logs_snapshot",
@@ -107,6 +131,26 @@ async fn logs_snapshot_and_follow() {
         .unwrap()
         .unwrap();
     assert_eq!(first, "simple-pipeline-cat-0-abcd/udf hello from udf");
+    drop(lines);
+
+    let cli = Cli::parse_from([
+        "nfctl",
+        "logs",
+        "simple-pipeline",
+        "-f",
+        "-c",
+        "udf",
+        "-o",
+        "json",
+    ]);
+    let Output::Lines(mut lines) = run(&cli, &ctx).await.unwrap() else {
+        panic!("expected a stream")
+    };
+    let first = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next())
+        .await
+        .unwrap()
+        .unwrap();
+    serde_json::from_str::<nfctl_core::model::TaggedLine>(&first).unwrap();
 }
 
 #[tokio::test]
@@ -204,6 +248,41 @@ async fn status_with_daemon_and_without() {
 }
 
 #[tokio::test]
+async fn continuous_top_is_ndjson_and_noninteractive_tables_do_not_clear() {
+    let live = ctx_with_daemon(FakeCluster::default(), live_daemon());
+    let cli = Cli::parse_from([
+        "nfctl",
+        "top",
+        "simple-pipeline",
+        "--interval",
+        "1",
+        "-o",
+        "json",
+    ]);
+    let Output::Lines(mut lines) = run(&cli, &live).await.unwrap() else {
+        panic!("expected a stream")
+    };
+    let json = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!json.contains('\u{1b}'), "{json:?}");
+    serde_json::from_str::<serde_json::Value>(&json).unwrap();
+
+    let mut noninteractive = live;
+    noninteractive.terminal_width = None;
+    let cli = Cli::parse_from(["nfctl", "top", "simple-pipeline", "--interval", "1"]);
+    let Output::Lines(mut lines) = run(&cli, &noninteractive).await.unwrap() else {
+        panic!("expected a stream")
+    };
+    let table = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!table.contains('\u{1b}'), "{table:?}");
+}
+
+#[tokio::test]
 async fn isb_commands() {
     insta::assert_snapshot!("isb_ls", out(&["isb", "ls"]).await);
     insta::assert_snapshot!("isb_inspect", out(&["isb", "inspect", "default"]).await);
@@ -275,6 +354,39 @@ async fn lifecycle_commands_against_fake() {
         "demo/simple-pipeline/cat: replicas=3\n"
     );
     assert_eq!(c.scale_calls().len(), 1);
+
+    for args in [
+        &[
+            "nfctl",
+            "resume",
+            "simple-pipeline",
+            "--strategy",
+            "slow",
+            "-o",
+            "json",
+        ][..],
+        &[
+            "nfctl",
+            "wait",
+            "simple-pipeline",
+            "--phase",
+            "running",
+            "-o",
+            "json",
+        ],
+        &[
+            "nfctl",
+            "scale",
+            "simple-pipeline",
+            "cat",
+            "3",
+            "-o",
+            "json",
+        ],
+    ] {
+        let json = run_s(args).await;
+        serde_json::from_str::<serde_json::Value>(&json).unwrap();
+    }
     let err = run(
         &Cli::parse_from([
             "nfctl",
