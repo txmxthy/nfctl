@@ -155,6 +155,10 @@ Hexagonal. A pure domain crate with two ports (cluster, daemon), thin adapters f
 kube-rs and the daemon's JSON API, and a CLI on top. See
 [docs/architecture.md](docs/architecture.md) and the ADRs in [docs/adr](docs/adr).
 
+Operators should review the [RBAC and transport boundary](docs/operator-security.md).
+Security vulnerabilities should be reported through the private process in
+[SECURITY.md](SECURITY.md), not a public issue.
+
 ## Development
 
 ```
