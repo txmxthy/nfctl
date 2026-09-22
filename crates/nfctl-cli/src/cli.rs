@@ -47,7 +47,8 @@ pub struct Globals {
     #[arg(short, long, global = true, default_value = "table", value_enum)]
     pub output: OutputFormat,
 
-    /// Talk to the pipeline daemon at this URL instead of port-forwarding
+    /// Talk to the pipeline daemon at this URL instead of port-forwarding.
+    /// HTTPS certificates are checked against the platform trust store.
     #[arg(long, global = true, env = "NFCTL_DAEMON_URL", value_name = "URL")]
     pub daemon_url: Option<String>,
 

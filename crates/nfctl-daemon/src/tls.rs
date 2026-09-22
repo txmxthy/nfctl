@@ -4,9 +4,10 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
+use rustls_platform_verifier::BuilderVerifierExt;
 
 /// Accepts any certificate. The daemon mints a self-signed certificate on every
-/// start, so there is nothing to pin; encryption is still negotiated.
+/// start, so the authenticated Kubernetes port-forward is the trust boundary.
 #[derive(Debug)]
 struct NoVerify(Arc<CryptoProvider>);
 
@@ -45,9 +46,9 @@ impl ServerCertVerifier for NoVerify {
     }
 }
 
-/// TLS config: no certificate verification, HTTP/1.1 only (the daemon multiplexes
-/// gRPC on the same port and its own REST client speaks h1).
-pub(crate) fn insecure_client_config() -> Arc<rustls::ClientConfig> {
+/// TLS config for an authenticated Kubernetes port-forward. Certificate
+/// verification is bypassed only inside that transport.
+pub(crate) fn port_forward_client_config() -> Arc<rustls::ClientConfig> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let builder = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
         .with_safe_default_protocol_versions();
@@ -66,4 +67,30 @@ pub(crate) fn insecure_client_config() -> Arc<rustls::ClientConfig> {
     };
     cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
     Arc::new(cfg)
+}
+
+/// TLS config for direct HTTPS, using the operating system's trust decisions.
+pub(crate) fn direct_client_config() -> Result<Arc<rustls::ClientConfig>, rustls::Error> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut cfg = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()?
+        .with_platform_verifier()?
+        .with_no_client_auth();
+    cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(Arc::new(cfg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn certificate_bypass_is_only_installed_for_port_forwarding() {
+        let direct = format!("{:?}", direct_client_config().unwrap());
+        let forwarded = format!("{:?}", port_forward_client_config());
+
+        assert!(!direct.contains("NoVerify"), "{direct}");
+        assert!(direct.contains("Verifier"), "{direct}");
+        assert!(forwarded.contains("NoVerify"), "{forwarded}");
+    }
 }

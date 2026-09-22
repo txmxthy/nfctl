@@ -170,8 +170,6 @@ impl Dialer {
 
     #[tracing::instrument(level = "info", skip_all)]
     async fn dial(self) -> Result<TokioIo<Forwarded>, DialError> {
-        let server_name =
-            ServerName::try_from("localhost").map_err(|e| DialError::BadUrl(e.to_string()))?;
         match self {
             Dialer::PodForward {
                 pods,
@@ -179,6 +177,8 @@ impl Dialer {
                 tls,
                 cached_pod,
             } => {
+                let server_name = ServerName::try_from("localhost")
+                    .map_err(|e| DialError::BadUrl(e.to_string()))?;
                 let name = {
                     let span = tracing::info_span!("resolve daemon pod");
                     Self::resolve_pod(&pods, &selector, &cached_pod)
@@ -217,6 +217,8 @@ impl Dialer {
                 }
             }
             Dialer::Direct { host, port, tls } => {
+                let server_name = ServerName::try_from(host.clone())
+                    .map_err(|e| DialError::BadUrl(e.to_string()))?;
                 let tcp = TcpStream::connect((host.as_str(), port))
                     .await
                     .map_err(DialError::Io)?;
