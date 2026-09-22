@@ -253,6 +253,7 @@ const MAX_OPEN_FAILURES: u32 = 5;
 impl TailTask {
     async fn run(mut self) -> Key {
         let mut last_ts: Option<Timestamp> = None;
+        let mut boundary = HashMap::<String, usize>::new();
         let mut failures = 0u32;
         loop {
             let lo = LogOptions {
@@ -278,15 +279,36 @@ impl TailTask {
                 }
                 Ok(mut stream) => {
                     failures = 0;
+                    let replay_at = last_ts;
+                    let mut replay = boundary.clone();
                     while let Some(item) = stream.next().await {
                         let Ok(line) = item else { break };
-                        // `since` is inclusive on the server: skip what we already sent.
-                        if let (Some(ts), Some(last)) = (line.at, last_ts)
-                            && ts <= last
+                        // `since` is inclusive: skip matching entries from the
+                        // last timestamp, but keep new entries at that instant.
+                        if line.at == replay_at
+                            && let Some(count) = replay.get_mut(&line.text)
+                            && *count > 0
                         {
+                            *count -= 1;
                             continue;
                         }
-                        last_ts = line.at.or(last_ts);
+                        if let Some(at) = line.at {
+                            match last_ts {
+                                Some(last) if at > last => {
+                                    last_ts = Some(at);
+                                    boundary.clear();
+                                    boundary.insert(line.text.clone(), 1);
+                                }
+                                Some(last) if at == last => {
+                                    *boundary.entry(line.text.clone()).or_default() += 1;
+                                }
+                                None => {
+                                    last_ts = Some(at);
+                                    boundary.insert(line.text.clone(), 1);
+                                }
+                                Some(_) => {}
+                            }
+                        }
                         if self.tx.send(self.tagged(line)).await.is_err() {
                             return self.key;
                         }
@@ -467,6 +489,68 @@ mod tests {
             calls[1].opts.tail_lines, None,
             "resume must not re-apply tail_lines"
         );
+    }
+
+    #[tokio::test]
+    async fn one_stream_preserves_distinct_lines_with_the_same_timestamp() {
+        let c = FakeCluster::default();
+        c.script(
+            &name("p-cat-0-abc"),
+            &name("numa"),
+            LogScript {
+                lines: vec![line(1, "first"), line(1, "second")],
+                hang: true,
+            },
+        );
+        c.emit(&PodEvent::Applied(sample_pod("p-cat-0-abc", false)));
+
+        let (mut s, _h) = start(&c, TailOptions::default()).await;
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa first");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa second");
+    }
+
+    #[tokio::test]
+    async fn resume_dedupes_only_matching_boundary_entries() {
+        let c = FakeCluster::default();
+        let pod: PodName = name("p-cat-0-abc");
+        let ctr: ContainerName = name("numa");
+        c.script(
+            &pod,
+            &ctr,
+            LogScript {
+                lines: vec![
+                    line(1, "before"),
+                    line(2, "boundary-a"),
+                    line(2, "boundary-b"),
+                ],
+                hang: false,
+            },
+        );
+        c.script(
+            &pod,
+            &ctr,
+            LogScript {
+                lines: vec![
+                    line(2, "boundary-a"),
+                    line(2, "boundary-b"),
+                    line(2, "new-at-boundary"),
+                    line(3, "after"),
+                ],
+                hang: true,
+            },
+        );
+        c.emit(&PodEvent::Applied(sample_pod("p-cat-0-abc", false)));
+        let opts = TailOptions {
+            resume_delay: Duration::from_millis(10),
+            ..Default::default()
+        };
+
+        let (mut s, _h) = start(&c, opts).await;
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa before");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa boundary-a");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa boundary-b");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa new-at-boundary");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa after");
     }
 
     #[tokio::test]
