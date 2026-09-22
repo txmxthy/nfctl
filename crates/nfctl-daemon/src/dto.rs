@@ -242,13 +242,15 @@ fn windows_f64(m: &HashMap<String, Option<f64>>) -> Windows<f64> {
 /// send from/to, so the caller supplies them from the topology when it can.
 pub(crate) fn buffer_from(
     d: &BufferInfoDto,
-    from: VertexName,
+    mut sources: Vec<VertexName>,
     to: VertexName,
 ) -> Result<BufferInfo, Malformed> {
+    sources.sort();
+    sources.dedup();
     Ok(BufferInfo {
         name: BufferName::new(&d.buffer_name)
             .map_err(|e| Malformed(format!("buffer `{}`: {e}", d.buffer_name)))?,
-        from,
+        sources,
         to,
         pending: nonneg(d.pending_count),
         ack_pending: nonneg(d.ack_pending_count),
@@ -334,7 +336,8 @@ mod tests {
     #[test]
     fn buffers_parse_int64_strings() {
         let d: ListBuffersDto = serde_json::from_str(BUFFERS).unwrap();
-        let b = buffer_from(&d.buffers[0], v("in"), v("cat")).unwrap();
+        let b = buffer_from(&d.buffers[0], vec![v("side"), v("in"), v("side")], v("cat")).unwrap();
+        assert_eq!(b.sources, [v("in"), v("side")]);
         assert_eq!(b.pending, Some(7));
         assert_eq!(b.length, Some(30000));
         assert_eq!(b.usage_limit.map(Fraction::get), Some(0.8));

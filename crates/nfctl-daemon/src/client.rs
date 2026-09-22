@@ -226,12 +226,12 @@ impl HttpDaemonClient {
         }
     }
 
-    /// Resolve a buffer's edge from its name using the topology.
-    fn edge_for(&self, buffer: &str) -> (VertexName, VertexName) {
+    /// Resolve a buffer's incoming edges from its name using the topology.
+    fn ends_for(&self, buffer: &str) -> (Vec<VertexName>, VertexName) {
         let unknown =
             || VertexName::new("unknown").unwrap_or_else(|_| unreachable!("literal is valid"));
         let Some(t) = &self.topology else {
-            return (unknown(), unknown());
+            return (vec![unknown()], unknown());
         };
         // `<isb>-<pipeline>-<to>-<partition>`; the `to` vertex owns the buffer.
         let stem = buffer.rsplit_once('-').map_or(buffer, |(s, _)| s);
@@ -244,14 +244,18 @@ impl HttpDaemonClient {
             .cloned();
         match to {
             Some(to) => {
-                let from = t
+                let mut sources: Vec<_> = t
                     .edges()
                     .iter()
-                    .find(|e| e.to == to)
-                    .map_or_else(unknown, |e| e.from.clone());
-                (from, to)
+                    .filter(|e| e.to == to)
+                    .map(|e| e.from.clone())
+                    .collect();
+                if sources.is_empty() {
+                    sources.push(unknown());
+                }
+                (sources, to)
             }
-            None => (unknown(), unknown()),
+            None => (vec![unknown()], unknown()),
         }
     }
 }
@@ -265,8 +269,8 @@ impl DaemonPort for HttpDaemonClient {
         d.buffers
             .into_iter()
             .map(|b| {
-                let (from, to) = self.edge_for(&b.buffer_name);
-                dto::buffer_from(&b, from, to).map_err(Error::daemon)
+                let (sources, to) = self.ends_for(&b.buffer_name);
+                dto::buffer_from(&b, sources, to).map_err(Error::daemon)
             })
             .collect()
     }
@@ -281,8 +285,8 @@ impl DaemonPort for HttpDaemonClient {
             kind: "buffer",
             name: name.to_string(),
         })?;
-        let (from, to) = self.edge_for(&b.buffer_name);
-        dto::buffer_from(&b, from, to).map_err(Error::daemon)
+        let (sources, to) = self.ends_for(&b.buffer_name);
+        dto::buffer_from(&b, sources, to).map_err(Error::daemon)
     }
 
     #[tracing::instrument(level = "info", skip_all)]

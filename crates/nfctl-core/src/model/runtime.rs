@@ -51,7 +51,8 @@ impl From<Fraction> for f64 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BufferInfo {
     pub name: BufferName,
-    pub from: VertexName,
+    /// Every vertex feeding the target buffer, sorted and deduplicated.
+    pub sources: Vec<VertexName>,
     pub to: VertexName,
     pub pending: Option<i64>,
     pub ack_pending: Option<i64>,

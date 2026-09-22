@@ -156,7 +156,7 @@ fn live_daemon() -> FakeDaemon {
     FakeDaemon {
         buffers: vec![BufferInfo {
             name: BufferName::new("default-simple-pipeline-cat-0").unwrap(),
-            from: v("in"),
+            sources: vec![v("in")],
             to: v("cat"),
             pending: Some(42),
             ack_pending: Some(3),

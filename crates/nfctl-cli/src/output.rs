@@ -225,7 +225,7 @@ fn edge_table(edges: &[nfctl_core::service::EdgeView], at: Timestamp) -> String 
             },
         );
         t.row(vec![
-            format!("{} -> {}", e.from, e.to),
+            edge_label(e),
             opt_i64(e.pending()),
             opt_i64(ack),
             opt_pct(e.usage()),
@@ -238,6 +238,23 @@ fn edge_table(edges: &[nfctl_core::service::EdgeView], at: Timestamp) -> String 
         ]);
     }
     t.render()
+}
+
+fn edge_label(edge: &nfctl_core::service::EdgeView) -> String {
+    let Some(buffer) = edge.buffers.first() else {
+        return format!("{} -> {}", edge.from, edge.to);
+    };
+    let sources = buffer
+        .sources
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    if buffer.sources.len() > 1 {
+        format!("{{{sources}}} -> {}", buffer.to)
+    } else {
+        format!("{sources} -> {}", buffer.to)
+    }
 }
 
 /// The `top`/`status` screen.

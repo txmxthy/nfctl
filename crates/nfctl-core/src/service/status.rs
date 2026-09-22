@@ -26,6 +26,8 @@ pub struct VertexView {
 pub struct EdgeView {
     pub from: VertexName,
     pub to: VertexName,
+    /// Buffer partitions attached once to the first source of a shared input.
+    /// Each buffer retains the complete source set.
     pub buffers: Vec<BufferInfo>,
     pub watermark: Option<EdgeWatermark>,
 }
@@ -283,7 +285,7 @@ fn assemble(
             to: e.to.clone(),
             buffers: buffers
                 .iter()
-                .filter(|b| b.from == e.from && b.to == e.to)
+                .filter(|b| b.sources.first() == Some(&e.from) && b.to == e.to)
                 .cloned()
                 .collect(),
             watermark: watermarks
@@ -383,12 +385,15 @@ mod tests {
         sample_pipeline("ns", "p", PipelinePhase::Running).key
     }
 
+    fn v(name: &str) -> VertexName {
+        VertexName::new(name).unwrap()
+    }
+
     fn buffer(name: &str, pending: Option<i64>) -> BufferInfo {
-        let vertex = |name: &str| VertexName::new(name).unwrap();
         BufferInfo {
             name: BufferName::new(name).unwrap(),
-            from: vertex("in"),
-            to: vertex("out"),
+            sources: vec![v("in")],
+            to: v("out"),
             pending,
             ack_pending: Some(0),
             total: pending,
@@ -425,11 +430,10 @@ mod tests {
     async fn fuses_daemon_data_onto_topology() {
         let cluster =
             FakeCluster::with_pipelines(vec![sample_pipeline("ns", "p", PipelinePhase::Running)]);
-        let v = |s: &str| VertexName::new(s).unwrap();
         let daemon = FakeDaemon {
             buffers: vec![BufferInfo {
                 name: BufferName::new("default-p-cat-0").unwrap(),
-                from: v("in"),
+                sources: vec![v("in")],
                 to: v("cat"),
                 pending: Some(12),
                 ack_pending: Some(0),
@@ -471,6 +475,54 @@ mod tests {
         assert_eq!(view.edges[0].pending(), Some(12));
         assert_eq!(view.edges[1].pending(), None);
         assert_eq!(view.drained(), Some(false));
+    }
+
+    #[tokio::test]
+    async fn a_shared_fan_in_buffer_is_attached_once() {
+        let mut pipeline = sample_pipeline("ns", "p", PipelinePhase::Running);
+        let mut vertices = pipeline.spec.topology.vertices().to_vec();
+        let mut edges = pipeline.spec.topology.edges().to_vec();
+        let mut side = vertices[0].clone();
+        side.name = v("side");
+        vertices.push(side);
+        let mut side_edge = edges[0].clone();
+        side_edge.from = v("side");
+        edges.push(side_edge);
+        pipeline.spec.topology = Topology::new(vertices, edges).unwrap();
+
+        let cluster = FakeCluster::with_pipelines(vec![pipeline]);
+        let daemon = FakeDaemon {
+            buffers: vec![BufferInfo {
+                name: BufferName::new("default-p-cat-0").unwrap(),
+                sources: vec![v("in"), v("side")],
+                to: v("cat"),
+                pending: Some(12),
+                ack_pending: Some(0),
+                total: Some(12),
+                length: Some(30_000),
+                usage: Fraction::new(0.5),
+                usage_limit: Fraction::new(0.8),
+                is_full: Some(false),
+            }],
+            ..FakeDaemon::default()
+        };
+
+        let view = pipeline_view(
+            &cluster,
+            &FakeDaemons::one(daemon),
+            &key(),
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
+        let attached: Vec<_> = view
+            .edges
+            .iter()
+            .filter(|edge| !edge.buffers.is_empty())
+            .collect();
+        assert_eq!(attached.len(), 1);
+        assert_eq!(attached[0].pending(), Some(12));
+        assert_eq!(attached[0].buffers[0].sources, [v("in"), v("side")]);
     }
 
     #[tokio::test]

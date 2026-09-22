@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|e| -> Result<BufferInfo, Box<dyn std::error::Error>> {
                     Ok(BufferInfo {
                         name: BufferName::new(format!("default-{name}-{}-0", e.to))?,
-                        from: e.from.clone(),
+                        sources: vec![e.from.clone()],
                         to: e.to.clone(),
                         pending: Some(i64::from(seed(e.to.as_str()) % 100)),
                         ack_pending: Some(1),

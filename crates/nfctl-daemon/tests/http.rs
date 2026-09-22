@@ -3,7 +3,10 @@
 
 use std::time::Duration;
 
-use nfctl_core::model::{Namespace, PipelineKey, PipelineName, VertexName};
+use nfctl_core::model::{
+    Edge, Namespace, OnFull, PipelineKey, PipelineName, ScaleSpec, Topology, Vertex, VertexKind,
+    VertexName,
+};
 use nfctl_core::ports::DaemonConnector;
 use nfctl_daemon::{ClientOptions, DirectConnector};
 use wiremock::matchers::{method, path};
@@ -98,6 +101,50 @@ async fn malformed_json_is_a_decode_error() {
         .await;
     let d = connector(&server, 0).connect(&key(), None).await.unwrap();
     assert!(d.buffers().await.is_err());
+}
+
+#[tokio::test]
+async fn a_fan_in_buffer_keeps_every_source() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/pipelines/p/buffers"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"buffers":[{"bufferName":"default-p-cat-0","pendingCount":"7"}]}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let v = |name: &str| VertexName::new(name).unwrap();
+    let vertex = |name: &str, kind| Vertex {
+        name: v(name),
+        kind,
+        partitions: 1,
+        scale: ScaleSpec::default(),
+        image: None,
+    };
+    let edge = |from: &str, to: &str| Edge {
+        from: v(from),
+        to: v(to),
+        conditions: None,
+        on_full: OnFull::default(),
+    };
+    let topology = Topology::new(
+        vec![
+            vertex("a", VertexKind::Source),
+            vertex("b", VertexKind::Source),
+            vertex("cat", VertexKind::Sink),
+        ],
+        vec![edge("b", "cat"), edge("a", "cat")],
+    )
+    .unwrap();
+    let d = connector(&server, 0)
+        .connect(&key(), Some(&topology))
+        .await
+        .unwrap();
+
+    let buffers = d.buffers().await.unwrap();
+    assert_eq!(buffers[0].sources, [v("a"), v("b")]);
+    assert_eq!(buffers[0].to, v("cat"));
 }
 
 #[test]
