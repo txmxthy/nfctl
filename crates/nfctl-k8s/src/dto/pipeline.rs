@@ -143,10 +143,13 @@ impl TryFrom<VertexDto> for Vertex {
 
     fn try_from(d: VertexDto) -> Result<Self, String> {
         let name = VertexName::new(&d.name).map_err(|e| format!("vertex `{}`: {e}", d.name))?;
+        if d.partitions == Some(0) {
+            return Err(format!("vertex `{}` partitions must be at least 1", d.name));
+        }
         let (kind, image) = match (&d.source, &d.sink, &d.udf) {
-            (Some(_), _, _) => (VertexKind::Source, None),
-            (_, Some(_), _) => (VertexKind::Sink, None),
-            (_, _, Some(u)) => {
+            (Some(_), None, None) => (VertexKind::Source, None),
+            (None, Some(_), None) => (VertexKind::Sink, None),
+            (None, None, Some(u)) => {
                 let kind = if u.group_by.is_some() {
                     VertexKind::Reduce
                 } else {
@@ -156,7 +159,7 @@ impl TryFrom<VertexDto> for Vertex {
             }
             _ => {
                 return Err(format!(
-                    "vertex `{}` is neither source, sink nor udf",
+                    "vertex `{}` must set exactly one of source, sink or udf",
                     d.name
                 ));
             }
@@ -164,7 +167,7 @@ impl TryFrom<VertexDto> for Vertex {
         // Sources are always single-partition; Numaflow ignores the field for them.
         let partitions = match kind {
             VertexKind::Source => 1,
-            _ => d.partitions.filter(|p| *p >= 1).unwrap_or(1),
+            _ => d.partitions.unwrap_or(1),
         };
         let scale = d
             .scale
@@ -190,17 +193,26 @@ impl TryFrom<EdgeDto> for Edge {
     fn try_from(d: EdgeDto) -> Result<Self, String> {
         let from = VertexName::new(&d.from).map_err(|e| format!("edge from `{}`: {e}", d.from))?;
         let to = VertexName::new(&d.to).map_err(|e| format!("edge to `{}`: {e}", d.to))?;
-        let conditions = d.conditions.and_then(|c| c.tags).map(|t| TagCondition {
-            operator: match t.operator.as_deref() {
-                Some("and") => TagOperator::And,
-                Some("not") => TagOperator::Not,
-                _ => TagOperator::Or,
-            },
-            values: t.values,
-        });
+        let conditions = d
+            .conditions
+            .and_then(|c| c.tags)
+            .map(|t| {
+                let operator = match t.operator.as_deref() {
+                    None | Some("or") => TagOperator::Or,
+                    Some("and") => TagOperator::And,
+                    Some("not") => TagOperator::Not,
+                    Some(other) => return Err(format!("unknown tag operator `{other}`")),
+                };
+                Ok(TagCondition {
+                    operator,
+                    values: t.values,
+                })
+            })
+            .transpose()?;
         let on_full = match d.on_full.as_deref() {
             Some("discardLatest") => OnFull::DiscardLatest,
-            _ => OnFull::RetryUntilSuccess,
+            None | Some("retryUntilSuccess") => OnFull::RetryUntilSuccess,
+            Some(other) => return Err(format!("unknown onFull policy `{other}`")),
         };
         Ok(Edge {
             from,
@@ -211,11 +223,12 @@ impl TryFrom<EdgeDto> for Edge {
     }
 }
 
-fn lifecycle_from(lc: &LifecycleDto) -> Lifecycle {
-    Lifecycle {
+fn lifecycle_from(lc: &LifecycleDto) -> Result<Lifecycle, String> {
+    Ok(Lifecycle {
         desired: match lc.desired_phase.as_deref() {
             Some("Paused") => DesiredPhase::Paused,
-            _ => DesiredPhase::Running,
+            None | Some("Running") => DesiredPhase::Running,
+            Some(other) => return Err(format!("unknown desired phase `{other}`")),
         },
         pause_grace: Duration::from_secs(lc.pause_grace_period_seconds.unwrap_or(30)),
         deletion_grace: Duration::from_secs(
@@ -223,7 +236,7 @@ fn lifecycle_from(lc: &LifecycleDto) -> Lifecycle {
                 .or(lc.delete_grace_period_seconds)
                 .unwrap_or(30),
         ),
-    }
+    })
 }
 
 fn limits_from(l: &LimitsDto) -> Limits {
@@ -305,6 +318,17 @@ pub fn into_pipeline(o: PipelineObject) -> Result<Pipeline, Error> {
     let pause_started = annotations
         .get(labels::PAUSE_TIMESTAMP)
         .and_then(|s| Timestamp::parse_rfc3339(s).ok());
+    let resume_strategy = match annotations.get(labels::RESUME_STRATEGY).map(String::as_str) {
+        None => None,
+        Some("slow") => Some(ResumeStrategy::Slow),
+        Some("fast") => Some(ResumeStrategy::Fast),
+        Some(other) => {
+            return Err(invalid(
+                &raw_name,
+                format!("unknown resume strategy `{other}`"),
+            ));
+        }
+    };
     let meta = ObjectMeta {
         generation: o.metadata.generation,
         created: o
@@ -313,11 +337,7 @@ pub fn into_pipeline(o: PipelineObject) -> Result<Pipeline, Error> {
             .as_ref()
             .and_then(super::to_timestamp),
         instance: annotations.get(labels::INSTANCE).cloned(),
-        resume_strategy: match annotations.get(labels::RESUME_STRATEGY).map(String::as_str) {
-            Some("slow") => Some(ResumeStrategy::Slow),
-            Some("fast") => Some(ResumeStrategy::Fast),
-            _ => None,
-        },
+        resume_strategy,
     };
 
     Ok(Pipeline {
@@ -325,7 +345,7 @@ pub fn into_pipeline(o: PipelineObject) -> Result<Pipeline, Error> {
         meta,
         spec: PipelineSpec {
             isb,
-            lifecycle: lifecycle_from(&o.spec.lifecycle),
+            lifecycle: lifecycle_from(&o.spec.lifecycle).map_err(|e| invalid(&raw_name, e))?,
             limits: limits_from(&o.spec.limits),
             topology,
         },
@@ -336,6 +356,17 @@ pub fn into_pipeline(o: PipelineObject) -> Result<Pipeline, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_invalid(value: serde_json::Value, expected_reason: &str) {
+        let err = into_pipeline(serde_json::from_value(value).unwrap()).unwrap_err();
+        match err {
+            Error::Invalid { reason, .. } => assert!(
+                reason.contains(expected_reason),
+                "expected `{expected_reason}` in `{reason}`"
+            ),
+            other => panic!("expected invalid pipeline, got {other}"),
+        }
+    }
 
     /// Shaped like Numaflow's `1-simple-pipeline` example after the operator has
     /// defaulted and reconciled it. Synthetic values throughout.
@@ -409,5 +440,62 @@ mod tests {
         v["spec"]["edges"][0]["to"] = "ghost".into();
         let err = into_pipeline(serde_json::from_value::<PipelineObject>(v).unwrap()).unwrap_err();
         assert!(matches!(err, Error::Invalid { .. }), "{err}");
+    }
+
+    #[test]
+    fn rejects_vertices_with_multiple_kind_markers() {
+        let vertices = [
+            serde_json::json!({"name": "in", "source": {}, "sink": {}}),
+            serde_json::json!({"name": "in", "source": {}, "udf": {}}),
+            serde_json::json!({"name": "in", "sink": {}, "udf": {}}),
+            serde_json::json!({"name": "in", "source": {}, "sink": {}, "udf": {}}),
+        ];
+
+        for vertex in vertices {
+            let mut value: serde_json::Value = serde_json::from_str(SIMPLE).unwrap();
+            value["spec"]["vertices"][0] = vertex;
+            assert_invalid(value, "exactly one of source, sink or udf");
+        }
+    }
+
+    #[test]
+    fn rejects_zero_partitions() {
+        for vertex_index in [0, 1] {
+            let mut value: serde_json::Value = serde_json::from_str(SIMPLE).unwrap();
+            value["spec"]["vertices"][vertex_index]["partitions"] = 0.into();
+            assert_invalid(value, "partitions must be at least 1");
+        }
+    }
+
+    #[test]
+    fn rejects_an_unknown_tag_operator() {
+        let mut value: serde_json::Value = serde_json::from_str(SIMPLE).unwrap();
+        value["spec"]["edges"][1]["conditions"]["tags"]["operator"] = "xor".into();
+
+        assert_invalid(value, "unknown tag operator `xor`");
+    }
+
+    #[test]
+    fn rejects_an_unknown_on_full_policy() {
+        let mut value: serde_json::Value = serde_json::from_str(SIMPLE).unwrap();
+        value["spec"]["edges"][0]["onFull"] = "dropOldest".into();
+
+        assert_invalid(value, "unknown onFull policy `dropOldest`");
+    }
+
+    #[test]
+    fn rejects_an_unknown_desired_phase() {
+        let mut value: serde_json::Value = serde_json::from_str(SIMPLE).unwrap();
+        value["spec"]["lifecycle"]["desiredPhase"] = "Hibernating".into();
+
+        assert_invalid(value, "unknown desired phase `Hibernating`");
+    }
+
+    #[test]
+    fn rejects_an_unknown_resume_strategy() {
+        let mut value: serde_json::Value = serde_json::from_str(SIMPLE).unwrap();
+        value["metadata"]["annotations"][labels::RESUME_STRATEGY] = "instant".into();
+
+        assert_invalid(value, "unknown resume strategy `instant`");
     }
 }
