@@ -74,7 +74,7 @@ pub fn check(live: Option<&Pipeline>, new: &Pipeline, backlog: Option<i64>) -> A
             match backlog {
                 Some(n) if n > 0 => format!("; {n} messages pending now"),
                 Some(_) => "; buffers are empty now".to_owned(),
-                None => "; backlog unknown (daemon unreachable)".to_owned(),
+                None => "; backlog unknown".to_owned(),
             }
         );
         r.warnings.push(msg);

@@ -10,9 +10,9 @@ use nfctl_core::fake::{
     FakeCluster, FakeDaemon, FakeDaemons, LogScript, sample_monovertex, sample_pipeline, sample_pod,
 };
 use nfctl_core::model::{
-    BufferInfo, BufferName, Fraction, Health, IsbName, IsbPhase, IsbService, LogLine,
-    MonoVertexPhase, Namespace, PipelineHealth, PipelinePhase, PodEvent, Timestamp, VertexMetrics,
-    VertexName, Windows,
+    BufferInfo, BufferName, Edge, Fraction, Health, IsbName, IsbPhase, IsbService, LogLine,
+    MonoVertexPhase, Namespace, OnFull, PipelineHealth, PipelinePhase, PodEvent, Timestamp,
+    Topology, VertexKind, VertexMetrics, VertexName, Windows,
 };
 use nfctl_core::ports::ClusterPort;
 use nfctl_core::service::PipelineService;
@@ -353,6 +353,54 @@ async fn apply_check_blocks_and_warns() {
         "demo/simple-pipeline: no topology changes\n"
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn apply_check_keeps_partial_backlog_unknown_in_human_and_json_output() {
+    let c = FakeCluster::default();
+    let mut daemon = live_daemon();
+    let mut unknown = daemon.buffers[0].clone();
+    unknown.name = BufferName::new("default-simple-pipeline-cat-1").unwrap();
+    unknown.pending = None;
+    daemon.buffers.push(unknown);
+    let ctx = ctx_with_daemon(c.clone(), daemon);
+
+    let mut changed = sample_pipeline("demo", "simple-pipeline", PipelinePhase::Running);
+    let mut vertices = changed.spec.topology.vertices().to_vec();
+    let mut edges = changed.spec.topology.edges().to_vec();
+    let mut extra = vertices[1].clone();
+    extra.name = VertexName::new("extra").unwrap();
+    extra.kind = VertexKind::Map;
+    vertices.push(extra);
+    edges.push(Edge {
+        from: VertexName::new("cat").unwrap(),
+        to: VertexName::new("extra").unwrap(),
+        conditions: None,
+        on_full: OnFull::default(),
+    });
+    changed.spec.topology = Topology::new(vertices, edges).unwrap();
+    c.register_manifest("topology-change", changed);
+
+    let file =
+        std::env::temp_dir().join(format!("nfctl-unknown-backlog-{}.yaml", std::process::id()));
+    std::fs::write(&file, "topology-change").unwrap();
+    let file = file.to_string_lossy();
+    let human = out_ctx(
+        &Cli::parse_from(["nfctl", "apply", "-f", &file, "--check"]),
+        &ctx,
+    )
+    .await;
+    let json = out_ctx(
+        &Cli::parse_from(["nfctl", "apply", "-f", &file, "--check", "-o", "json"]),
+        &ctx,
+    )
+    .await;
+
+    assert!(human.contains("backlog unknown"), "{human}");
+    assert!(json.contains("backlog unknown"), "{json}");
+    assert!(!human.contains("buffers are empty"), "{human}");
+    assert!(!json.contains("buffers are empty"), "{json}");
+    std::fs::remove_file(file.as_ref()).ok();
 }
 
 #[tokio::test]

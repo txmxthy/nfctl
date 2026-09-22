@@ -31,13 +31,17 @@ pub struct EdgeView {
 }
 
 impl EdgeView {
-    /// Sum of pending across the edge's partitions; `None` if every partition is unknown.
+    /// Sum pending messages across the edge's partitions.
+    ///
+    /// Returns `None` when there are no observations, or any partition is unknown,
+    /// invalid, or makes the total overflow.
     #[must_use]
     pub fn pending(&self) -> Option<i64> {
-        self.buffers
-            .iter()
-            .filter_map(|b| b.pending)
-            .reduce(|a, b| a + b)
+        if self.buffers.is_empty() {
+            None
+        } else {
+            total_pending(&self.buffers)
+        }
     }
 
     /// Highest buffer usage across partitions.
@@ -53,6 +57,18 @@ impl EdgeView {
     pub fn is_full(&self) -> bool {
         self.buffers.iter().any(|b| b.is_full == Some(true))
     }
+}
+
+/// Sum known, non-negative pending counts without inventing a partial total.
+#[must_use]
+pub fn total_pending(buffers: &[BufferInfo]) -> Option<i64> {
+    buffers.iter().try_fold(0_i64, |total, buffer| {
+        let pending = buffer.pending?;
+        if pending < 0 {
+            return None;
+        }
+        total.checked_add(pending)
+    })
 }
 
 /// How long each step of a view took. The TUI owns the terminal and so
@@ -365,6 +381,44 @@ mod tests {
 
     fn key() -> PipelineKey {
         sample_pipeline("ns", "p", PipelinePhase::Running).key
+    }
+
+    fn buffer(name: &str, pending: Option<i64>) -> BufferInfo {
+        let vertex = |name: &str| VertexName::new(name).unwrap();
+        BufferInfo {
+            name: BufferName::new(name).unwrap(),
+            from: vertex("in"),
+            to: vertex("out"),
+            pending,
+            ack_pending: Some(0),
+            total: pending,
+            length: Some(100),
+            usage: Fraction::new(0.0),
+            usage_limit: Fraction::new(0.8),
+            is_full: Some(false),
+        }
+    }
+
+    #[test]
+    fn total_pending_requires_complete_valid_counts() {
+        let cases = [
+            ("all known", vec![Some(4), Some(7)], Some(11)),
+            ("one unknown", vec![Some(4), None], None),
+            ("all unknown", vec![None, None], None),
+            ("empty", vec![], Some(0)),
+            ("overflow", vec![Some(i64::MAX), Some(1)], None),
+            ("negative", vec![Some(-1)], None),
+        ];
+
+        for (case, pending, expected) in cases {
+            let buffers = pending
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| buffer(&format!("partition-{index}"), value))
+                .collect::<Vec<_>>();
+
+            assert_eq!(total_pending(&buffers), expected, "{case}");
+        }
     }
 
     #[tokio::test]

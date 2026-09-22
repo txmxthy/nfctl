@@ -571,7 +571,7 @@ async fn run_apply(
             .buffers()
             .await
             .ok()
-            .map(|b| b.iter().filter_map(|x| x.pending).sum::<i64>()),
+            .and_then(|buffers| nfctl_core::service::total_pending(&buffers)),
         _ => None,
     };
     let report = nfctl_core::service::check(live.as_ref(), &new, backlog);
