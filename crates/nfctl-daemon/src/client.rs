@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::Bytes;
 use http::{Request, Uri};
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Empty, LengthLimitError, Limited};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use nfctl_core::model::{
@@ -26,6 +26,8 @@ pub struct ClientOptions {
     pub timeout: Duration,
     /// Extra attempts on transport failure or timeout (never on HTTP errors).
     pub retries: u8,
+    /// Maximum bytes accepted from one daemon response body.
+    pub max_response_body: usize,
     /// How long a whole-pipeline metrics answer is reused before asking
     /// again. See `METRICS_TTL`.
     pub metrics_ttl: Duration,
@@ -36,6 +38,7 @@ impl Default for ClientOptions {
         Self {
             timeout: Duration::from_secs(5),
             retries: 2,
+            max_response_body: 8 * 1024 * 1024,
             metrics_ttl: METRICS_TTL,
         }
     }
@@ -49,6 +52,8 @@ enum CallError {
     Timeout(Duration),
     #[error("daemon returned HTTP {status}: {message}")]
     Http { status: u16, message: String },
+    #[error("daemon response body exceeds {limit} bytes")]
+    BodyTooLarge { limit: usize },
     #[error("{0}")]
     Decode(String),
 }
@@ -187,11 +192,18 @@ impl HttpDaemonClient {
                 .await
                 .map_err(|e| CallError::Transport(e.to_string()))?;
             let status = resp.status();
-            let body = resp
-                .into_body()
+            let body = Limited::new(resp.into_body(), self.opts.max_response_body)
                 .collect()
                 .await
-                .map_err(|e| CallError::Transport(e.to_string()))?
+                .map_err(|e| {
+                    if e.downcast_ref::<LengthLimitError>().is_some() {
+                        CallError::BodyTooLarge {
+                            limit: self.opts.max_response_body,
+                        }
+                    } else {
+                        CallError::Transport(e.to_string())
+                    }
+                })?
                 .to_bytes();
             if !status.is_success() {
                 let message = serde_json::from_slice::<dto::GatewayErrorDto>(&body).map_or_else(
