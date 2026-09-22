@@ -154,6 +154,27 @@ async fn logs_snapshot_and_follow() {
 }
 
 #[tokio::test]
+async fn logs_reject_a_missing_named_container() {
+    let c = FakeCluster::default();
+    c.emit(&PodEvent::Applied(sample_pod(
+        "simple-pipeline-cat-0-abcd",
+        true,
+    )));
+    let ctx = ctx_with(c);
+    let cli = Cli::parse_from(["nfctl", "logs", "simple-pipeline", "-c", "missing"]);
+
+    let err = run(&cli, &ctx).await.err().unwrap();
+    assert!(
+        matches!(&err, nfctl_core::Error::ContainerNotFound { .. }),
+        "{err}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "container `missing` not found; available containers: numa, udf"
+    );
+}
+
+#[tokio::test]
 async fn ls_table() {
     insta::assert_snapshot!(out(&["ls"]).await);
 }
