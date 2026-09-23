@@ -1,28 +1,30 @@
 # Releasing nfctl
 
-Releases are built by cargo-dist 0.32.0. A version tag such as `v0.1.0` must
-match the `nfctl-cli` workspace version. The release workflow first calls the
-normal CI workflow, then builds `nfctl` archives for:
+Release-plz prepares releases from Conventional Commit squash titles. Changes
+to any workspace crate are included in the single `nfctl` version and
+changelog. A `fix`, `feat`, `perf` or `refactor` change opens or updates the
+release PR; a breaking `!` change receives the corresponding Cargo SemVer bump.
+CI and documentation changes alone do not cut a release.
+
+After the release PR is squash-merged, release-plz creates the matching
+`vX.Y.Z` tag. Cargo-dist 0.33.0 then runs normal CI and builds archives for:
 
 - macOS on Apple silicon (`aarch64-apple-darwin`)
 - macOS on Intel (`x86_64-apple-darwin`)
 - Linux on x86-64 (`x86_64-unknown-linux-gnu`)
 - Linux on ARM64 (`aarch64-unknown-linux-gnu`)
 
-Each archive has a SHA-256 checksum. The workflow creates a draft GitHub
-release and attaches the artifacts; it does not publish crates, Homebrew
-formulae, or the GitHub release. Artifact signing is not configured.
+Each archive has a SHA-256 checksum and a GitHub artifact attestation. The
+workflow also generates the Homebrew formula and creates a draft GitHub
+release. The workspace crates are not published to crates.io.
 
-Before tagging, confirm that the standalone-checkout CI gate passes and that
-the workspace version and `Cargo.lock` are committed. In particular, release
-builds cannot resolve dependencies through paths outside this repository.
+To release:
 
-To stage a release:
+1. Review and squash-merge the release-plz PR after its required checks pass.
+2. Inspect the resulting draft release, archives, checksums and attestations.
+3. Run the **Publish release** workflow with the release tag.
+4. Confirm the **Homebrew** workflow updates `txmxthy/homebrew-tap`.
+5. Install with `brew install txmxthy/tap/nfctl` and run `nfctl --version`.
 
-1. Run `dist plan --tag vX.Y.Z` with cargo-dist 0.32.0.
-2. Push the matching `vX.Y.Z` tag after normal CI is green.
-3. Inspect the draft release, archives, and checksums in GitHub.
-4. Publish the draft manually when it is ready for users.
-
-Pull requests run the cargo-dist planning step, but do not build or publish
-release artifacts.
+Pull requests run the cargo-dist plan but do not build or publish artifacts.
+Prereleases never update the stable Homebrew formula.

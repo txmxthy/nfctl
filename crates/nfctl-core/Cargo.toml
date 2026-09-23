@@ -8,7 +8,9 @@ license.workspace = true
 license-file.workspace = true
 readme.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
+publish.workspace = true
 
 [features]
 # In-memory adapters for tests and the CLI's own test-suite.
