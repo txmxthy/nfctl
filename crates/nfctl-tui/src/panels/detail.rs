@@ -570,20 +570,7 @@ fn section(frame: &mut Frame, area: Rect, title: &'static str, focused: bool) ->
 }
 
 fn edge_name(edge: &nfctl_core::service::EdgeView) -> String {
-    let Some(buffer) = edge.buffers.first() else {
-        return format!("{} -> {}", edge.from, edge.to);
-    };
-    let sources = buffer
-        .sources
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
-    if buffer.sources.len() > 1 {
-        format!("{{{sources}}} -> {}", buffer.to)
-    } else {
-        format!("{sources} -> {}", buffer.to)
-    }
+    format!("{} -> {}", edge.from, edge.to)
 }
 
 /// Tags and the arrow between the two names take the edge's colour, the same
@@ -630,17 +617,9 @@ fn edge_cells(v: &PipelineView, palette: Palette) -> (Vec<Vec<String>>, Vec<Vec<
                         .map_or_else(|| "-".to_owned(), |d| format!("{}s ago", d.as_secs()))
                 },
             );
-            let grouped = e
-                .buffers
-                .first()
-                .is_some_and(|buffer| buffer.sources.len() > 1);
             vec![
                 edge_name(e),
-                if grouped {
-                    String::new()
-                } else {
-                    tags(&e.from, &e.to)
-                },
+                tags(&e.from, &e.to),
                 e.pending()
                     .map_or_else(|| "-".to_owned(), |n| n.to_string()),
                 usage,
@@ -659,15 +638,7 @@ fn edge_cells(v: &PipelineView, palette: Palette) -> (Vec<Vec<String>>, Vec<Vec<
         .iter()
         .zip(&mut cells.clone())
         .map(|(e, c)| {
-            let grouped = e
-                .buffers
-                .first()
-                .is_some_and(|buffer| buffer.sources.len() > 1);
-            let ink = if grouped {
-                Style::default()
-            } else {
-                palette.edge(colour_of.get(&(&e.from, &e.to)).copied().flatten())
-            };
+            let ink = palette.edge(colour_of.get(&(&e.from, &e.to)).copied().flatten());
             let edge = Line::from(Span::styled(std::mem::take(&mut c[0]), ink));
             let tags = Line::styled(std::mem::take(&mut c[1]), ink);
             [Cell::from(edge), Cell::from(tags)]

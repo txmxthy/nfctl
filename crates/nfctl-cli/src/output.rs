@@ -257,20 +257,7 @@ fn edge_table(edges: &[nfctl_core::service::EdgeView], at: Timestamp) -> String 
 }
 
 fn edge_label(edge: &nfctl_core::service::EdgeView) -> String {
-    let Some(buffer) = edge.buffers.first() else {
-        return format!("{} -> {}", edge.from, edge.to);
-    };
-    let sources = buffer
-        .sources
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
-    if buffer.sources.len() > 1 {
-        format!("{{{sources}}} -> {}", buffer.to)
-    } else {
-        format!("{sources} -> {}", buffer.to)
-    }
+    format!("{} -> {}", edge.from, edge.to)
 }
 
 /// The `top`/`status` screen.
