@@ -100,10 +100,12 @@ port-forward; if the daemon is unreachable the CRD half still renders with a war
 ## Install
 
 ```
-cargo install --path crates/nfctl-cli
+brew install txmxthy/tap/nfctl
 ```
 
-Prebuilt binaries and a Homebrew tap are on the roadmap.
+Prebuilt archives for macOS and Linux are attached to each
+[GitHub release](https://github.com/txmxthy/nfctl/releases). To build from a
+checkout instead, run `cargo install --path crates/nfctl-cli`.
 
 Shell completion is dynamic: it completes pipeline, vertex, MonoVertex, ISB and
 namespace names from the cluster you are pointed at (or from `--fixture`), with a
@@ -169,4 +171,4 @@ just test-live   # tests that need the demo cluster
 ## Licence
 
 Apache-2.0. The box-drawing output is drawn by the orthodag crate (MIT OR
-Apache-2.0), a sibling checkout the graph crate depends on by path.
+Apache-2.0).

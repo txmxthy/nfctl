@@ -1,0 +1,21 @@
+[workspace]
+release = false
+release_always = false
+release_commits = '^(feat|fix|perf|refactor)(\([^)]*\))?!?:'
+git_only = true
+git_release_enable = false
+pr_labels = ["release"]
+
+[[package]]
+name = "nfctl-cli"
+release = true
+changelog_path = "CHANGELOG.md"
+changelog_include = [
+  "nfctl-core",
+  "nfctl-daemon",
+  "nfctl-graph",
+  "nfctl-k8s",
+  "nfctl-tui",
+]
+git_tag_name = "v{{ version }}"
+semver_check = false
