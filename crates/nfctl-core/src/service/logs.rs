@@ -127,9 +127,14 @@ pub async fn tail(
     selector: Selector,
     opts: TailOptions,
 ) -> Result<(BoxStream<'static, TaggedLine>, TailHandle)> {
+    // A named container is checked against the pods that exist now. With none
+    // (a pipeline still coming up, or paused to zero) there is nothing to check
+    // against, and following is how the caller waits for them.
     if matches!(opts.containers, ContainerSelect::Named(_)) {
         let pods = cluster.list_pods(&ns, &selector).await?;
-        validate_named_containers(&pods, &opts.containers)?;
+        if !pods.is_empty() {
+            validate_named_containers(&pods, &opts.containers)?;
+        }
     }
     let events = cluster.watch_pods(&ns, &selector).await?;
     let (tx, rx) = mpsc::channel(opts.buffer);
@@ -714,5 +719,20 @@ mod tests {
             panic!("an explicitly named container must exist");
         };
         assert!(matches!(err, Error::ContainerNotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn follow_waits_for_pods_before_judging_a_named_container() {
+        let c = FakeCluster::default();
+        let sel = Selector::vertex_pods(&name::<PipelineName>("p"), None);
+        let opts = TailOptions {
+            containers: ContainerSelect::Named(vec![name("udf")]),
+            ..TailOptions::default()
+        };
+
+        assert!(
+            tail(Arc::new(c), name("ns"), sel, opts).await.is_ok(),
+            "no pods yet is not a missing container"
+        );
     }
 }
