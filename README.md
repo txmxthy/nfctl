@@ -9,8 +9,41 @@ things in one static binary, with machine-readable output for command results an
 `--dry-run` on every mutating one. Streaming `-o json` is NDJSON: one complete
 JSON object per line.
 
-> Status: pre-alpha. Commands below work against Numaflow 1.6+. ServingPipeline is
-> not covered yet; see [docs/roadmap.md](docs/roadmap.md).
+> Status: alpha. Commands below work against Numaflow 1.6+. Interfaces may
+> change before 1.0. ServingPipeline is not covered yet; see
+> [docs/roadmap.md](docs/roadmap.md).
+
+## Install
+
+After the first alpha release:
+
+```console
+brew install txmxthy/tap/nfctl
+```
+
+Published releases include prebuilt archives for macOS and Linux. Until then,
+build from a checkout with `cargo install --path crates/nfctl-cli`.
+
+## Quick start
+
+Point your current kube context at a Numaflow cluster, then run:
+
+```console
+nfctl ls
+nfctl dag pipeline-name
+nfctl status pipeline-name
+nfctl tui
+```
+
+To explore without a cluster:
+
+```console
+git clone https://github.com/txmxthy/nfctl.git
+cd nfctl
+nfctl --fixture examples/fixtures/demo.yaml tui
+```
+
+![nfctl TUI demo](docs/demo/tui.gif)
 
 ## Commands
 
@@ -34,9 +67,10 @@ nfctl completions <shell>                 tab-completes resource names from the 
 nfctl map                                 every command and option as one tree
 ```
 
-Global flags: `-n/--namespace`, `--context`, `--request-timeout`, `-o`, `--daemon-url`
-(skip the port-forward when running in-cluster), `--fixture` (no cluster at all),
-`--no-color` (`NO_COLOR` in the environment does the same).
+Global flags: `-n/--namespace`, `--context`, `--request-timeout`, `-o`,
+`--daemon-url` (skip the automatic port-forward), `--daemon-insecure`
+(accept a self-signed daemon certificate), `--fixture` (no cluster at all),
+`--timings`, and `--no-color` (`NO_COLOR` does the same).
 
 Without `-n`, lists span every namespace and a bare name resolves to the namespace
 it lives in; the tool refuses only when the same name exists in several. `get`
@@ -97,15 +131,7 @@ cat -> out  0        10           0%     no    2s ago
 Runtime numbers come from the pipeline's daemon, reached through an automatic
 port-forward; if the daemon is unreachable the CRD half still renders with a warning.
 
-## Install
-
-```
-brew install txmxthy/tap/nfctl
-```
-
-Prebuilt archives for macOS and Linux are attached to each
-[GitHub release](https://github.com/txmxthy/nfctl/releases). To build from a
-checkout instead, run `cargo install --path crates/nfctl-cli`.
+## Shell completion
 
 Shell completion is dynamic: it completes pipeline, vertex, MonoVertex, ISB and
 namespace names from the cluster you are pointed at (or from `--fixture`), with a
@@ -140,9 +166,12 @@ stills used to review layout, so what is tested is what is shown.
 | ![sharded detail](docs/demo/tui-sharded.png) | ![dag](docs/demo/dag.png) |
 | ![status](docs/demo/status.png) | |
 
-Animated: [tui](docs/demo/tui.gif) · [ls](docs/demo/ls.gif) · [logs through a pod
-restart](docs/demo/logs.gif) · [top](docs/demo/top.gif) · [pause and resume](docs/demo/pause.gif)
-· [apply --check](docs/demo/apply.gif) · [recycle](docs/demo/recycle.gif)
+Animated fixture demos: [tui](docs/demo/tui.gif) · [ls](docs/demo/ls.gif) ·
+[dag](docs/demo/dag.gif) · [status](docs/demo/status.gif).
+
+The cluster-backed logs, top, lifecycle and apply tapes live in
+[`docs/demo`](docs/demo/demo.md) and are regenerated against a local Numaflow
+cluster.
 
 `just gallery` renders every fixture pipeline through the card view and `dag`
 into one HTML page you can draw on; see [CONTRIBUTING](CONTRIBUTING.md#looking-at-layouts).

@@ -6,6 +6,9 @@ changelog. A `fix`, `feat`, `perf` or `refactor` change opens or updates the
 release PR; a breaking `!` change receives the corresponding Cargo SemVer bump.
 CI and documentation changes alone do not cut a release.
 
+Versions below 1.0 are alpha releases. Use a SemVer prerelease suffix only when
+the release must not update the stable Homebrew formula.
+
 After the release PR is squash-merged, release-plz creates the matching
 `vX.Y.Z` tag. Cargo-dist 0.33.0 then runs normal CI and builds archives for:
 
@@ -28,3 +31,7 @@ To release:
 
 Pull requests run the cargo-dist plan but do not build or publish artifacts.
 Prereleases never update the stable Homebrew formula.
+
+The release workflows authenticate as the release GitHub App. The repository
+stores its client ID in `RELEASE_APP_CLIENT_ID` and its private key in the
+`RELEASE_APP_PRIVATE_KEY` Actions secret.

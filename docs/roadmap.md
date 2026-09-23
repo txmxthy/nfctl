@@ -23,10 +23,10 @@
 | `completions` from live resources (dynamic) | done | M11 |
 | docs + ADRs 0006–0008 | done | M12 |
 | `isb ls` namespace column, rolling `recycle` | done | M13 |
-| TUI load timings and faster detail panel | planned | M14 |
+| TUI load timings and concurrent detail-panel metrics | done | M14 |
 | layout gallery (`just gallery`) | done | — |
 | straight chains, no framed cards, short back edges | planned | M15 |
 | ServingPipeline | planned | later |
-| prebuilt binaries, Homebrew tap | planned | later |
+| prebuilt binaries, attestations and Homebrew tap | wip | release |
 
 Statuses: `done` · `wip` · `stub` (command exists, exits 4 with this pointer) · `planned`.
