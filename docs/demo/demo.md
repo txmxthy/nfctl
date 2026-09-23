@@ -8,11 +8,11 @@ The rest run against the local demo cluster.
 Everything cluster-bound runs against a local cluster only. `just demo-up` installs
 Numaflow into the current local context and applies `examples/`.
 
-```
-just demo-up      # Numaflow + ISB + four example pipelines, waits for Running
+```console
+just demo-up         # Numaflow + ISB + example workloads, waits for Running
 just record          # every tape (cluster ones need `just demo-up` first)
 just record-fixture  # only the fixture-driven tapes: no cluster needed
-just demo-down    # removes everything again
+just demo-down       # removes everything again
 ```
 
 Script, one tape per step:
@@ -26,5 +26,6 @@ Script, one tape per step:
 7. `recycle` a vertex and watch the replacement pod pick up in `logs -f`.
 8. `tui`: list → detail → vertex logs and back, then the sharded pipeline collapsed and expanded (`x`).
 
-The gifs next to the tapes are what `just record` produced last. The tapes assume a shell with `nfctl` on PATH and the local context selected
+The GIFs next to the tapes are generated outputs from `just record`. The tapes
+assume a shell with `nfctl` on `PATH` and the local context selected
 (`NFCTL_CONTEXT=<local-context>` works too).

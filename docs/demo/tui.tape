@@ -12,6 +12,8 @@ Enter
 Sleep 2s
 Screenshot docs/demo/tui-pipelines.png
 Sleep 1s
+Type "j"
+Sleep 500ms
 Enter
 Sleep 2s
 Screenshot docs/demo/tui-detail.png
@@ -26,7 +28,7 @@ Escape
 Sleep 500ms
 Escape
 Sleep 500ms
-Type "jjjj"
+Type "jjjjj"
 Sleep 500ms
 Enter
 Sleep 2s
