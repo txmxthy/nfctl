@@ -285,7 +285,7 @@ fn assemble(
             to: e.to.clone(),
             buffers: buffers
                 .iter()
-                .filter(|b| b.sources.first() == Some(&e.from) && b.to == e.to)
+                .filter(|b| b.sources.contains(&e.from) && b.to == e.to)
                 .cloned()
                 .collect(),
             watermark: watermarks
@@ -478,7 +478,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_shared_fan_in_buffer_is_attached_once() {
+    async fn a_shared_fan_in_buffer_is_attached_to_every_edge_that_feeds_it() {
         let mut pipeline = sample_pipeline("ns", "p", PipelinePhase::Running);
         let mut vertices = pipeline.spec.topology.vertices().to_vec();
         let mut edges = pipeline.spec.topology.edges().to_vec();
@@ -520,9 +520,13 @@ mod tests {
             .iter()
             .filter(|edge| !edge.buffers.is_empty())
             .collect();
-        assert_eq!(attached.len(), 1);
-        assert_eq!(attached[0].pending(), Some(12));
-        assert_eq!(attached[0].buffers[0].sources, [v("in"), v("side")]);
+        assert_eq!(attached.len(), 2, "one row per incoming edge");
+        assert!(attached.iter().all(|edge| edge.pending() == Some(12)));
+        assert!(
+            attached
+                .iter()
+                .all(|edge| edge.buffers[0].sources == [v("in"), v("side")])
+        );
     }
 
     #[tokio::test]

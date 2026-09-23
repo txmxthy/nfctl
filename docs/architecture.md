@@ -43,7 +43,7 @@ presentation.
 
 Orthodag is a separate repository and general-purpose layout crate. `nfctl-graph` and
 `nfctl-tui` cross that repository boundary through Orthodag's public Rust API; core does
-not. The current manifests resolve it as a versioned sibling path dependency.
+not. It is a registry dependency, pinned by version in each manifest.
 
 ## Ports
 

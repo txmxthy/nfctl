@@ -28,3 +28,12 @@ All notable changes to this project are documented here. Format follows
 - The `MonoVertex` panel draws the container chain (ADR 0010): one card for the unit, with the container chain inside it — a box per stage joined by arrows, and a dashed hop to the fallback sink — the replica badge in the top border and the rate and pending count in the bottom one. Width steps down a three-rung ladder (boxes and full labels, boxes and short labels, bare labels) so the card floats in the middle of the panel rather than overflowing or sitting in a corner. `MonoVertex` gained `has_fallback`, read from `spec.sink.fallback`.
 - `--fixture FILE`: run any command, including the TUI, against in-memory fakes loaded from a YAML/JSON fixture. Golden-frame tests and cluster-free recordings use the same file.
 - Demo: `just demo-up/down`, synthetic example pipelines under `examples/`, vhs tapes and recordings under `docs/demo/`.
+
+### Changed
+- `status`/`top` JSON and YAML: `buffers[].from` (one vertex) is now `buffers[].sources` (every vertex feeding that buffer). A fan-in buffer is listed on each edge that feeds it.
+- `--daemon-url https://...` verifies the server name and certificate against the platform trust store. `--daemon-insecure` accepts any certificate, for a port-forward you opened yourself.
+- `resume`, `wait`, `scale`, `apply`, `logs` and `mvtx pause|resume` honour `-o json|yaml`; `completions` and `tui` refuse them (exit 2).
+- `top --interval` no longer clears the screen when stdout is not a terminal.
+- `logs -c NAME` fails with the containers that do exist when `NAME` is on none of the matching pods; under `--follow` with no pods yet it waits.
+- Manifests with an unknown `desiredPhase`, `onFull`, tag operator, resume strategy or zero partitions are rejected (exit 3) instead of being read as a default.
+- Daemon responses over 8 MiB are refused.

@@ -2,9 +2,8 @@
 
 ## Supported versions
 
-nfctl is pre-alpha and has no tagged release. Security fixes target the current
-default branch. Once releases begin, only the latest published release and the
-default branch will receive security fixes until 1.0.
+Security fixes target the current default branch and the latest published
+release. Older releases do not receive fixes until 1.0.
 
 ## Reporting a vulnerability
 
@@ -29,9 +28,11 @@ the exact API permissions are documented in
 The default daemon connection is an API-server-authorized port-forward to a
 selected Numaflow daemon pod. The daemon creates a new self-signed certificate
 at startup, so nfctl encrypts this inner connection but does not authenticate
-that certificate. A direct `--daemon-url http://...` connection is plaintext;
-the current `https://...` direct connection also does not verify the server
-certificate. Use direct URLs only on a trusted path.
+that certificate. A direct `--daemon-url https://...` connection verifies the
+server name and certificate against the platform trust store, which a daemon's
+own self-signed certificate will not pass; `--daemon-insecure` turns that check
+off for a path you already trust, and says so on stderr. A direct
+`http://...` connection is plaintext. Use direct URLs only on a trusted path.
 
 Command output can contain manifests, resource names, health data, and pod logs.
 Treat redirected output and fixture files according to the sensitivity of the
