@@ -99,6 +99,14 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<Output> {
         Arc::new(nfctl_k8s::KubeCluster::new(conn.client.clone()));
     let daemon_opts = nfctl_daemon::ClientOptions::default();
     let daemons: Arc<dyn DaemonConnector> = match &cli.globals.daemon_url {
+        Some(url) if cli.globals.daemon_insecure => {
+            eprintln!("nfctl: --daemon-insecure: not verifying the certificate of {url}");
+            Arc::new(nfctl_daemon::DirectConnector::insecure(
+                url,
+                None,
+                daemon_opts,
+            )?)
+        }
         Some(url) => Arc::new(nfctl_daemon::DirectConnector::new(url, None, daemon_opts)?),
         None => Arc::new(nfctl_daemon::PortForwardConnector::new(
             conn.client,

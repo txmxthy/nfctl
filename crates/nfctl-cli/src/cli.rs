@@ -26,6 +26,8 @@ impl Cli {
 }
 
 #[derive(Debug, Clone, Args)]
+// Each bool is one flag, which is how clap wants them.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Globals {
     /// Namespace. Without it, lists span every namespace and a bare name resolves across them
     #[arg(short, long, global = true, env = "NFCTL_NAMESPACE", add = ArgValueCompleter::new(complete::namespaces))]
@@ -51,6 +53,11 @@ pub struct Globals {
     /// HTTPS certificates are checked against the platform trust store.
     #[arg(long, global = true, env = "NFCTL_DAEMON_URL", value_name = "URL")]
     pub daemon_url: Option<String>,
+
+    /// Accept any certificate from --daemon-url. Numaflow daemons present a
+    /// self-signed one, so this is needed for a port-forward you opened yourself
+    #[arg(long, global = true, requires = "daemon_url")]
+    pub daemon_insecure: bool,
 
     /// Disable colour (also honours the `NO_COLOR` environment variable)
     #[arg(long, global = true)]

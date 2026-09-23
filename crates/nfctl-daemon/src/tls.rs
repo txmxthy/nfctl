@@ -46,9 +46,10 @@ impl ServerCertVerifier for NoVerify {
     }
 }
 
-/// TLS config for an authenticated Kubernetes port-forward. Certificate
-/// verification is bypassed only inside that transport.
-pub(crate) fn port_forward_client_config() -> Arc<rustls::ClientConfig> {
+/// TLS config that accepts any certificate. The port-forward transport uses
+/// it because the API server has already authenticated the far end; a direct
+/// URL uses it only when the caller asks with `--daemon-insecure`.
+pub(crate) fn unverified_client_config() -> Arc<rustls::ClientConfig> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let builder = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider))
         .with_safe_default_protocol_versions();
@@ -81,16 +82,67 @@ pub(crate) fn direct_client_config() -> Result<Arc<rustls::ClientConfig>, rustls
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
+    use rustls::pki_types::PrivateKeyDer;
+    use rustls::{ClientConnection, ServerConfig, ServerConnection};
+
     use super::*;
 
-    #[test]
-    fn certificate_bypass_is_only_installed_for_port_forwarding() {
-        let direct = format!("{:?}", direct_client_config().unwrap());
-        let forwarded = format!("{:?}", port_forward_client_config());
+    /// Runs a handshake in memory against a server that presents a fresh
+    /// self-signed certificate, the way a Numaflow daemon does.
+    fn handshake_with_self_signed(cfg: Arc<rustls::ClientConfig>) -> Result<(), rustls::Error> {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
+        let key = PrivateKeyDer::Pkcs8(cert.signing_key.serialize_der().into());
+        let server_cfg =
+            ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(vec![cert.cert.der().clone()], key)
+                .unwrap();
+        let mut server = ServerConnection::new(Arc::new(server_cfg)).unwrap();
+        let mut client =
+            ClientConnection::new(cfg, ServerName::try_from("localhost").unwrap()).unwrap();
 
-        assert!(!direct.contains("NoVerify"), "{direct}");
-        assert!(direct.contains("Verifier"), "{direct}");
-        assert!(forwarded.contains("NoVerify"), "{forwarded}");
+        while client.is_handshaking() || server.is_handshaking() {
+            let mut moved = false;
+            if client.wants_write() {
+                let mut wire = Vec::new();
+                client.write_tls(&mut wire).unwrap();
+                let mut wire = wire.as_slice();
+                while !wire.is_empty() {
+                    server.read_tls(&mut wire).unwrap();
+                }
+                server.process_new_packets()?;
+                moved = true;
+            }
+            if server.wants_write() {
+                let mut wire = Vec::new();
+                server.write_tls(&mut wire).unwrap();
+                let mut wire = wire.as_slice();
+                while !wire.is_empty() {
+                    client.read_tls(&mut wire).unwrap();
+                }
+                client.process_new_packets()?;
+                moved = true;
+            }
+            assert!(moved, "the handshake stalled");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_verified_direct_connection_rejects_a_self_signed_daemon() {
+        let err = handshake_with_self_signed(direct_client_config().unwrap()).unwrap_err();
+        assert!(
+            matches!(err, rustls::Error::InvalidCertificate(_)),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn the_unverified_config_accepts_a_self_signed_daemon() {
+        handshake_with_self_signed(unverified_client_config()).unwrap();
     }
 }

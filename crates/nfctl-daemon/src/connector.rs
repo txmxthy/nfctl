@@ -50,7 +50,7 @@ impl PortForwardConnector {
         Self {
             client,
             cluster,
-            tls: TlsConnector::from(crate::tls::port_forward_client_config()),
+            tls: TlsConnector::from(crate::tls::unverified_client_config()),
             opts,
             kept: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -165,8 +165,25 @@ pub struct DirectConnector {
 }
 
 impl DirectConnector {
-    /// `url` is `http://host[:port]` or `https://host[:port]`.
+    /// `url` is `http://host[:port]` or `https://host[:port]`. An `https` URL
+    /// is verified against the platform trust store.
     pub fn new(url: &str, topology: Option<Topology>, opts: ClientOptions) -> Result<Self> {
+        Self::build(url, topology, opts, true)
+    }
+
+    /// As [`new`](Self::new), accepting any certificate an `https` URL
+    /// presents. For a path the caller already trusts, such as a port-forward
+    /// they opened themselves.
+    pub fn insecure(url: &str, topology: Option<Topology>, opts: ClientOptions) -> Result<Self> {
+        Self::build(url, topology, opts, false)
+    }
+
+    fn build(
+        url: &str,
+        topology: Option<Topology>,
+        opts: ClientOptions,
+        verify: bool,
+    ) -> Result<Self> {
         let uri: http::Uri = url
             .parse()
             .map_err(|e| Error::Usage(format!("invalid daemon url `{url}`: {e}")))?;
@@ -184,11 +201,14 @@ impl DirectConnector {
             .ok_or_else(|| Error::Usage(format!("daemon url `{url}` has no host")))?
             .to_owned();
         let port = uri.port_u16().unwrap_or(DAEMON_PORT);
-        let tls = secure
-            .then(crate::tls::direct_client_config)
-            .transpose()
-            .map_err(Error::daemon)?
-            .map(TlsConnector::from);
+        let tls = if !secure {
+            None
+        } else if verify {
+            Some(crate::tls::direct_client_config().map_err(Error::daemon)?)
+        } else {
+            Some(crate::tls::unverified_client_config())
+        }
+        .map(TlsConnector::from);
         Ok(Self {
             kept: Arc::new(Mutex::new(HashMap::new())),
             host,

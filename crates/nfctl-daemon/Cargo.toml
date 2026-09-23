@@ -34,6 +34,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 wiremock = "0.6"
 nfctl-k8s.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
