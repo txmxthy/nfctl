@@ -40,8 +40,12 @@ jobs:
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
           git merge-base --is-ancestor "$RELEASE_TAG" origin/main
           gh release download "$RELEASE_TAG" --pattern 'nfctl-*' --pattern '*.sha256' --dir release-assets
-          test -n "$(find release-assets -type f -name 'nfctl-*' -print -quit)"
-          test -n "$(find release-assets -type f -name '*.sha256' -print -quit)"
+          archives=$(find release-assets -type f -name 'nfctl-*.tar.*' | wc -l)
+          sums=$(find release-assets -type f -name '*.sha256' | wc -l)
+          if [[ "$archives" -ne 4 || "$sums" -ne 4 ]]; then
+            echo "::error::Expected four archives and four checksums, found $archives and $sums"
+            exit 1
+          fi
       - name: Publish draft
         env:
           GH_TOKEN: ${{ steps.release-token.outputs.token }}
