@@ -624,7 +624,7 @@ daemons:
       code: D1
     buffers:
     - name: default-linear-cat-0
-      from: in
+      sources: [in]
       to: cat
       pending: 0
       ack_pending: 6
@@ -634,7 +634,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-linear-out-0
-      from: cat
+      sources: [cat]
       to: out
       pending: 0
       ack_pending: 10
@@ -695,7 +695,7 @@ daemons:
       code: D3
     buffers:
     - name: default-fanout-even-or-odd-0
-      from: in
+      sources: [in]
       to: even-or-odd
       pending: 3
       ack_pending: 1
@@ -705,7 +705,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-fanout-even-sink-0
-      from: even-or-odd
+      sources: [even-or-odd]
       to: even-sink
       pending: 3
       ack_pending: 1
@@ -715,7 +715,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-fanout-odd-sink-0
-      from: even-or-odd
+      sources: [even-or-odd]
       to: odd-sink
       pending: 3
       ack_pending: 1
@@ -725,7 +725,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-fanout-all-sink-0
-      from: even-or-odd
+      sources: [even-or-odd]
       to: all-sink
       pending: 3
       ack_pending: 1
@@ -818,7 +818,7 @@ daemons:
       code: D1
     buffers:
     - name: default-sharded-router-0
-      from: in
+      sources: [in]
       to: router
       pending: 12
       ack_pending: 4
@@ -828,7 +828,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-sharded-worker-0-0
-      from: router
+      sources: [router]
       to: worker-0
       pending: 12
       ack_pending: 4
@@ -838,7 +838,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-sharded-worker-1-0
-      from: router
+      sources: [router]
       to: worker-1
       pending: 12
       ack_pending: 4
@@ -848,7 +848,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-sharded-worker-2-0
-      from: router
+      sources: [router]
       to: worker-2
       pending: 12
       ack_pending: 4
@@ -858,27 +858,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-sharded-merge-0
-      from: worker-0
-      to: merge
-      pending: 12
-      ack_pending: 4
-      total: 16
-      length: 30000
-      usage: 0.0005
-      usage_limit: 0.8
-      is_full: false
-    - name: default-sharded-merge-0
-      from: worker-1
-      to: merge
-      pending: 12
-      ack_pending: 4
-      total: 16
-      length: 30000
-      usage: 0.0005
-      usage_limit: 0.8
-      is_full: false
-    - name: default-sharded-merge-0
-      from: worker-2
+      sources: [worker-0, worker-1, worker-2]
       to: merge
       pending: 12
       ack_pending: 4
@@ -888,7 +868,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-sharded-out-0
-      from: merge
+      sources: [merge]
       to: out
       pending: 12
       ack_pending: 4
@@ -898,7 +878,7 @@ daemons:
       usage_limit: 0.8
       is_full: false
     - name: default-sharded-audit-0
-      from: router
+      sources: [router]
       to: audit
       pending: 12
       ack_pending: 4

@@ -198,8 +198,14 @@ pub fn run_offline(cli: &Cli) -> Option<Result<String>> {
             })
         }
         Command::Completions { shell } => Some(
-            crate::complete::registration(*shell)
-                .ok_or_else(|| Error::Usage(format!("no dynamic completion for {shell}"))),
+            if matches!(cli.globals.output, OutputFormat::Json | OutputFormat::Yaml) {
+                Err(Error::Usage(
+                    "completions does not produce structured output".to_owned(),
+                ))
+            } else {
+                crate::complete::registration(*shell)
+                    .ok_or_else(|| Error::Usage(format!("no dynamic completion for {shell}")))
+            },
         ),
         _ => None,
     }
@@ -268,19 +274,29 @@ pub async fn run(cli: &Cli, ctx: &Context) -> Result<Output> {
     {
         let key = ctx.resolve_pipeline(cli, name).await?;
         let fmt = cli.globals.output;
+        let clear =
+            matches!(fmt, OutputFormat::Table | OutputFormat::Wide) && ctx.terminal_width.is_some();
         let service = ctx.service.clone();
         let every = Duration::from_secs((*interval).max(1));
         let frames = futures::stream::unfold((service, key), move |(service, key)| async move {
             let frame = match service.view(&key, Timestamp::now()).await {
+                Ok(v) if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) => {
+                    output::stream_item(&v, fmt)
+                }
                 Ok(v) => output::view(&v, fmt).unwrap_or_else(|e| format!("error: {e}\n")),
+                Err(e) if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) => {
+                    output::stream_item(&serde_json::json!({ "error": e.to_string() }), fmt)
+                }
                 Err(e) => format!("error: {e}\n"),
             };
             tokio::time::sleep(every).await;
-            // Clear screen + home, then the frame (no trailing newline: the printer adds one).
-            Some((
-                format!("\x1b[2J\x1b[H{}", frame.trim_end_matches('\n')),
-                (service, key),
-            ))
+            let frame = frame.trim_end_matches('\n');
+            let frame = if clear {
+                format!("\x1b[2J\x1b[H{frame}")
+            } else {
+                frame.to_owned()
+            };
+            Some((frame, (service, key)))
         });
         return Ok(Output::Lines(Box::pin(frames)));
     }
@@ -448,6 +464,17 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
                 Strategy::Slow => ResumeStrategy::Slow,
             };
             lifecycle::resume(cluster, &key, strategy, *dry_run).await?;
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                return output::serialised(
+                    &serde_json::json!({
+                        "pipeline": key.to_string(),
+                        "action": "resume",
+                        "strategy": strategy.as_str(),
+                        "dry_run": dry_run,
+                    }),
+                    fmt,
+                );
+            }
             Ok(format!(
                 "{key}: resume ({}){}\n",
                 strategy.as_str(),
@@ -516,6 +543,9 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             };
             let p = lifecycle::wait_for_phase(cluster, &key, phase, Duration::from_secs(*timeout))
                 .await?;
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                return output::serialised(&p, fmt);
+            }
             Ok(format!("{key}: {}\n", p.status.phase.as_str()))
         }
         Command::Scale {
@@ -529,6 +559,17 @@ async fn run_lifecycle(cli: &Cli, ctx: &Context) -> Result<String> {
             cluster
                 .scale_vertex(&key, &vertex, *replicas, *dry_run)
                 .await?;
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                return output::serialised(
+                    &serde_json::json!({
+                        "pipeline": key.to_string(),
+                        "vertex": vertex.to_string(),
+                        "replicas": replicas,
+                        "dry_run": dry_run,
+                    }),
+                    fmt,
+                );
+            }
             Ok(format!(
                 "{key}/{vertex}: replicas={replicas}{}\n",
                 if *dry_run { " (dry run)" } else { "" }
@@ -571,7 +612,7 @@ async fn run_apply(
             .buffers()
             .await
             .ok()
-            .map(|b| b.iter().filter_map(|x| x.pending).sum::<i64>()),
+            .and_then(|buffers| nfctl_core::service::total_pending(&buffers)),
         _ => None,
     };
     let report = nfctl_core::service::check(live.as_ref(), &new, backlog);
@@ -599,6 +640,9 @@ async fn run_apply(
         )));
     }
     let applied = ctx.cluster.apply_manifest(&text, &ns, dry_run).await?;
+    if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+        return output::serialised(&applied, fmt);
+    }
     let mut s = output::apply_report(&new.key, &report, live.is_some());
     let _ = std::fmt::Write::write_fmt(
         &mut s,
@@ -662,16 +706,24 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
             ..TailOptions::default()
         };
         let timestamps = *timestamps;
+        let fmt = cli.globals.output;
         if *follow {
             let (lines, handle) = tail(Arc::clone(&ctx.cluster), ns, selector, opts).await?;
             // The handle rides along with the stream so the tails live exactly as long as it.
             let stream = lines.map(move |l| {
                 let _keep = &handle;
-                format_line(&l, timestamps)
+                if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                    output::stream_item(&l, fmt)
+                } else {
+                    format_line(&l, timestamps)
+                }
             });
             return Ok(Some(Output::Lines(Box::pin(stream))));
         }
         let lines = snapshot(ctx.cluster.as_ref(), &ns, &selector, &opts).await?;
+        if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+            return Ok(Some(Output::Text(output::serialised(&lines, fmt)?)));
+        }
         if lines.is_empty() {
             return Ok(Some(Output::Text("No pods found.\n".to_owned())));
         }
@@ -683,6 +735,11 @@ async fn run_logs(cli: &Cli, ctx: &Context) -> Result<Option<Output>> {
         )));
     }
     if let Command::Tui { interval } = &cli.command {
+        if matches!(cli.globals.output, OutputFormat::Json | OutputFormat::Yaml) {
+            return Err(Error::Usage(
+                "tui does not produce structured output".to_owned(),
+            ));
+        }
         let ns = Context::scope(cli)?;
         nfctl_tui::run(
             Arc::clone(&ctx.cluster),
@@ -722,6 +779,17 @@ async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Out
             cluster
                 .set_monovertex_lifecycle(&key, nfctl_core::model::DesiredPhase::Paused, *dry_run)
                 .await?;
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                return output::serialised(
+                    &serde_json::json!({
+                        "monovertex": key.to_string(),
+                        "action": "pause",
+                        "dry_run": dry_run,
+                    }),
+                    fmt,
+                )
+                .map(Output::Text);
+            }
             Ok(Output::Text(format!(
                 "{key}: pause{}\n",
                 if *dry_run { " accepted (dry run)" } else { "" }
@@ -732,6 +800,17 @@ async fn run_mvtx(cli: &Cli, ctx: &Context, command: &MvtxCommand) -> Result<Out
             cluster
                 .set_monovertex_lifecycle(&key, nfctl_core::model::DesiredPhase::Running, *dry_run)
                 .await?;
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                return output::serialised(
+                    &serde_json::json!({
+                        "monovertex": key.to_string(),
+                        "action": "resume",
+                        "dry_run": dry_run,
+                    }),
+                    fmt,
+                )
+                .map(Output::Text);
+            }
             Ok(Output::Text(format!(
                 "{key}: resume{}\n",
                 if *dry_run { " accepted (dry run)" } else { "" }
@@ -748,6 +827,7 @@ async fn run_mvtx_logs(
     all_containers: bool,
     tail_lines: Option<u32>,
 ) -> Result<Output> {
+    let fmt = cli.globals.output;
     let key = ctx.resolve_monovertex(cli, name).await?;
     let cluster = ctx.cluster.as_ref();
     let selector = Selector::monovertex_pods(&key.name);
@@ -765,11 +845,18 @@ async fn run_mvtx_logs(
         let (lines, handle) = tail(Arc::clone(&ctx.cluster), key.namespace, selector, opts).await?;
         let stream = lines.map(move |l| {
             let _keep = &handle;
-            format_line(&l, false)
+            if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+                output::stream_item(&l, fmt)
+            } else {
+                format_line(&l, false)
+            }
         });
         return Ok(Output::Lines(Box::pin(stream)));
     }
     let lines = snapshot(cluster, &key.namespace, &selector, &opts).await?;
+    if matches!(fmt, OutputFormat::Json | OutputFormat::Yaml) {
+        return output::serialised(&lines, fmt).map(Output::Text);
+    }
     if lines.is_empty() {
         return Ok(Output::Text("No pods found.\n".to_owned()));
     }

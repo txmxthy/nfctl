@@ -108,7 +108,9 @@ impl CardView {
             else {
                 continue;
             };
-            og.add_tagged_edge(from, to, e.tags.iter().cloned());
+            let Ok(_) = og.add_tagged_edge(from, to, e.tags.iter().cloned()) else {
+                continue;
+            };
         }
         let colours = orthodag::colour::of(&og);
         let badges = labels

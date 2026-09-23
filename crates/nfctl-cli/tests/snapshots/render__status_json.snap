@@ -161,7 +161,9 @@ expression: "out_ctx(&cli, &live).await"
       "buffers": [
         {
           "name": "default-simple-pipeline-cat-0",
-          "from": "in",
+          "sources": [
+            "in"
+          ],
           "to": "cat",
           "pending": 42,
           "ack_pending": 3,

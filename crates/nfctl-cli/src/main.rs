@@ -85,7 +85,7 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<Output> {
             service: PipelineService::new(cluster, daemons),
             default_namespace,
             now: nfctl_core::model::Timestamp::now(),
-            terminal_width: terminal_size::terminal_size().map(|(w, _)| usize::from(w.0)),
+            terminal_width: terminal_width(),
             colour: colour_enabled(cli),
         };
         return run(cli, &ctx).await;
@@ -111,7 +111,7 @@ async fn execute(cli: &Cli) -> nfctl_core::Result<Output> {
         service: PipelineService::new(cluster, daemons),
         default_namespace: conn.default_namespace,
         now: nfctl_core::model::Timestamp::now(),
-        terminal_width: terminal_size::terminal_size().map(|(w, _)| usize::from(w.0)),
+        terminal_width: terminal_width(),
         colour: colour_enabled(cli),
     };
     run(cli, &ctx).await
@@ -123,4 +123,13 @@ fn colour_enabled(cli: &Cli) -> bool {
     use std::io::IsTerminal as _;
     let env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     std::io::stdout().is_terminal() && !cli.globals.no_color && !env
+}
+
+fn terminal_width() -> Option<usize> {
+    use std::io::IsTerminal as _;
+    std::io::stdout()
+        .is_terminal()
+        .then(terminal_size::terminal_size)
+        .flatten()
+        .map(|(width, _)| usize::from(width.0))
 }

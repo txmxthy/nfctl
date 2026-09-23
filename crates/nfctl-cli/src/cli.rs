@@ -43,11 +43,12 @@ pub struct Globals {
     #[arg(long, global = true, default_value_t = 20, value_name = "SECS")]
     pub request_timeout: u64,
 
-    /// Output format
+    /// Output format; streaming JSON is NDJSON (one object per line)
     #[arg(short, long, global = true, default_value = "table", value_enum)]
     pub output: OutputFormat,
 
-    /// Talk to the pipeline daemon at this URL instead of port-forwarding
+    /// Talk to the pipeline daemon at this URL instead of port-forwarding.
+    /// HTTPS certificates are checked against the platform trust store.
     #[arg(long, global = true, env = "NFCTL_DAEMON_URL", value_name = "URL")]
     pub daemon_url: Option<String>,
 

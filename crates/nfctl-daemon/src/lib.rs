@@ -3,9 +3,9 @@
 //! port-forward to the daemon pod or directly by URL.
 //!
 //! One HTTP client serves both: a custom connector ([`dialer::Dialer`]) either
-//! opens a port-forward and wraps it in TLS, or dials TCP. The daemon's
-//! certificate is self-signed and regenerated per pod, so verification is off,
-//! matching Numaflow's own client.
+//! opens an authenticated port-forward and wraps it in TLS, or dials TCP.
+//! Port-forwarded daemon certificates are ephemeral and bypass verification
+//! within that transport; direct HTTPS uses the platform trust store.
 
 mod client;
 mod connector;

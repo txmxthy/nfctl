@@ -235,7 +235,9 @@ pub fn to_graph(g: &ViewGraph) -> orthodag::Graph {
         let (Some(from), Some(to)) = (ids.get(e.from.0 as usize), ids.get(e.to.0 as usize)) else {
             continue;
         };
-        out.add_tagged_edge(*from, *to, e.tags.iter().cloned());
+        let Ok(_) = out.add_tagged_edge(*from, *to, e.tags.iter().cloned()) else {
+            continue;
+        };
     }
     out
 }

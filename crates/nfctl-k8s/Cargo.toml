@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+license-file.workspace = true
+readme.workspace = true
 repository.workspace = true
 authors.workspace = true
 
@@ -21,6 +23,10 @@ thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+http = "1"
+tower-test = "0.4"
 
 [lints]
 workspace = true

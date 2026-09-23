@@ -33,7 +33,9 @@ async fn port_forward_round_trip() {
     let buffers = d.buffers().await.unwrap();
     assert!(!buffers.is_empty());
     assert!(
-        buffers.iter().all(|b| b.from.as_str() != "unknown"),
+        buffers
+            .iter()
+            .all(|b| b.sources.iter().all(|source| source.as_str() != "unknown")),
         "{buffers:?}"
     );
     let metrics = d.vertex_metrics(None).await.unwrap();

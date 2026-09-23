@@ -50,7 +50,7 @@ impl PortForwardConnector {
         Self {
             client,
             cluster,
-            tls: TlsConnector::from(crate::tls::insecure_client_config()),
+            tls: TlsConnector::from(crate::tls::port_forward_client_config()),
             opts,
             kept: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -158,6 +158,7 @@ pub struct DirectConnector {
     host: String,
     port: u16,
     secure: bool,
+    tls: Option<TlsConnector>,
     topology: Option<Topology>,
     opts: ClientOptions,
     kept: Arc<Mutex<HashMap<Kept, Arc<dyn DaemonPort>>>>,
@@ -183,11 +184,17 @@ impl DirectConnector {
             .ok_or_else(|| Error::Usage(format!("daemon url `{url}` has no host")))?
             .to_owned();
         let port = uri.port_u16().unwrap_or(DAEMON_PORT);
+        let tls = secure
+            .then(crate::tls::direct_client_config)
+            .transpose()
+            .map_err(Error::daemon)?
+            .map(TlsConnector::from);
         Ok(Self {
             kept: Arc::new(Mutex::new(HashMap::new())),
             host,
             port,
             secure,
+            tls,
             topology,
             opts,
         })
@@ -225,13 +232,10 @@ impl DaemonConnector for DirectConnector {
         if let Some(kept) = self.kept(&at) {
             return Ok(kept);
         }
-        let tls = self
-            .secure
-            .then(|| TlsConnector::from(crate::tls::insecure_client_config()));
         let dialer = Dialer::Direct {
             host: self.host.clone(),
             port: self.port,
-            tls,
+            tls: self.tls.clone(),
         };
         let port: Arc<dyn DaemonPort> = Arc::new(HttpDaemonClient::new(
             dialer,
@@ -250,13 +254,10 @@ impl DaemonConnector for DirectConnector {
         if let Some(kept) = self.kept(&at) {
             return Ok(kept);
         }
-        let tls = self
-            .secure
-            .then(|| TlsConnector::from(crate::tls::insecure_client_config()));
         let dialer = Dialer::Direct {
             host: self.host.clone(),
             port: self.port,
-            tls,
+            tls: self.tls.clone(),
         };
         let pkey = PipelineKey::new(key.namespace.clone(), key.name.clone());
         let port: Arc<dyn DaemonPort> = Arc::new(HttpDaemonClient::new(

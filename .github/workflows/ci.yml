@@ -1,26 +1,75 @@
 name: ci
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 permissions:
   contents: read
+
 env:
   CARGO_TERM_COLOR: always
+
 jobs:
   check:
+    name: fmt, clippy, tests, docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
+          toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --workspace --all-features
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --all-features --locked
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings -A rustdoc::private-intra-doc-links
+        run: cargo doc --workspace --all-features --no-deps --locked
+
+  msrv:
+    name: MSRV 1.96
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - run: rustc --version
+      - run: cargo check --workspace --all-targets --all-features --locked
+
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25  # v2.1.1
+
+  release-surface:
+    name: standalone metadata, build, package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Reject out-of-tree path dependencies
+        shell: bash
+        run: |
+          if grep -n -E 'path[[:space:]]*=[[:space:]]*"\.\./' Cargo.toml crates/*/Cargo.toml; then
+            echo "::error::A standalone checkout cannot resolve out-of-tree path dependencies. Use a registry dependency before release."
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+      - name: Metadata
+        run: cargo metadata --locked --format-version 1 > /dev/null
+      - name: Build
+        run: cargo build --workspace --all-features --locked
+      - name: Package
+        run: cargo package --workspace --all-features --locked

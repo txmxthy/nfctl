@@ -26,18 +26,24 @@ pub struct VertexView {
 pub struct EdgeView {
     pub from: VertexName,
     pub to: VertexName,
+    /// Buffer partitions attached once to the first source of a shared input.
+    /// Each buffer retains the complete source set.
     pub buffers: Vec<BufferInfo>,
     pub watermark: Option<EdgeWatermark>,
 }
 
 impl EdgeView {
-    /// Sum of pending across the edge's partitions; `None` if every partition is unknown.
+    /// Sum pending messages across the edge's partitions.
+    ///
+    /// Returns `None` when there are no observations, or any partition is unknown,
+    /// invalid, or makes the total overflow.
     #[must_use]
     pub fn pending(&self) -> Option<i64> {
-        self.buffers
-            .iter()
-            .filter_map(|b| b.pending)
-            .reduce(|a, b| a + b)
+        if self.buffers.is_empty() {
+            None
+        } else {
+            total_pending(&self.buffers)
+        }
     }
 
     /// Highest buffer usage across partitions.
@@ -53,6 +59,18 @@ impl EdgeView {
     pub fn is_full(&self) -> bool {
         self.buffers.iter().any(|b| b.is_full == Some(true))
     }
+}
+
+/// Sum known, non-negative pending counts without inventing a partial total.
+#[must_use]
+pub fn total_pending(buffers: &[BufferInfo]) -> Option<i64> {
+    buffers.iter().try_fold(0_i64, |total, buffer| {
+        let pending = buffer.pending?;
+        if pending < 0 {
+            return None;
+        }
+        total.checked_add(pending)
+    })
 }
 
 /// How long each step of a view took. The TUI owns the terminal and so
@@ -267,7 +285,7 @@ fn assemble(
             to: e.to.clone(),
             buffers: buffers
                 .iter()
-                .filter(|b| b.from == e.from && b.to == e.to)
+                .filter(|b| b.sources.first() == Some(&e.from) && b.to == e.to)
                 .cloned()
                 .collect(),
             watermark: watermarks
@@ -367,15 +385,55 @@ mod tests {
         sample_pipeline("ns", "p", PipelinePhase::Running).key
     }
 
+    fn v(name: &str) -> VertexName {
+        VertexName::new(name).unwrap()
+    }
+
+    fn buffer(name: &str, pending: Option<i64>) -> BufferInfo {
+        BufferInfo {
+            name: BufferName::new(name).unwrap(),
+            sources: vec![v("in")],
+            to: v("out"),
+            pending,
+            ack_pending: Some(0),
+            total: pending,
+            length: Some(100),
+            usage: Fraction::new(0.0),
+            usage_limit: Fraction::new(0.8),
+            is_full: Some(false),
+        }
+    }
+
+    #[test]
+    fn total_pending_requires_complete_valid_counts() {
+        let cases = [
+            ("all known", vec![Some(4), Some(7)], Some(11)),
+            ("one unknown", vec![Some(4), None], None),
+            ("all unknown", vec![None, None], None),
+            ("empty", vec![], Some(0)),
+            ("overflow", vec![Some(i64::MAX), Some(1)], None),
+            ("negative", vec![Some(-1)], None),
+        ];
+
+        for (case, pending, expected) in cases {
+            let buffers = pending
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| buffer(&format!("partition-{index}"), value))
+                .collect::<Vec<_>>();
+
+            assert_eq!(total_pending(&buffers), expected, "{case}");
+        }
+    }
+
     #[tokio::test]
     async fn fuses_daemon_data_onto_topology() {
         let cluster =
             FakeCluster::with_pipelines(vec![sample_pipeline("ns", "p", PipelinePhase::Running)]);
-        let v = |s: &str| VertexName::new(s).unwrap();
         let daemon = FakeDaemon {
             buffers: vec![BufferInfo {
                 name: BufferName::new("default-p-cat-0").unwrap(),
-                from: v("in"),
+                sources: vec![v("in")],
                 to: v("cat"),
                 pending: Some(12),
                 ack_pending: Some(0),
@@ -417,6 +475,54 @@ mod tests {
         assert_eq!(view.edges[0].pending(), Some(12));
         assert_eq!(view.edges[1].pending(), None);
         assert_eq!(view.drained(), Some(false));
+    }
+
+    #[tokio::test]
+    async fn a_shared_fan_in_buffer_is_attached_once() {
+        let mut pipeline = sample_pipeline("ns", "p", PipelinePhase::Running);
+        let mut vertices = pipeline.spec.topology.vertices().to_vec();
+        let mut edges = pipeline.spec.topology.edges().to_vec();
+        let mut side = vertices[0].clone();
+        side.name = v("side");
+        vertices.push(side);
+        let mut side_edge = edges[0].clone();
+        side_edge.from = v("side");
+        edges.push(side_edge);
+        pipeline.spec.topology = Topology::new(vertices, edges).unwrap();
+
+        let cluster = FakeCluster::with_pipelines(vec![pipeline]);
+        let daemon = FakeDaemon {
+            buffers: vec![BufferInfo {
+                name: BufferName::new("default-p-cat-0").unwrap(),
+                sources: vec![v("in"), v("side")],
+                to: v("cat"),
+                pending: Some(12),
+                ack_pending: Some(0),
+                total: Some(12),
+                length: Some(30_000),
+                usage: Fraction::new(0.5),
+                usage_limit: Fraction::new(0.8),
+                is_full: Some(false),
+            }],
+            ..FakeDaemon::default()
+        };
+
+        let view = pipeline_view(
+            &cluster,
+            &FakeDaemons::one(daemon),
+            &key(),
+            Timestamp::now(),
+        )
+        .await
+        .unwrap();
+        let attached: Vec<_> = view
+            .edges
+            .iter()
+            .filter(|edge| !edge.buffers.is_empty())
+            .collect();
+        assert_eq!(attached.len(), 1);
+        assert_eq!(attached[0].pending(), Some(12));
+        assert_eq!(attached[0].buffers[0].sources, [v("in"), v("side")]);
     }
 
     #[tokio::test]

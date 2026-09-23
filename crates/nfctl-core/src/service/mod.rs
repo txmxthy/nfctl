@@ -13,7 +13,7 @@ pub use logs::{ContainerSelect, TailHandle, TailOptions};
 pub use pipeline::PipelineService;
 pub use status::{
     EdgeView, MonoVertexView, PipelineView, Timings, VertexView, monovertex_view, pipeline_numbers,
-    pipeline_shape, pipeline_view,
+    pipeline_shape, pipeline_view, total_pending,
 };
 
 use std::sync::Arc;

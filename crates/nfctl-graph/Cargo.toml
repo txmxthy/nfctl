@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+license-file.workspace = true
+readme.workspace = true
 repository.workspace = true
 authors.workspace = true
 
@@ -12,7 +14,7 @@ authors.workspace = true
 nfctl-core.workspace = true
 thiserror.workspace = true
 serde.workspace = true
-orthodag = { path = "../../../orthodag", version = "0.1.0", features = ["mermaid"] }
+orthodag = { version = "0.1.0", features = ["mermaid"] }
 
 [dev-dependencies]
 nfctl-core = { workspace = true, features = ["fake"] }

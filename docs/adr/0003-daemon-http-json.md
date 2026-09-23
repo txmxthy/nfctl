@@ -10,7 +10,8 @@ without a port-forward. Numaflow's own REST client disables certificate verifica
 ## Decision
 HTTP/1.1 + JSON via a hyper client whose connector opens a `kube` port-forward to the
 daemon pod and wraps it in TLS with verification disabled. No tonic, no checked-in
-protos. `--daemon-url` bypasses the forward for in-cluster or pre-forwarded use.
+protos. `--daemon-url` bypasses the forward for in-cluster or pre-forwarded use;
+direct HTTPS verifies the server name and certificate against the platform trust store.
 Reconnection lives in the connector: a dead forward is re-established on the next
 request, bounded by a small retry count.
 

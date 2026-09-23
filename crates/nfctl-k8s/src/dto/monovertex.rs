@@ -57,12 +57,14 @@ pub fn into_monovertex(o: MonoVertexObject) -> Result<MonoVertex, Error> {
     let namespace = Namespace::new(o.metadata.namespace.clone().unwrap_or_default())
         .map_err(|e| invalid(format!("namespace: {e}")))?;
     let st = o.status.unwrap_or_default();
+    let desired = match o.spec.lifecycle.desired_phase.as_deref() {
+        Some("Paused") => DesiredPhase::Paused,
+        None | Some("Running") => DesiredPhase::Running,
+        Some(other) => return Err(invalid(format!("unknown desired phase `{other}`"))),
+    };
     Ok(MonoVertex {
         key: MonoVertexKey { namespace, name },
-        desired: match o.spec.lifecycle.desired_phase.as_deref() {
-            Some("Paused") => DesiredPhase::Paused,
-            _ => DesiredPhase::Running,
-        },
+        desired,
         phase: st
             .phase
             .as_deref()
@@ -95,4 +97,31 @@ pub fn into_monovertex(o: MonoVertexObject) -> Result<MonoVertex, Error> {
             .as_ref()
             .and_then(super::to_timestamp),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_an_unknown_desired_phase() {
+        let object = serde_json::from_value(serde_json::json!({
+            "apiVersion": "numaflow.numaproj.io/v1alpha1",
+            "kind": "MonoVertex",
+            "metadata": {"name": "mono", "namespace": "demo"},
+            "spec": {"lifecycle": {"desiredPhase": "Hibernating"}}
+        }))
+        .unwrap();
+
+        let err = into_monovertex(object).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                Error::Invalid { ref reason, .. }
+                    if reason.contains("unknown desired phase `Hibernating`")
+            ),
+            "{err}"
+        );
+    }
 }

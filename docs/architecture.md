@@ -1,19 +1,49 @@
 # Architecture
 
+## Compile-time dependencies
+
 ```mermaid
 flowchart LR
-    cli[nfctl-cli] --> core[nfctl-core]
-    tui[nfctl-tui] --> core
-    cli --> graph[nfctl-graph]
-    graph --> core
-    k8s[nfctl-k8s] --> core
-    daemon[nfctl-daemon] --> core
-    k8s -. kube-rs .-> apiserver[(Kubernetes API)]
-    daemon -. HTTPS/JSON over port-forward .-> dsvc[(pipeline daemon :4327)]
+    subgraph nfctl_repo["nfctl repository"]
+        cli["nfctl-cli"]
+        tui["nfctl-tui"]
+        graph_crate["nfctl-graph"]
+        k8s["nfctl-k8s"]
+        daemon["nfctl-daemon"]
+        core["nfctl-core<br/>domain, ports, services"]
+    end
+
+    subgraph orthodag_repo["Orthodag repository"]
+        orthodag["orthodag public API<br/>layout and routing"]
+    end
+
+    cli --> core
+    cli --> k8s
+    cli --> daemon
+    cli --> graph_crate
+    cli --> tui
+    tui --> core
+    tui --> graph_crate
+    tui --> orthodag
+    graph_crate --> core
+    graph_crate --> orthodag
+    k8s --> core
+    daemon --> core
 ```
 
-Dependency direction is always toward `nfctl-core`. The composition root that picks
-adapters lives in `nfctl-cli`.
+Arrows are direct, normal Cargo dependencies, not runtime calls; dev-dependencies are
+excluded. This is hexagonal architecture (ports and adapters): `nfctl-core` is the
+inner hexagon, while the binary, presentations and infrastructure adapters depend inward.
+
+`nfctl-cli` is the binary and composition root, so it compiles the core, both adapters
+and both presentation crates. `nfctl-core` owns the domain model, ports and use cases.
+`nfctl-k8s` and `nfctl-daemon` own protocol DTOs and implement core ports. `nfctl-graph`
+owns topology-to-diagram projection; `nfctl-tui` owns interactive state and terminal
+presentation.
+
+Orthodag is a separate repository and general-purpose layout crate. `nfctl-graph` and
+`nfctl-tui` cross that repository boundary through Orthodag's public Rust API; core does
+not. The current manifests resolve it as a versioned sibling path dependency.
 
 ## Ports
 

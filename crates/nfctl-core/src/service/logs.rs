@@ -5,7 +5,7 @@
 //! and a tail that ends early (container restart) is reopened from the last
 //! timestamp it saw. Output is one merged stream of tagged lines.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -86,6 +86,27 @@ pub fn select_containers(pod: &PodRef, sel: &ContainerSelect) -> Vec<ContainerNa
     }
 }
 
+fn validate_named_containers(pods: &[PodRef], sel: &ContainerSelect) -> Result<()> {
+    let ContainerSelect::Named(requested) = sel else {
+        return Ok(());
+    };
+    let available = pods
+        .iter()
+        .flat_map(|pod| {
+            pod.containers
+                .iter()
+                .map(|container| container.name.clone())
+        })
+        .collect::<BTreeSet<_>>();
+    if let Some(name) = requested.iter().find(|name| !available.contains(*name)) {
+        return Err(Error::ContainerNotFound {
+            name: name.clone(),
+            available: available.into_iter().collect(),
+        });
+    }
+    Ok(())
+}
+
 /// Drop this to stop the supervisor and every tail.
 #[derive(Debug)]
 pub struct TailHandle(tokio::task::JoinHandle<()>);
@@ -106,6 +127,10 @@ pub async fn tail(
     selector: Selector,
     opts: TailOptions,
 ) -> Result<(BoxStream<'static, TaggedLine>, TailHandle)> {
+    if matches!(opts.containers, ContainerSelect::Named(_)) {
+        let pods = cluster.list_pods(&ns, &selector).await?;
+        validate_named_containers(&pods, &opts.containers)?;
+    }
     let events = cluster.watch_pods(&ns, &selector).await?;
     let (tx, rx) = mpsc::channel(opts.buffer);
     let sup = Supervisor {
@@ -129,7 +154,9 @@ pub async fn snapshot(
     opts: &TailOptions,
 ) -> Result<Vec<TaggedLine>> {
     let mut out = Vec::new();
-    for pod in cluster.list_pods(ns, selector).await? {
+    let pods = cluster.list_pods(ns, selector).await?;
+    validate_named_containers(&pods, &opts.containers)?;
+    for pod in pods {
         for container in select_containers(&pod, &opts.containers) {
             let lo = LogOptions {
                 follow: false,
@@ -253,6 +280,7 @@ const MAX_OPEN_FAILURES: u32 = 5;
 impl TailTask {
     async fn run(mut self) -> Key {
         let mut last_ts: Option<Timestamp> = None;
+        let mut boundary = HashMap::<String, usize>::new();
         let mut failures = 0u32;
         loop {
             let lo = LogOptions {
@@ -278,15 +306,36 @@ impl TailTask {
                 }
                 Ok(mut stream) => {
                     failures = 0;
+                    let replay_at = last_ts;
+                    let mut replay = boundary.clone();
                     while let Some(item) = stream.next().await {
                         let Ok(line) = item else { break };
-                        // `since` is inclusive on the server: skip what we already sent.
-                        if let (Some(ts), Some(last)) = (line.at, last_ts)
-                            && ts <= last
+                        // `since` is inclusive: skip matching entries from the
+                        // last timestamp, but keep new entries at that instant.
+                        if line.at == replay_at
+                            && let Some(count) = replay.get_mut(&line.text)
+                            && *count > 0
                         {
+                            *count -= 1;
                             continue;
                         }
-                        last_ts = line.at.or(last_ts);
+                        if let Some(at) = line.at {
+                            match last_ts {
+                                Some(last) if at > last => {
+                                    last_ts = Some(at);
+                                    boundary.clear();
+                                    boundary.insert(line.text.clone(), 1);
+                                }
+                                Some(last) if at == last => {
+                                    *boundary.entry(line.text.clone()).or_default() += 1;
+                                }
+                                None => {
+                                    last_ts = Some(at);
+                                    boundary.insert(line.text.clone(), 1);
+                                }
+                                Some(_) => {}
+                            }
+                        }
                         if self.tx.send(self.tagged(line)).await.is_err() {
                             return self.key;
                         }
@@ -470,6 +519,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn one_stream_preserves_distinct_lines_with_the_same_timestamp() {
+        let c = FakeCluster::default();
+        c.script(
+            &name("p-cat-0-abc"),
+            &name("numa"),
+            LogScript {
+                lines: vec![line(1, "first"), line(1, "second")],
+                hang: true,
+            },
+        );
+        c.emit(&PodEvent::Applied(sample_pod("p-cat-0-abc", false)));
+
+        let (mut s, _h) = start(&c, TailOptions::default()).await;
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa first");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa second");
+    }
+
+    #[tokio::test]
+    async fn resume_dedupes_only_matching_boundary_entries() {
+        let c = FakeCluster::default();
+        let pod: PodName = name("p-cat-0-abc");
+        let ctr: ContainerName = name("numa");
+        c.script(
+            &pod,
+            &ctr,
+            LogScript {
+                lines: vec![
+                    line(1, "before"),
+                    line(2, "boundary-a"),
+                    line(2, "boundary-b"),
+                ],
+                hang: false,
+            },
+        );
+        c.script(
+            &pod,
+            &ctr,
+            LogScript {
+                lines: vec![
+                    line(2, "boundary-a"),
+                    line(2, "boundary-b"),
+                    line(2, "new-at-boundary"),
+                    line(3, "after"),
+                ],
+                hang: true,
+            },
+        );
+        c.emit(&PodEvent::Applied(sample_pod("p-cat-0-abc", false)));
+        let opts = TailOptions {
+            resume_delay: Duration::from_millis(10),
+            ..Default::default()
+        };
+
+        let (mut s, _h) = start(&c, opts).await;
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa before");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa boundary-a");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa boundary-b");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa new-at-boundary");
+        assert_eq!(next_text(&mut s).await, "p-cat-0-abc/numa after");
+    }
+
+    #[tokio::test]
     async fn deleted_pod_stops_its_tail_and_resync_gc_removes_unseen() {
         let c = FakeCluster::default();
         for p in ["p-a-0-x", "p-b-0-y"] {
@@ -559,5 +670,49 @@ mod tests {
             .unwrap();
         assert_eq!(lines.len(), 2);
         assert!(!c.tail_calls()[0].opts.follow);
+    }
+
+    #[tokio::test]
+    async fn snapshot_rejects_a_named_container_absent_from_matching_pods() {
+        let c = FakeCluster::default();
+        c.emit(&PodEvent::Applied(sample_pod("p-a-0-x", true)));
+        let sel = Selector::vertex_pods(&name::<PipelineName>("p"), None);
+        let opts = TailOptions {
+            containers: ContainerSelect::Named(vec![name("missing")]),
+            ..TailOptions::default()
+        };
+
+        let err = snapshot(&c, &name("ns"), &sel, &opts)
+            .await
+            .expect_err("an explicitly named container must exist");
+        assert_eq!(
+            err.to_string(),
+            "container `missing` not found; available containers: numa, udf"
+        );
+        let Error::ContainerNotFound {
+            name: missing,
+            available,
+        } = err
+        else {
+            panic!("unexpected error: {err}");
+        };
+        assert_eq!(missing, name::<ContainerName>("missing"));
+        assert_eq!(available, [name("numa"), name("udf")]);
+    }
+
+    #[tokio::test]
+    async fn follow_rejects_a_named_container_absent_from_matching_pods() {
+        let c = FakeCluster::default();
+        c.emit(&PodEvent::Applied(sample_pod("p-a-0-x", true)));
+        let sel = Selector::vertex_pods(&name::<PipelineName>("p"), None);
+        let opts = TailOptions {
+            containers: ContainerSelect::Named(vec![name("missing")]),
+            ..TailOptions::default()
+        };
+
+        let Err(err) = tail(Arc::new(c), name("ns"), sel, opts).await else {
+            panic!("an explicitly named container must exist");
+        };
+        assert!(matches!(err, Error::ContainerNotFound { .. }));
     }
 }

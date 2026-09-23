@@ -1,4 +1,16 @@
-use crate::model::TopologyError;
+use crate::model::{ContainerName, TopologyError};
+
+fn display_containers(containers: &[ContainerName]) -> String {
+    if containers.is_empty() {
+        "none".to_owned()
+    } else {
+        containers
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
 
 /// Every failure `nfctl` can report. Adapter failures are boxed as `source`.
 #[derive(Debug, thiserror::Error)]
@@ -6,6 +18,15 @@ use crate::model::TopologyError;
 pub enum Error {
     #[error("{kind} `{name}` not found")]
     NotFound { kind: &'static str, name: String },
+
+    #[error(
+        "container `{name}` not found; available containers: {}",
+        display_containers(.available)
+    )]
+    ContainerNotFound {
+        name: ContainerName,
+        available: Vec<ContainerName>,
+    },
 
     #[error("forbidden: {0}")]
     Forbidden(String),

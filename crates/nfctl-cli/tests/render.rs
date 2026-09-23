@@ -10,9 +10,9 @@ use nfctl_core::fake::{
     FakeCluster, FakeDaemon, FakeDaemons, LogScript, sample_monovertex, sample_pipeline, sample_pod,
 };
 use nfctl_core::model::{
-    BufferInfo, BufferName, Fraction, Health, IsbName, IsbPhase, IsbService, LogLine,
-    MonoVertexPhase, Namespace, PipelineHealth, PipelinePhase, PodEvent, Timestamp, VertexMetrics,
-    VertexName, Windows,
+    BufferInfo, BufferName, Edge, Fraction, Health, IsbName, IsbPhase, IsbService, LogLine,
+    MonoVertexPhase, Namespace, OnFull, PipelineHealth, PipelinePhase, PodEvent, Timestamp,
+    Topology, VertexKind, VertexMetrics, VertexName, Windows,
 };
 use nfctl_core::ports::ClusterPort;
 use nfctl_core::service::PipelineService;
@@ -86,12 +86,36 @@ async fn logs_snapshot_and_follow() {
             &pod.name,
             &ctr.try_into().unwrap(),
             LogScript {
+                lines: vec![line.clone()],
+                hang: false,
+            },
+        );
+        c.script(
+            &pod.name,
+            &ctr.try_into().unwrap(),
+            LogScript {
+                lines: vec![line.clone()],
+                hang: true,
+            },
+        );
+        c.script(
+            &pod.name,
+            &ctr.try_into().unwrap(),
+            LogScript {
                 lines: vec![line],
                 hang: true,
             },
         );
     }
     let ctx = ctx_with(c);
+    let json = out_ctx(
+        &Cli::parse_from(["nfctl", "logs", "simple-pipeline", "-o", "json"]),
+        &ctx,
+    )
+    .await;
+    let parsed: Vec<nfctl_core::model::TaggedLine> = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.len(), 2);
+
     let cli = Cli::parse_from(["nfctl", "logs", "simple-pipeline", "--timestamps"]);
     insta::assert_snapshot!(
         "logs_snapshot",
@@ -107,6 +131,47 @@ async fn logs_snapshot_and_follow() {
         .unwrap()
         .unwrap();
     assert_eq!(first, "simple-pipeline-cat-0-abcd/udf hello from udf");
+    drop(lines);
+
+    let cli = Cli::parse_from([
+        "nfctl",
+        "logs",
+        "simple-pipeline",
+        "-f",
+        "-c",
+        "udf",
+        "-o",
+        "json",
+    ]);
+    let Output::Lines(mut lines) = run(&cli, &ctx).await.unwrap() else {
+        panic!("expected a stream")
+    };
+    let first = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next())
+        .await
+        .unwrap()
+        .unwrap();
+    serde_json::from_str::<nfctl_core::model::TaggedLine>(&first).unwrap();
+}
+
+#[tokio::test]
+async fn logs_reject_a_missing_named_container() {
+    let c = FakeCluster::default();
+    c.emit(&PodEvent::Applied(sample_pod(
+        "simple-pipeline-cat-0-abcd",
+        true,
+    )));
+    let ctx = ctx_with(c);
+    let cli = Cli::parse_from(["nfctl", "logs", "simple-pipeline", "-c", "missing"]);
+
+    let err = run(&cli, &ctx).await.err().unwrap();
+    assert!(
+        matches!(&err, nfctl_core::Error::ContainerNotFound { .. }),
+        "{err}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "container `missing` not found; available containers: numa, udf"
+    );
 }
 
 #[tokio::test]
@@ -156,7 +221,7 @@ fn live_daemon() -> FakeDaemon {
     FakeDaemon {
         buffers: vec![BufferInfo {
             name: BufferName::new("default-simple-pipeline-cat-0").unwrap(),
-            from: v("in"),
+            sources: vec![v("in")],
             to: v("cat"),
             pending: Some(42),
             ack_pending: Some(3),
@@ -201,6 +266,41 @@ async fn status_with_daemon_and_without() {
     // Daemon reports nothing usable: the CRD half still renders, with a warning.
     let cli = Cli::parse_from(["nfctl", "status", "paused-pipeline"]);
     insta::assert_snapshot!("status_degraded", out_ctx(&cli, &ctx()).await);
+}
+
+#[tokio::test]
+async fn continuous_top_is_ndjson_and_noninteractive_tables_do_not_clear() {
+    let live = ctx_with_daemon(FakeCluster::default(), live_daemon());
+    let cli = Cli::parse_from([
+        "nfctl",
+        "top",
+        "simple-pipeline",
+        "--interval",
+        "1",
+        "-o",
+        "json",
+    ]);
+    let Output::Lines(mut lines) = run(&cli, &live).await.unwrap() else {
+        panic!("expected a stream")
+    };
+    let json = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!json.contains('\u{1b}'), "{json:?}");
+    serde_json::from_str::<serde_json::Value>(&json).unwrap();
+
+    let mut noninteractive = live;
+    noninteractive.terminal_width = None;
+    let cli = Cli::parse_from(["nfctl", "top", "simple-pipeline", "--interval", "1"]);
+    let Output::Lines(mut lines) = run(&cli, &noninteractive).await.unwrap() else {
+        panic!("expected a stream")
+    };
+    let table = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!table.contains('\u{1b}'), "{table:?}");
 }
 
 #[tokio::test]
@@ -275,6 +375,39 @@ async fn lifecycle_commands_against_fake() {
         "demo/simple-pipeline/cat: replicas=3\n"
     );
     assert_eq!(c.scale_calls().len(), 1);
+
+    for args in [
+        &[
+            "nfctl",
+            "resume",
+            "simple-pipeline",
+            "--strategy",
+            "slow",
+            "-o",
+            "json",
+        ][..],
+        &[
+            "nfctl",
+            "wait",
+            "simple-pipeline",
+            "--phase",
+            "running",
+            "-o",
+            "json",
+        ],
+        &[
+            "nfctl",
+            "scale",
+            "simple-pipeline",
+            "cat",
+            "3",
+            "-o",
+            "json",
+        ],
+    ] {
+        let json = run_s(args).await;
+        serde_json::from_str::<serde_json::Value>(&json).unwrap();
+    }
     let err = run(
         &Cli::parse_from([
             "nfctl",
@@ -353,6 +486,54 @@ async fn apply_check_blocks_and_warns() {
         "demo/simple-pipeline: no topology changes\n"
     );
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn apply_check_keeps_partial_backlog_unknown_in_human_and_json_output() {
+    let c = FakeCluster::default();
+    let mut daemon = live_daemon();
+    let mut unknown = daemon.buffers[0].clone();
+    unknown.name = BufferName::new("default-simple-pipeline-cat-1").unwrap();
+    unknown.pending = None;
+    daemon.buffers.push(unknown);
+    let ctx = ctx_with_daemon(c.clone(), daemon);
+
+    let mut changed = sample_pipeline("demo", "simple-pipeline", PipelinePhase::Running);
+    let mut vertices = changed.spec.topology.vertices().to_vec();
+    let mut edges = changed.spec.topology.edges().to_vec();
+    let mut extra = vertices[1].clone();
+    extra.name = VertexName::new("extra").unwrap();
+    extra.kind = VertexKind::Map;
+    vertices.push(extra);
+    edges.push(Edge {
+        from: VertexName::new("cat").unwrap(),
+        to: VertexName::new("extra").unwrap(),
+        conditions: None,
+        on_full: OnFull::default(),
+    });
+    changed.spec.topology = Topology::new(vertices, edges).unwrap();
+    c.register_manifest("topology-change", changed);
+
+    let file =
+        std::env::temp_dir().join(format!("nfctl-unknown-backlog-{}.yaml", std::process::id()));
+    std::fs::write(&file, "topology-change").unwrap();
+    let file = file.to_string_lossy();
+    let human = out_ctx(
+        &Cli::parse_from(["nfctl", "apply", "-f", &file, "--check"]),
+        &ctx,
+    )
+    .await;
+    let json = out_ctx(
+        &Cli::parse_from(["nfctl", "apply", "-f", &file, "--check", "-o", "json"]),
+        &ctx,
+    )
+    .await;
+
+    assert!(human.contains("backlog unknown"), "{human}");
+    assert!(json.contains("backlog unknown"), "{json}");
+    assert!(!human.contains("buffers are empty"), "{human}");
+    assert!(!json.contains("buffers are empty"), "{json}");
+    std::fs::remove_file(file.as_ref()).ok();
 }
 
 #[tokio::test]

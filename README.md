@@ -5,8 +5,9 @@ A CLI and TUI for operating [Numaflow](https://numaflow.numaproj.io/) pipelines.
 `kubectl` can create and patch Numaflow resources, but it cannot follow a vertex's
 logs through pod churn, show buffer fill and processing rates next to the pipeline
 phase, draw the DAG, or run a safe pause → drain → resume. `nfctl` does those
-things in one static binary, with `-o json` on every command and `--dry-run` on
-every mutating one.
+things in one static binary, with machine-readable output for command results and
+`--dry-run` on every mutating one. Streaming `-o json` is NDJSON: one complete
+JSON object per line.
 
 > Status: pre-alpha. Commands below work against Numaflow 1.6+. ServingPipeline is
 > not covered yet; see [docs/roadmap.md](docs/roadmap.md).
@@ -153,6 +154,10 @@ the pipelines in [`examples/`](examples); [`docs/demo`](docs/demo) has the tapes
 Hexagonal. A pure domain crate with two ports (cluster, daemon), thin adapters for
 kube-rs and the daemon's JSON API, and a CLI on top. See
 [docs/architecture.md](docs/architecture.md) and the ADRs in [docs/adr](docs/adr).
+
+Operators should review the [RBAC and transport boundary](docs/operator-security.md).
+Security vulnerabilities should be reported through the private process in
+[SECURITY.md](SECURITY.md), not a public issue.
 
 ## Development
 
