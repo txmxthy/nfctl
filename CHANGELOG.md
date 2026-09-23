@@ -5,6 +5,47 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.0](https://github.com/txmxthy/nfctl/releases/tag/v0.1.0) - 2026-09-23
+
+### Added
+
+- *(tui)* a MonoVertex panel draws its chain as one card
+- MonoVertex becomes a Workload kind
+- *(tui)* one column of edges, a card that fits its tags, and a ticker for what does not
+- *(cli)* redirect stderr and the TUI writes its timings there
+- *(cli)* --timings says where a command spent its time
+- *(gallery)* draw and annotate frames, export marked-up PNGs
+- isb namespace column, rolling vertex recycle
+- *(cli)* complete resource names from the cluster
+- *(graph,tui,cli)* layered card layout, shard collapse, tag colours
+- lists span all namespaces; bare names resolve across them
+- --fixture, golden TUI frames, cluster-free recordings
+- nfctl map prints the whole command surface as a tree
+- MonoVertex support (mvtx ls/get/status/logs/pause/resume)
+- nfctl tui
+- pause, resume, recycle, wait, scale and apply --check
+- status, top and isb commands
+- nfctl logs with churn-safe multi-pod tailing
+- nfctl dag with mermaid, dot and box-drawing output
+- domain model, ports, fakes, ls/get
+
+### Fixed
+
+- follow-ups from the hardening review ([#3](https://github.com/txmxthy/nfctl/pull/3))
+- *(cli)* --timings does not scribble over the TUI
+- *(cli)* a Tab press never prints a credential plugin's errors
+
+### Other
+
+- prepare nfctl for its alpha release ([#6](https://github.com/txmxthy/nfctl/pull/6))
+- *(release)* automate binary releases ([#2](https://github.com/txmxthy/nfctl/pull/2))
+- Harden nfctl for an open-source release
+- *(core)* ask the daemon its four questions at once, and write timings to a file
+- *(daemon)* keep the daemon client, and read the pipeline once
+- demo pipelines, vhs tapes and recordings, README
+- scaffold workspace, lints, ci, adrs
+- nfctl
+
 ### Added
 - Workspace scaffold, lints, CI, ADRs 0001–0008.
 - Domain model with validated identifiers and topology; `ClusterPort`/`DaemonPort` ports; in-memory fakes.
