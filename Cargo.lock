@@ -2113,6 +2113,12 @@ dependencies = [
 [[package]]
 name = "orthodag"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a034cdc05b26cbed85a1d30c75520a4027e76e8cbdb4f05cfb27c0f0e3476c3c"
+dependencies = [
+ "unicode-segmentation",
+ "unicode-width",
+]
 
 [[package]]
 name = "palette"
