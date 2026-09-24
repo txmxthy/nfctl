@@ -27,6 +27,6 @@
 | layout gallery (`just gallery`) | done | — |
 | straight chains, no framed cards, short back edges | planned | M15 |
 | ServingPipeline | planned | later |
-| prebuilt binaries, attestations and Homebrew tap | wip | release |
+| prebuilt binaries, attestations and Homebrew tap | done | release |
 
 Statuses: `done` · `wip` · `stub` (command exists, exits 4 with this pointer) · `planned`.

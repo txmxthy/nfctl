@@ -15,14 +15,12 @@ JSON object per line.
 
 ## Install
 
-After the first alpha release:
-
 ```console
 brew install txmxthy/tap/nfctl
 ```
 
-Published releases include prebuilt archives for macOS and Linux. Until then,
-build from a checkout with `cargo install --path crates/nfctl-cli`.
+Published releases include prebuilt archives for macOS and Linux. To build from
+a checkout instead, run `cargo install --path crates/nfctl-cli`.
 
 ## Quick start
 
