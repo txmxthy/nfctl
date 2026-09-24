@@ -48,9 +48,15 @@ jobs:
           mkdir -p tap/Formula
           cp nfctl.rb tap/Formula/nfctl.rb
           ruby -pi -e 'sub(/^  desc .*/, %q{  desc "Command-line interface and terminal UI for operating Numaflow pipelines"})' tap/Formula/nfctl.rb
+          sed -i '' '/^  version /d' tap/Formula/nfctl.rb
+          ruby -0pi -e 'sub(/\nend\n\z/, "\n\n  test do\n    assert_match version.to_s, shell_output(\"\#{bin}/nfctl --version\")\n  end\nend\n")' tap/Formula/nfctl.rb
           brew style --fix tap/Formula/nfctl.rb
           brew style tap/Formula/nfctl.rb
-          brew audit --strict --online tap/Formula/nfctl.rb
+          brew tap txmxthy/tap
+          tap_repo=$(brew --repository txmxthy/tap)
+          mkdir -p "$tap_repo/Formula"
+          cp tap/Formula/nfctl.rb "$tap_repo/Formula/nfctl.rb"
+          brew audit --strict --online txmxthy/tap/nfctl
       - name: Publish formula
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
