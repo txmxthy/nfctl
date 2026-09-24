@@ -3,13 +3,19 @@ name: Homebrew
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to add to the tap
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   publish:
-    if: github.event.release.prerelease == false
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
     runs-on: macos-latest
     steps:
       - name: Create tap token
@@ -25,8 +31,11 @@ jobs:
       - name: Download formula
         env:
           GH_TOKEN: ${{ steps.release-token.outputs.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'nfctl.rb'
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = false
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'nfctl.rb'
       - name: Check out tap
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,7 +53,7 @@ jobs:
           brew audit --strict --online tap/Formula/nfctl.rb
       - name: Publish formula
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         working-directory: tap
         run: |
           git config user.name "txmxthy release automation"
