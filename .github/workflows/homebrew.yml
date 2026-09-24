@@ -38,6 +38,8 @@ jobs:
         run: |
           mkdir -p tap/Formula
           cp nfctl.rb tap/Formula/nfctl.rb
+          ruby -pi -e 'sub(/^  desc .*/, %q{  desc "Command-line interface and terminal UI for operating Numaflow pipelines"})' tap/Formula/nfctl.rb
+          brew style --fix tap/Formula/nfctl.rb
           brew style tap/Formula/nfctl.rb
           brew audit --strict --online tap/Formula/nfctl.rb
       - name: Publish formula
