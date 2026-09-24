@@ -39,9 +39,9 @@ jobs:
           fi
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
           git merge-base --is-ancestor "$RELEASE_TAG" origin/main
-          gh release download "$RELEASE_TAG" --pattern 'nfctl-*' --pattern '*.sha256' --dir release-assets
-          archives=$(find release-assets -type f -name 'nfctl-*.tar.*' | wc -l)
-          sums=$(find release-assets -type f -name '*.sha256' | wc -l)
+          gh release download "$RELEASE_TAG" --pattern 'nfctl-*.tar.xz' --pattern 'nfctl-*.tar.xz.sha256' --dir release-assets
+          archives=$(find release-assets -type f -name 'nfctl-*.tar.xz' | wc -l)
+          sums=$(find release-assets -type f -name 'nfctl-*.tar.xz.sha256' | wc -l)
           if [[ "$archives" -ne 4 || "$sums" -ne 4 ]]; then
             echo "::error::Expected four archives and four checksums, found $archives and $sums"
             exit 1
