@@ -1,6 +1,6 @@
 [package]
 name = "nfctl-cli"
-description = "nfctl: a CLI for operating Numaflow pipelines"
+description = "Command-line interface and terminal UI for operating Numaflow pipelines"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
